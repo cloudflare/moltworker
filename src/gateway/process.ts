@@ -34,8 +34,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
   return null;
 }
 
-// Backward compatibility alias
-export const findExistingClawdbotProcess = findExistingMoltbotProcess;
+
 
 /**
  * Ensure the Moltbot gateway is running
@@ -125,5 +124,4 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   return process;
 }
 
-// Backward compatibility alias
-export const ensureClawdbotGateway = ensureMoltbotGateway;
+
