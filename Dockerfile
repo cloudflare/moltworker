@@ -16,7 +16,7 @@ RUN npm install -g pnpm
 
 # Install moltbot globally
 # Note: The npm package is still named "clawdbot" - using that until the moltbot package is published
-RUN npm install -g clawdbot@latest \
+RUN npm install -g clawdbot@2026.1.24-3 \
     && clawdbot --version
 
 # Create moltbot directories
