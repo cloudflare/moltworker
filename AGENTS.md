@@ -47,9 +47,10 @@ src/
 
 ### CLI Commands
 
-When calling the moltbot CLI from the worker, always include `--url ws://localhost:18789`:
+When calling the clawdbot CLI from the worker, always include `--url ws://localhost:18789`:
 ```typescript
-sandbox.startProcess('moltbot devices list --json --url ws://localhost:18789')
+// Note: The npm package/CLI is still named "clawdbot" even though branding is "moltbot"
+sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789')
 ```
 
 CLI commands take 10-15 seconds due to WebSocket connection overhead. Use `waitForProcess()` helper in `src/routes/api.ts`.

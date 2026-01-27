@@ -13,11 +13,11 @@ const debug = new Hono<AppEnv>();
 debug.get('/version', async (c) => {
   const sandbox = c.get('sandbox');
   try {
-    // Get moltbot version
-    const versionProcess = await sandbox.startProcess('moltbot --version');
+    // Get clawdbot version (npm package is still named clawdbot)
+    const versionProcess = await sandbox.startProcess('clawdbot --version');
     await new Promise(resolve => setTimeout(resolve, 500));
     const versionLogs = await versionProcess.getLogs();
-    const moltbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
+    const clawdbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
 
     // Get node version
     const nodeProcess = await sandbox.startProcess('node --version');
@@ -26,7 +26,7 @@ debug.get('/version', async (c) => {
     const nodeVersion = (nodeLogs.stdout || '').trim();
 
     return c.json({
-      moltbot_version: moltbotVersion,
+      clawdbot_version: clawdbotVersion,
       node_version: nodeVersion,
     });
   } catch (error) {
@@ -126,7 +126,7 @@ debug.get('/gateway-api', async (c) => {
 // GET /debug/cli - Test moltbot CLI commands
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
-  const cmd = c.req.query('cmd') || 'moltbot --help';
+  const cmd = c.req.query('cmd') || 'clawdbot --help';
   
   try {
     const proc = await sandbox.startProcess(cmd);

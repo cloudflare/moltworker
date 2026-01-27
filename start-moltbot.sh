@@ -14,8 +14,9 @@ GATEWAY_TOKEN="${MOLTBOT_GATEWAY_TOKEN:-$CLAWDBOT_GATEWAY_TOKEN}"
 DEV_MODE_VAL="${MOLTBOT_DEV_MODE:-$CLAWDBOT_DEV_MODE}"
 BIND_MODE_VAL="${MOLTBOT_BIND_MODE:-$CLAWDBOT_BIND_MODE}"
 
-# Check if moltbot gateway is already running - bail early if so
-if pgrep -f "moltbot gateway" > /dev/null 2>&1; then
+# Check if clawdbot gateway is already running - bail early if so
+# Note: The npm package/CLI is still named "clawdbot" even though branding is "moltbot"
+if pgrep -f "clawdbot gateway" > /dev/null 2>&1; then
     echo "Moltbot gateway is already running, exiting."
     exit 0
 fi
@@ -202,8 +203,8 @@ echo "Dev mode: ${DEV_MODE_VAL:-false}, Bind mode: $BIND_MODE"
 
 if [ -n "$GATEWAY_TOKEN" ]; then
     echo "Starting gateway with token auth..."
-    exec moltbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$GATEWAY_TOKEN"
+    exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$GATEWAY_TOKEN"
 else
     echo "Starting gateway with device pairing (no token)..."
-    exec moltbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"
+    exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"
 fi

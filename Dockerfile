@@ -15,8 +15,9 @@ RUN apt-get update && apt-get install -y xz-utils ca-certificates rsync \
 RUN npm install -g pnpm
 
 # Install moltbot globally
-RUN npm install -g moltbot@latest \
-    && moltbot --version
+# Note: The npm package is still named "clawdbot" - using that until the moltbot package is published
+RUN npm install -g clawdbot@latest \
+    && clawdbot --version
 
 # Create moltbot directories
 # Note: When R2 is mounted, MOLTBOT_STATE_DIR env var points to the mount path
