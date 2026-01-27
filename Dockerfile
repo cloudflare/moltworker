@@ -1,6 +1,6 @@
 FROM docker.io/cloudflare/sandbox:0.7.0
 
-# Install Node.js 22 (required by clawdbot) and rsync (for R2 backup sync)
+# Install Node.js 22 (required by moltbot) and rsync (for R2 backup sync)
 # The base image has Node 20, we need to replace it with Node 22
 # Using direct binary download for reliability
 ENV NODE_VERSION=22.13.1
@@ -14,28 +14,28 @@ RUN apt-get update && apt-get install -y xz-utils ca-certificates rsync \
 # Install pnpm globally
 RUN npm install -g pnpm
 
-# Install clawdbot globally
-RUN npm install -g clawdbot@latest \
-    && clawdbot --version
+# Install moltbot globally
+RUN npm install -g moltbot@latest \
+    && moltbot --version
 
-# Create clawdbot directories
-# Note: When R2 is mounted, CLAWDBOT_STATE_DIR env var points to the mount path
-# Templates are stored in /root/.clawdbot-templates for initialization
-RUN mkdir -p /root/.clawdbot \
-    && mkdir -p /root/.clawdbot-templates \
-    && mkdir -p /root/clawd \
-    && mkdir -p /root/clawd/skills
+# Create moltbot directories
+# Note: When R2 is mounted, MOLTBOT_STATE_DIR env var points to the mount path
+# Templates are stored in /root/.moltbot-templates for initialization
+RUN mkdir -p /root/.moltbot \
+    && mkdir -p /root/.moltbot-templates \
+    && mkdir -p /root/molt \
+    && mkdir -p /root/molt/skills
 
 # Copy startup script
-# Build cache bust: 2026-01-27-v21-rename-to-moltbot
-COPY start-clawdbot.sh /usr/local/bin/start-clawdbot.sh
-RUN chmod +x /usr/local/bin/start-clawdbot.sh
+# Build cache bust: 2026-01-27-v22-rename-to-moltbot
+COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
+RUN chmod +x /usr/local/bin/start-moltbot.sh
 
 # Copy default configuration template
-COPY clawdbot.json.template /root/.clawdbot-templates/clawdbot.json.template
+COPY moltbot.json.template /root/.moltbot-templates/moltbot.json.template
 
 # Set working directory
-WORKDIR /root/clawd
+WORKDIR /root/molt
 
 # Expose the gateway port
 EXPOSE 18789

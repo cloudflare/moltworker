@@ -1,5 +1,5 @@
 import type { Sandbox } from '@cloudflare/sandbox';
-import type { ClawdbotEnv } from '../types';
+import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH } from '../config';
 import { mountR2Storage } from './r2';
 import { waitForProcess } from './utils';
@@ -12,7 +12,7 @@ export interface SyncResult {
 }
 
 /**
- * Sync clawdbot config from container to R2 for persistence.
+ * Sync moltbot config from container to R2 for persistence.
  * 
  * This function:
  * 1. Mounts R2 if not already mounted
@@ -24,7 +24,7 @@ export interface SyncResult {
  * @param env - Worker environment bindings
  * @returns SyncResult with success status and optional error details
  */
-export async function syncToR2(sandbox: Sandbox, env: ClawdbotEnv): Promise<SyncResult> {
+export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
   // Check if R2 is configured
   if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
     return { success: false, error: 'R2 storage is not configured' };
@@ -39,13 +39,13 @@ export async function syncToR2(sandbox: Sandbox, env: ClawdbotEnv): Promise<Sync
   // Sanity check: verify source has critical files before syncing
   // This prevents accidentally overwriting a good backup with empty/corrupted data
   try {
-    const checkProc = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json && echo "ok"');
+    const checkProc = await sandbox.startProcess('test -f /root/.moltbot/moltbot.json && echo "ok"');
     await waitForProcess(checkProc, 5000);
     const checkLogs = await checkProc.getLogs();
     if (!checkLogs.stdout?.includes('ok')) {
       return { 
         success: false, 
-        error: 'Sync aborted: source missing clawdbot.json',
+        error: 'Sync aborted: source missing moltbot.json',
         details: 'The local config directory is missing critical files. This could indicate corruption or an incomplete setup.',
       };
     }
@@ -59,7 +59,7 @@ export async function syncToR2(sandbox: Sandbox, env: ClawdbotEnv): Promise<Sync
 
   // Run rsync to backup config to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.moltbot/ ${R2_MOUNT_PATH}/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
   
   try {
     const proc = await sandbox.startProcess(syncCmd);

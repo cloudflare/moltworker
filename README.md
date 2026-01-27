@@ -61,9 +61,9 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 # Generate and set a gateway token (required for remote access)
 # Save this token - you'll need it to access the Control UI
-export CLAWDBOT_GATEWAY_TOKEN=$(openssl rand -base64 32 | tr -d '=+/' | head -c 32)
-echo "Your gateway token: $CLAWDBOT_GATEWAY_TOKEN"
-echo "$CLAWDBOT_GATEWAY_TOKEN" | npx wrangler secret put CLAWDBOT_GATEWAY_TOKEN
+export MOLTBOT_GATEWAY_TOKEN=$(openssl rand -base64 32 | tr -d '=+/' | head -c 32)
+echo "Your gateway token: $MOLTBOT_GATEWAY_TOKEN"
+echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 
 # Deploy
 npm run deploy
@@ -182,7 +182,7 @@ By default, moltbot data (configs, paired devices, conversation history) is lost
 1. Go to **R2** > **Overview** in the [Cloudflare Dashboard](https://dash.cloudflare.com/)
 2. Click **Manage R2 API Tokens**
 3. Create a new token with **Object Read & Write** permissions
-4. Select the `clawdbot-data` bucket (created automatically on first deploy)
+4. Select the `moltbot-data` bucket (created automatically on first deploy)
 5. Copy the **Access Key ID** and **Secret Access Key**
 
 ### 2. Set Secrets
@@ -205,11 +205,11 @@ To find your Account ID: Go to the [Cloudflare Dashboard](https://dash.cloudflar
 R2 storage uses a backup/restore approach for simplicity:
 
 **On container startup:**
-- If R2 is mounted and contains backup data, it's restored to `/root/.clawdbot`
+- If R2 is mounted and contains backup data, it's restored to `/root/.moltbot`
 - Moltbot uses its default paths (no special configuration needed)
 
 **During operation:**
-- A cron job runs every 5 minutes to sync `/root/.clawdbot` → R2
+- A cron job runs every 5 minutes to sync `/root/.moltbot` → R2
 - You can also trigger a manual backup from the admin UI at `/_admin/`
 
 **In the admin UI:**
@@ -338,7 +338,7 @@ npm run deploy
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative to Anthropic) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
-| `CLAWDBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
+| `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
 | `DEV_MODE` | No | Set to `true` to skip CF Access auth + device pairing (local dev only) |
 | `DEBUG_ROUTES` | No | Set to `true` to enable `/debug/*` routes |
 | `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |

@@ -1,7 +1,7 @@
 {
   "agents": {
     "defaults": {
-      "workspace": "/root/clawd",
+      "workspace": "/root/molt",
       "model": {
         "primary": "anthropic/claude-opus-4-5-20251101"
       }

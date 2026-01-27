@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AppEnv, ClawdbotEnv } from '../types';
+import type { AppEnv, MoltbotEnv } from '../types';
 import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
 
 /**
@@ -338,7 +338,7 @@ cdp.get('/json', async (c) => {
 /**
  * Initialize a CDP session for a WebSocket connection
  */
-async function initCDPSession(ws: WebSocket, env: ClawdbotEnv): Promise<void> {
+async function initCDPSession(ws: WebSocket, env: MoltbotEnv): Promise<void> {
   let session: CDPSession | null = null;
 
   try {

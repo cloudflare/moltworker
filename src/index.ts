@@ -1,8 +1,8 @@
 /**
- * Clawdbot + Cloudflare Sandbox
+ * Moltbot + Cloudflare Sandbox
  *
- * This Worker runs Clawdbot personal AI assistant in a Cloudflare Sandbox container.
- * It proxies all requests to the Clawdbot Gateway's web UI and WebSocket endpoint.
+ * This Worker runs Moltbot personal AI assistant in a Cloudflare Sandbox container.
+ * It proxies all requests to the Moltbot Gateway's web UI and WebSocket endpoint.
  *
  * Features:
  * - Web UI (Control Dashboard + WebChat) at /
@@ -14,7 +14,7 @@
  * - ANTHROPIC_API_KEY: Your Anthropic API key
  *
  * Optional secrets:
- * - CLAWDBOT_GATEWAY_TOKEN: Token to protect gateway access
+ * - MOLTBOT_GATEWAY_TOKEN: Token to protect gateway access
  * - TELEGRAM_BOT_TOKEN: Telegram bot token
  * - DISCORD_BOT_TOKEN: Discord bot token
  * - SLACK_BOT_TOKEN + SLACK_APP_TOKEN: Slack tokens
@@ -23,10 +23,10 @@
 import { Hono } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
-import type { AppEnv, ClawdbotEnv } from './types';
-import { CLAWDBOT_PORT } from './config';
+import type { AppEnv, MoltbotEnv } from './types';
+import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureClawdbotGateway, syncToR2 } from './gateway';
+import { ensureMoltbotGateway, syncToR2 } from './gateway';
 import { api, admin, debug, cdp } from './routes';
 
 export { Sandbox };
@@ -42,7 +42,7 @@ export { Sandbox };
  *   npx wrangler secret put SANDBOX_SLEEP_AFTER
  *   # Enter: 10m (or 1h, 30m, etc.)
  */
-function buildSandboxOptions(env: ClawdbotEnv): SandboxOptions {
+function buildSandboxOptions(env: MoltbotEnv): SandboxOptions {
   const sleepAfter = env.SANDBOX_SLEEP_AFTER?.toLowerCase() || 'never';
   
   // 'never' means keep the container alive indefinitely
@@ -70,17 +70,17 @@ app.use('*', async (c, next) => {
 // Middleware: Initialize sandbox for all requests
 app.use('*', async (c, next) => {
   const options = buildSandboxOptions(c.env);
-  const sandbox = getSandbox(c.env.Sandbox, 'clawdbot', options);
+  const sandbox = getSandbox(c.env.Sandbox, 'moltbot', options);
   c.set('sandbox', sandbox);
   await next();
 });
 
-// Health check endpoint (before starting clawdbot)
+// Health check endpoint (before starting moltbot)
 app.get('/sandbox-health', (c) => {
   return c.json({
     status: 'ok',
-    service: 'clawdbot-sandbox',
-    gateway_port: CLAWDBOT_PORT,
+    service: 'moltbot-sandbox',
+    gateway_port: MOLTBOT_PORT,
   });
 });
 
@@ -104,7 +104,7 @@ app.route('/debug', debug);
 // This allows programmatic access from external tools
 app.route('/cdp', cdp);
 
-// All other routes: start clawdbot and proxy
+// All other routes: start moltbot and proxy
 app.all('*', async (c) => {
   const sandbox = c.get('sandbox');
   const request = c.req.raw;
@@ -112,11 +112,11 @@ app.all('*', async (c) => {
 
   console.log('[PROXY] Handling request:', url.pathname);
 
-  // Ensure clawdbot is running (this will wait for startup)
+  // Ensure moltbot is running (this will wait for startup)
   try {
-    await ensureClawdbotGateway(sandbox, c.env);
+    await ensureMoltbotGateway(sandbox, c.env);
   } catch (error) {
-    console.error('[PROXY] Failed to start Clawdbot:', error);
+    console.error('[PROXY] Failed to start Moltbot:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
     let hint = 'Check worker logs with: wrangler tail';
@@ -127,29 +127,29 @@ app.all('*', async (c) => {
     }
 
     return c.json({
-      error: 'Clawdbot gateway failed to start',
+      error: 'Moltbot gateway failed to start',
       details: errorMessage,
       hint,
     }, 503);
   }
 
-  // Proxy to Clawdbot
+  // Proxy to Moltbot
   if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-    console.log('[WS] Proxying WebSocket connection to Clawdbot');
+    console.log('[WS] Proxying WebSocket connection to Moltbot');
     console.log('[WS] URL:', request.url);
     console.log('[WS] Search params:', url.search);
-    const wsResponse = await sandbox.wsConnect(request, CLAWDBOT_PORT);
+    const wsResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
     console.log('[WS] wsConnect response status:', wsResponse.status);
     return wsResponse;
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
-  const httpResponse = await sandbox.containerFetch(request, CLAWDBOT_PORT);
+  const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
   
   // Add debug header to verify worker handled the request
   const newHeaders = new Headers(httpResponse.headers);
-  newHeaders.set('X-Worker-Debug', 'proxy-to-clawdbot');
+  newHeaders.set('X-Worker-Debug', 'proxy-to-moltbot');
   newHeaders.set('X-Debug-Path', url.pathname);
   
   return new Response(httpResponse.body, {
@@ -161,15 +161,15 @@ app.all('*', async (c) => {
 
 /**
  * Scheduled handler for cron triggers.
- * Syncs clawdbot config/state from container to R2 for persistence.
+ * Syncs moltbot config/state from container to R2 for persistence.
  */
 async function scheduled(
   _event: ScheduledEvent,
-  env: ClawdbotEnv,
+  env: MoltbotEnv,
   _ctx: ExecutionContext
 ): Promise<void> {
   const options = buildSandboxOptions(env);
-  const sandbox = getSandbox(env.Sandbox, 'clawdbot', options);
+  const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
 
   console.log('[cron] Starting backup sync to R2...');
   const result = await syncToR2(sandbox, env);

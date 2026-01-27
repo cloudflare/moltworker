@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
-import { ensureClawdbotGateway, findExistingClawdbotProcess, mountR2Storage, syncToR2, waitForProcess } from '../gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, mountR2Storage, syncToR2, waitForProcess } from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
@@ -15,12 +15,12 @@ const CLI_TIMEOUT_MS = 20000;
 const api = new Hono<AppEnv>();
 
 // GET /api/status - Simple health check (no auth required)
-// Returns whether the clawdbot gateway is running
+// Returns whether the moltbot gateway is running
 api.get('/status', async (c) => {
   const sandbox = c.get('sandbox');
   
   try {
-    const process = await findExistingClawdbotProcess(sandbox);
+    const process = await findExistingMoltbotProcess(sandbox);
     if (!process) {
       return c.json({ ok: false, status: 'not_running' });
     }
@@ -51,12 +51,12 @@ admin.get('/devices', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Ensure clawdbot is running first
-    await ensureClawdbotGateway(sandbox, c.env);
+    // Ensure moltbot is running first
+    await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run clawdbot CLI to list devices
+    // Run moltbot CLI to list devices
     // Must specify --url to connect to the gateway running in the same container
-    const proc = await sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789');
+    const proc = await sandbox.startProcess('moltbot devices list --json --url ws://localhost:18789');
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -104,11 +104,11 @@ admin.post('/devices/:requestId/approve', async (c) => {
   }
 
   try {
-    // Ensure clawdbot is running first
-    await ensureClawdbotGateway(sandbox, c.env);
+    // Ensure moltbot is running first
+    await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run clawdbot CLI to approve the device
-    const proc = await sandbox.startProcess(`clawdbot devices approve ${requestId} --url ws://localhost:18789`);
+    // Run moltbot CLI to approve the device
+    const proc = await sandbox.startProcess(`moltbot devices approve ${requestId} --url ws://localhost:18789`);
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -136,11 +136,11 @@ admin.post('/devices/approve-all', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Ensure clawdbot is running first
-    await ensureClawdbotGateway(sandbox, c.env);
+    // Ensure moltbot is running first
+    await ensureMoltbotGateway(sandbox, c.env);
 
     // First, get the list of pending devices
-    const listProc = await sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789');
+    const listProc = await sandbox.startProcess('moltbot devices list --json --url ws://localhost:18789');
     await waitForProcess(listProc, CLI_TIMEOUT_MS);
 
     const listLogs = await listProc.getLogs();
@@ -167,7 +167,7 @@ admin.post('/devices/approve-all', async (c) => {
 
     for (const device of pending) {
       try {
-        const approveProc = await sandbox.startProcess(`clawdbot devices approve ${device.requestId} --url ws://localhost:18789`);
+        const approveProc = await sandbox.startProcess(`moltbot devices approve ${device.requestId} --url ws://localhost:18789`);
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
         const approveLogs = await approveProc.getLogs();
@@ -269,7 +269,7 @@ admin.post('/gateway/restart', async (c) => {
 
   try {
     // Find and kill the existing gateway process
-    const existingProcess = await findExistingClawdbotProcess(sandbox);
+    const existingProcess = await findExistingMoltbotProcess(sandbox);
     
     if (existingProcess) {
       console.log('Killing existing gateway process:', existingProcess.id);
@@ -283,7 +283,7 @@ admin.post('/gateway/restart', async (c) => {
     }
 
     // Start a new gateway in the background
-    const bootPromise = ensureClawdbotGateway(sandbox, c.env).catch((err) => {
+    const bootPromise = ensureMoltbotGateway(sandbox, c.env).catch((err) => {
       console.error('Gateway restart failed:', err);
     });
     c.executionCtx.waitUntil(bootPromise);

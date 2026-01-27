@@ -4,8 +4,8 @@ Guidelines for AI agents working on this codebase.
 
 ## Project Overview
 
-This is a Cloudflare Worker that runs [Clawdbot](https://clawd.bot/) in a Cloudflare Sandbox container. It provides:
-- Proxying to the Clawdbot gateway (web UI + WebSocket)
+This is a Cloudflare Worker that runs [Moltbot](https://molt.bot/) in a Cloudflare Sandbox container. It provides:
+- Proxying to the Moltbot gateway (web UI + WebSocket)
 - Admin UI at `/_admin/` for device management
 - API endpoints at `/api/*` for device pairing
 - Debug endpoints at `/debug/*` for troubleshooting
@@ -21,7 +21,7 @@ src/
 │   ├── jwt.ts        # JWT verification
 │   ├── jwks.ts       # JWKS fetching and caching
 │   └── middleware.ts # Hono middleware for auth
-├── gateway/          # Clawdbot gateway management
+├── gateway/          # Moltbot gateway management
 │   ├── process.ts    # Process lifecycle (find, start)
 │   ├── env.ts        # Environment variable building
 │   ├── r2.ts         # R2 bucket mounting
@@ -41,15 +41,15 @@ src/
 
 ### Environment Variables
 
-- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `CLAWDBOT_DEV_MODE` for container)
+- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `MOLTBOT_DEV_MODE` for container)
 - `DEBUG_ROUTES` - Enables `/debug/*` routes (disabled by default)
-- See `src/types.ts` for full `ClawdbotEnv` interface
+- See `src/types.ts` for full `MoltbotEnv` interface
 
 ### CLI Commands
 
-When calling the clawdbot CLI from the worker, always include `--url ws://localhost:18789`:
+When calling the moltbot CLI from the worker, always include `--url ws://localhost:18789`:
 ```typescript
-sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789')
+sandbox.startProcess('moltbot devices list --json --url ws://localhost:18789')
 ```
 
 CLI commands take 10-15 seconds due to WebSocket connection overhead. Use `waitForProcess()` helper in `src/routes/api.ts`.
@@ -111,7 +111,7 @@ Browser
    ▼
 ┌─────────────────────────────────────┐
 │     Cloudflare Worker (index.ts)    │
-│  - Starts Clawdbot in sandbox       │
+│  - Starts Moltbot in sandbox        │
 │  - Proxies HTTP/WebSocket requests  │
 │  - Passes secrets as env vars       │
 └──────────────┬──────────────────────┘
@@ -120,7 +120,7 @@ Browser
 ┌─────────────────────────────────────┐
 │     Cloudflare Sandbox Container    │
 │  ┌───────────────────────────────┐  │
-│  │     Clawdbot Gateway          │  │
+│  │     Moltbot Gateway           │  │
 │  │  - Control UI on port 18789   │  │
 │  │  - WebSocket RPC protocol     │  │
 │  │  - Agent runtime              │  │
@@ -133,9 +133,9 @@ Browser
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Worker that manages sandbox lifecycle and proxies requests |
-| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + Clawdbot |
-| `start-clawdbot.sh` | Startup script that configures clawdbot from env vars and launches gateway |
-| `clawdbot.json.template` | Default Clawdbot configuration template |
+| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + Moltbot |
+| `start-moltbot.sh` | Startup script that configures moltbot from env vars and launches gateway |
+| `moltbot.json.template` | Default Moltbot configuration template |
 | `wrangler.jsonc` | Cloudflare Worker + Container configuration |
 
 ## Local Development
@@ -163,7 +163,7 @@ Local development with `wrangler dev` has issues proxying WebSocket connections 
 
 ## Docker Image Caching
 
-The Dockerfile includes a cache bust comment. When changing `clawdbot.json.template` or `start-clawdbot.sh`, bump the version:
+The Dockerfile includes a cache bust comment. When changing `moltbot.json.template` or `start-moltbot.sh`, bump the version:
 
 ```dockerfile
 # Build cache bust: 2026-01-26-v10
@@ -171,34 +171,36 @@ The Dockerfile includes a cache bust comment. When changing `clawdbot.json.templ
 
 ## Gateway Configuration
 
-Clawdbot configuration is built at container startup:
+Moltbot configuration is built at container startup:
 
-1. `clawdbot.json.template` is copied to `~/.clawdbot/clawdbot.json`
-2. `start-clawdbot.sh` updates the config with values from environment variables
+1. `moltbot.json.template` is copied to `~/.moltbot/moltbot.json`
+2. `start-moltbot.sh` updates the config with values from environment variables
 3. Gateway starts with `--allow-unconfigured` flag (skips onboarding wizard)
 
 ### Container Environment Variables
 
 | Variable | Config Path | Notes |
 |----------|-------------|-------|
-| `ANTHROPIC_API_KEY` | (env var) | Clawdbot reads directly from env |
-| `CLAWDBOT_GATEWAY_TOKEN` | `--token` flag | If not set, random token is generated |
-| `CLAWDBOT_DEV_MODE` | `controlUi.allowInsecureAuth` | Set to `true` for local dev (allows HTTP auth) |
+| `ANTHROPIC_API_KEY` | (env var) | Moltbot reads directly from env |
+| `MOLTBOT_GATEWAY_TOKEN` | `--token` flag | If not set, random token is generated |
+| `MOLTBOT_DEV_MODE` | `controlUi.allowInsecureAuth` | Set to `true` for local dev (allows HTTP auth) |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
 | `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
 
-## Clawdbot Config Schema
+Note: For backward compatibility, `CLAWDBOT_*` env var prefixes are also supported and mapped to their `MOLTBOT_*` equivalents.
 
-Clawdbot has strict config validation. Common gotchas:
+## Moltbot Config Schema
+
+Moltbot has strict config validation. Common gotchas:
 
 - `agents.defaults.model` must be `{ "primary": "model/name" }` not a string
 - `gateway.mode` must be `"local"` for headless operation
 - No `webchat` channel - the Control UI is served automatically
 - `gateway.bind` is not a config option - use `--bind` CLI flag
 
-See [Clawdbot docs](https://docs.clawd.bot/gateway/configuration) for full schema.
+See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
 
 ## Common Tasks
 
@@ -211,7 +213,7 @@ See [Clawdbot docs](https://docs.clawd.bot/gateway/configuration) for full schem
 
 ### Adding a New Environment Variable
 
-1. Add to `ClawdbotEnv` interface in `src/types.ts`
+1. Add to `MoltbotEnv` interface in `src/types.ts`
 2. If passed to container, add to `buildEnvVars()` in `src/gateway/env.ts`
 3. Update `.dev.vars.example`
 4. Document in README.md secrets table
@@ -230,12 +232,12 @@ Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
 
 ## R2 Storage Notes
 
-R2 is mounted via s3fs at `/data/clawdbot`. Important gotchas:
+R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
 
 - **rsync compatibility**: Use `rsync -r --no-times` instead of `rsync -a`. s3fs doesn't support setting timestamps, which causes rsync to fail with "Input/output error".
 
 - **Mount checking**: Don't rely on `sandbox.mountBucket()` error messages to detect "already mounted" state. Instead, check `mount | grep s3fs` to verify the mount status.
 
-- **Never delete R2 data**: The mount directory `/data/clawdbot` IS the R2 bucket. Running `rm -rf /data/clawdbot/*` will DELETE your backup data. Always check mount status before any destructive operations.
+- **Never delete R2 data**: The mount directory `/data/moltbot` IS the R2 bucket. Running `rm -rf /data/moltbot/*` will DELETE your backup data. Always check mount status before any destructive operations.
 
 - **Process status**: The sandbox API's `proc.status` may not update immediately after a process completes. Instead of checking `proc.status === 'completed'`, verify success by checking for expected output (e.g., timestamp file exists after sync).

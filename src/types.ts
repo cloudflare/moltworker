@@ -1,19 +1,26 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 /**
- * Environment bindings for the Clawdbot Worker
+ * Environment bindings for the Moltbot Worker
  */
-export interface ClawdbotEnv {
+export interface MoltbotEnv {
   Sandbox: DurableObjectNamespace<Sandbox>;
   ASSETS: Fetcher; // Assets binding for admin UI static files
-  CLAWDBOT_BUCKET: R2Bucket; // R2 bucket for persistent storage
+  MOLTBOT_BUCKET?: R2Bucket; // R2 bucket for persistent storage
+  CLAWDBOT_BUCKET?: R2Bucket; // @deprecated Use MOLTBOT_BUCKET
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string; // Custom base URL for Anthropic API (e.g., Cloudflare AI Gateway)
   OPENAI_API_KEY?: string;
-  CLAWDBOT_GATEWAY_TOKEN?: string;
+  
+  // Gateway token - supports both MOLTBOT_ and CLAWDBOT_ prefixes for backward compatibility
+  MOLTBOT_GATEWAY_TOKEN?: string;
+  CLAWDBOT_GATEWAY_TOKEN?: string; // @deprecated Use MOLTBOT_GATEWAY_TOKEN
 
-  CLAWDBOT_BIND_MODE?: string;
-  DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + clawdbot device pairing)
+  // Bind mode - supports both prefixes
+  MOLTBOT_BIND_MODE?: string;
+  CLAWDBOT_BIND_MODE?: string; // @deprecated Use MOLTBOT_BIND_MODE
+  
+  DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + moltbot device pairing)
   DEBUG_ROUTES?: string; // Set to 'true' to enable /debug/* routes
   SANDBOX_SLEEP_AFTER?: string; // How long before sandbox sleeps: 'never' (default), or duration like '10m', '1h'
   TELEGRAM_BOT_TOKEN?: string;
@@ -35,6 +42,9 @@ export interface ClawdbotEnv {
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
 }
 
+// Backward compatibility alias
+export type ClawdbotEnv = MoltbotEnv;
+
 /**
  * Authenticated user from Cloudflare Access
  */
@@ -47,7 +57,7 @@ export interface AccessUser {
  * Hono app environment type
  */
 export type AppEnv = {
-  Bindings: ClawdbotEnv;
+  Bindings: MoltbotEnv;
   Variables: {
     sandbox: Sandbox;
     accessUser?: AccessUser;

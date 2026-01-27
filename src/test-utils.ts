@@ -3,16 +3,16 @@
  */
 import { vi } from 'vitest';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
-import type { ClawdbotEnv } from './types';
+import type { MoltbotEnv } from './types';
 
 /**
- * Create a minimal ClawdbotEnv object for testing
+ * Create a minimal MoltbotEnv object for testing
  */
-export function createMockEnv(overrides: Partial<ClawdbotEnv> = {}): ClawdbotEnv {
+export function createMockEnv(overrides: Partial<MoltbotEnv> = {}): MoltbotEnv {
   return {
     Sandbox: {} as any,
     ASSETS: {} as any,
-    CLAWDBOT_BUCKET: {} as any,
+    MOLTBOT_BUCKET: {} as any,
     ...overrides,
   };
 }
@@ -20,7 +20,7 @@ export function createMockEnv(overrides: Partial<ClawdbotEnv> = {}): ClawdbotEnv
 /**
  * Create a mock env with R2 credentials configured
  */
-export function createMockEnvWithR2(overrides: Partial<ClawdbotEnv> = {}): ClawdbotEnv {
+export function createMockEnvWithR2(overrides: Partial<MoltbotEnv> = {}): MoltbotEnv {
   return createMockEnv({
     R2_ACCESS_KEY_ID: 'test-key-id',
     R2_SECRET_ACCESS_KEY: 'test-secret-key',
@@ -66,7 +66,7 @@ export function createMockSandbox(options: {
   // Default: return empty stdout (not mounted), unless mounted: true
   const startProcessMock = vi.fn().mockResolvedValue(
     options.mounted 
-      ? createMockProcess('s3fs on /data/clawdbot type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=0,group_id=0)\n')
+      ? createMockProcess('s3fs on /data/moltbot type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=0,group_id=0)\n')
       : createMockProcess('')
   );
   

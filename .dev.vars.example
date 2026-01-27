@@ -10,7 +10,7 @@ DEV_MODE=true
 DEBUG_ROUTES=true
 
 # Optional - set a fixed token instead of auto-generated
-CLAWDBOT_GATEWAY_TOKEN=dev-token-change-in-prod
+MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
 # Cloudflare Access configuration for /_admin and /api routes
 # Required for admin UI and device pairing API in production

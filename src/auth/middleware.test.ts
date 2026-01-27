@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isDevMode, extractJWT } from './middleware';
-import type { ClawdbotEnv } from '../types';
+import type { MoltbotEnv } from '../types';
 import type { Context } from 'hono';
 import type { AppEnv } from '../types';
 import { createMockEnv } from '../test-utils';
@@ -115,7 +115,7 @@ describe('createAccessMiddleware', () => {
 
   // Helper to create a mock context with full implementation
   function createFullMockContext(options: {
-    env?: Partial<ClawdbotEnv>;
+    env?: Partial<MoltbotEnv>;
     jwtHeader?: string;
     cookies?: string;
   }): { c: Context<AppEnv>; jsonMock: ReturnType<typeof vi.fn>; htmlMock: ReturnType<typeof vi.fn>; redirectMock: ReturnType<typeof vi.fn>; setMock: ReturnType<typeof vi.fn> } {

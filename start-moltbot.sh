@@ -1,25 +1,31 @@
 #!/bin/bash
-# Startup script for Clawdbot in Cloudflare Sandbox
+# Startup script for Moltbot in Cloudflare Sandbox
 # This script:
 # 1. Restores config from R2 backup if available
-# 2. Configures clawdbot from environment variables
+# 2. Configures moltbot from environment variables
 # 3. Starts a background sync to backup config to R2
 # 4. Starts the gateway
 
 set -e
 
-# Check if clawdbot gateway is already running - bail early if so
-if pgrep -f "clawdbot gateway" > /dev/null 2>&1; then
-    echo "Clawdbot gateway is already running, exiting."
+# Support both MOLTBOT_* and CLAWDBOT_* env vars for backward compatibility
+# Prefer MOLTBOT_* if set, fall back to CLAWDBOT_*
+GATEWAY_TOKEN="${MOLTBOT_GATEWAY_TOKEN:-$CLAWDBOT_GATEWAY_TOKEN}"
+DEV_MODE_VAL="${MOLTBOT_DEV_MODE:-$CLAWDBOT_DEV_MODE}"
+BIND_MODE_VAL="${MOLTBOT_BIND_MODE:-$CLAWDBOT_BIND_MODE}"
+
+# Check if moltbot gateway is already running - bail early if so
+if pgrep -f "moltbot gateway" > /dev/null 2>&1; then
+    echo "Moltbot gateway is already running, exiting."
     exit 0
 fi
 
 # Paths
-CONFIG_DIR="/root/.clawdbot"
-CONFIG_FILE="$CONFIG_DIR/clawdbot.json"
-TEMPLATE_DIR="/root/.clawdbot-templates"
-TEMPLATE_FILE="$TEMPLATE_DIR/clawdbot.json.template"
-BACKUP_DIR="/data/clawdbot"
+CONFIG_DIR="/root/.moltbot"
+CONFIG_FILE="$CONFIG_DIR/moltbot.json"
+TEMPLATE_DIR="/root/.moltbot-templates"
+TEMPLATE_FILE="$TEMPLATE_DIR/moltbot.json.template"
+BACKUP_DIR="/data/moltbot"
 
 echo "Config directory: $CONFIG_DIR"
 echo "Backup directory: $BACKUP_DIR"
@@ -30,9 +36,9 @@ mkdir -p "$CONFIG_DIR"
 # ============================================================
 # RESTORE FROM R2 BACKUP
 # ============================================================
-# Check if R2 backup exists by looking for clawdbot.json
+# Check if R2 backup exists by looking for moltbot.json
 # The BACKUP_DIR may exist but be empty if R2 was just mounted
-if [ -f "$BACKUP_DIR/clawdbot.json" ]; then
+if [ -f "$BACKUP_DIR/moltbot.json" ]; then
     echo "Found R2 backup at $BACKUP_DIR, restoring..."
     # Copy all files from backup to config dir, preserving attributes
     cp -a "$BACKUP_DIR/." "$CONFIG_DIR/"
@@ -54,7 +60,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 {
   "agents": {
     "defaults": {
-      "workspace": "/root/clawd",
+      "workspace": "/root/molt",
       "model": {
         "primary": "anthropic/claude-opus-4-5-20251101"
       }
@@ -74,10 +80,14 @@ fi
 # ============================================================
 # UPDATE CONFIG FROM ENVIRONMENT VARIABLES
 # ============================================================
-node << EOFNODE
+# Export the unified env vars for the Node script to use
+export GATEWAY_TOKEN
+export DEV_MODE_VAL
+
+node << 'EOFNODE'
 const fs = require('fs');
 
-const configPath = '/root/.clawdbot/clawdbot.json';
+const configPath = '/root/.moltbot/moltbot.json';
 console.log('Updating config at:', configPath);
 let config = {};
 
@@ -112,14 +122,16 @@ config.gateway.port = 18789;
 config.gateway.mode = 'local';
 config.gateway.trustedProxies = ['10.1.0.0'];
 
-// Set gateway token if provided
-if (process.env.CLAWDBOT_GATEWAY_TOKEN) {
+// Set gateway token if provided (check both MOLTBOT_ and CLAWDBOT_ prefixes)
+const gatewayToken = process.env.GATEWAY_TOKEN || process.env.MOLTBOT_GATEWAY_TOKEN || process.env.CLAWDBOT_GATEWAY_TOKEN;
+if (gatewayToken) {
     config.gateway.auth = config.gateway.auth || {};
-    config.gateway.auth.token = process.env.CLAWDBOT_GATEWAY_TOKEN;
+    config.gateway.auth.token = gatewayToken;
 }
 
-// Allow insecure auth for dev mode
-if (process.env.CLAWDBOT_DEV_MODE === 'true') {
+// Allow insecure auth for dev mode (check both prefixes)
+const devMode = process.env.DEV_MODE_VAL || process.env.MOLTBOT_DEV_MODE || process.env.CLAWDBOT_DEV_MODE;
+if (devMode === 'true') {
     config.gateway.controlUi = config.gateway.controlUi || {};
     config.gateway.controlUi.allowInsecureAuth = true;
 }
@@ -178,20 +190,20 @@ EOFNODE
 # START GATEWAY
 # ============================================================
 # Note: R2 backup sync is handled by the Worker's cron trigger
-echo "Starting Clawdbot Gateway..."
+echo "Starting Moltbot Gateway..."
 echo "Gateway will be available on port 18789"
 
 # Clean up stale lock files
-rm -f /tmp/clawdbot-gateway.lock 2>/dev/null || true
+rm -f /tmp/moltbot-gateway.lock 2>/dev/null || true
 rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
 
-BIND_MODE="lan"
-echo "Dev mode: ${CLAWDBOT_DEV_MODE:-false}, Bind mode: $BIND_MODE"
+BIND_MODE="${BIND_MODE_VAL:-lan}"
+echo "Dev mode: ${DEV_MODE_VAL:-false}, Bind mode: $BIND_MODE"
 
-if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+if [ -n "$GATEWAY_TOKEN" ]; then
     echo "Starting gateway with token auth..."
-    exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$CLAWDBOT_GATEWAY_TOKEN"
+    exec moltbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$GATEWAY_TOKEN"
 else
     echo "Starting gateway with device pairing (no token)..."
-    exec clawdbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"
+    exec moltbot gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"
 fi
