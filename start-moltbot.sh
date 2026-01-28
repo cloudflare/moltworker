@@ -163,6 +163,13 @@ if (config.models?.providers?.anthropic?.models) {
     }
 }
 
+// Clean up any custom openai provider config from previous runs
+// (we now use the built-in provider with env var overrides)
+if (config.models?.providers?.openai) {
+    console.log('Removing custom openai provider config (using built-in provider)');
+    delete config.models.providers.openai;
+}
+
 // Gateway configuration
 config.gateway.port = 18789;
 config.gateway.mode = 'local';
