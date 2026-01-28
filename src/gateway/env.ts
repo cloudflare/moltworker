@@ -9,21 +9,38 @@ import type { MoltbotEnv } from '../types';
 export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   const envVars: Record<string, string> = {};
 
-  // AI Gateway vars take precedence, mapped to ANTHROPIC_* for the container
-  // This allows users to configure any provider in AI Gateway
+  const isOpenAIGateway = env.AI_GATEWAY_BASE_URL?.endsWith('/openai');
+
+  // AI Gateway vars take precedence
+  // Map to the appropriate provider env var based on the gateway endpoint
   if (env.AI_GATEWAY_API_KEY) {
-    envVars.ANTHROPIC_API_KEY = env.AI_GATEWAY_API_KEY;
-  } else if (env.ANTHROPIC_API_KEY) {
-    envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+    if (isOpenAIGateway) {
+      envVars.OPENAI_API_KEY = env.AI_GATEWAY_API_KEY;
+    } else {
+      envVars.ANTHROPIC_API_KEY = env.AI_GATEWAY_API_KEY;
+    }
   }
 
+  // Fall back to direct provider keys
+  if (!envVars.ANTHROPIC_API_KEY && env.ANTHROPIC_API_KEY) {
+    envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+  }
+  if (!envVars.OPENAI_API_KEY && env.OPENAI_API_KEY) {
+    envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
+  }
+
+  // Pass base URL (used by start-moltbot.sh to determine provider)
   if (env.AI_GATEWAY_BASE_URL) {
-    envVars.ANTHROPIC_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    envVars.AI_GATEWAY_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    // Also set the provider-specific base URL env var
+    if (isOpenAIGateway) {
+      envVars.OPENAI_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    } else {
+      envVars.ANTHROPIC_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    }
   } else if (env.ANTHROPIC_BASE_URL) {
     envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
   }
-
-  if (env.OPENAI_API_KEY) envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
   // Map MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN (container expects this name)
   if (env.MOLTBOT_GATEWAY_TOKEN) envVars.CLAWDBOT_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;
   if (env.DEV_MODE) envVars.CLAWDBOT_DEV_MODE = env.DEV_MODE; // Pass DEV_MODE as CLAWDBOT_DEV_MODE to container
