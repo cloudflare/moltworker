@@ -61,9 +61,9 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 # Generate and set a gateway token (required for remote access)
 # Save this token - you'll need it to access the Control UI
-export CLAWDBOT_GATEWAY_TOKEN=$(openssl rand -base64 32 | tr -d '=+/' | head -c 32)
-echo "Your gateway token: $CLAWDBOT_GATEWAY_TOKEN"
-echo "$CLAWDBOT_GATEWAY_TOKEN" | npx wrangler secret put CLAWDBOT_GATEWAY_TOKEN
+export MOLTBOT_GATEWAY_TOKEN=$(openssl rand -base64 32 | tr -d '=+/' | head -c 32)
+echo "Your gateway token: $MOLTBOT_GATEWAY_TOKEN"
+echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 
 # Deploy
 npm run deploy
@@ -338,7 +338,7 @@ npm run deploy
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative to Anthropic) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
-| `CLAWDBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
+| `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
 | `DEV_MODE` | No | Set to `true` to skip CF Access auth + device pairing (local dev only) |
 | `DEBUG_ROUTES` | No | Set to `true` to enable `/debug/*` routes |
 | `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |

@@ -78,7 +78,7 @@
   // - DISCORD_BOT_TOKEN: (optional) Discord bot token
   // - SLACK_BOT_TOKEN: (optional) Slack bot token
   // - SLACK_APP_TOKEN: (optional) Slack app token
-  // - CLAWDBOT_GATEWAY_TOKEN: (optional) Token to protect gateway access, if unset device pairing will be used
+  // - MOLTBOT_GATEWAY_TOKEN: (optional) Token to protect gateway access, if unset device pairing will be used
   // - CDP_SECRET: (optional) Shared secret for /cdp endpoint authentication
   //
   // R2 persistent storage secrets (required for data persistence across sessions):

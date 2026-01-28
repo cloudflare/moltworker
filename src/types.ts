@@ -10,7 +10,7 @@ export interface ClawdbotEnv {
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string; // Custom base URL for Anthropic API (e.g., Cloudflare AI Gateway)
   OPENAI_API_KEY?: string;
-  CLAWDBOT_GATEWAY_TOKEN?: string;
+  MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to CLAWDBOT_GATEWAY_TOKEN for container)
 
   CLAWDBOT_BIND_MODE?: string;
   DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + clawdbot device pairing)
