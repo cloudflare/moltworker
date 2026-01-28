@@ -32,6 +32,12 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   // Pass base URL (used by start-moltbot.sh to determine provider)
   if (env.AI_GATEWAY_BASE_URL) {
     envVars.AI_GATEWAY_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    // Also set the provider-specific base URL env var
+    if (isOpenAIGateway) {
+      envVars.OPENAI_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    } else {
+      envVars.ANTHROPIC_BASE_URL = env.AI_GATEWAY_BASE_URL;
+    }
   } else if (env.ANTHROPIC_BASE_URL) {
     envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
   }
