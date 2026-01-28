@@ -9,10 +9,11 @@ Run [Moltbot](https://molt.bot/) personal AI assistant in a [Cloudflare Sandbox]
 ## Requirements
 
 - [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) — required for Cloudflare Sandbox containers
-- [Anthropic API key](https://console.anthropic.com/) — for Claude access
+- [Anthropic API key](https://console.anthropic.com/) — for Claude access, or you can AI Gateway's [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/)
 
 The following Cloudflare features used by this project have free tiers:
 - Cloudflare Access (authentication)
+- Browser Rendering (for browser navigation)
 - AI Gateway (optional, for API routing/analytics)
 - R2 Storage (optional, for persistence)
 
