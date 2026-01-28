@@ -32,6 +32,7 @@ describe('buildEnvVars', () => {
     });
     const result = buildEnvVars(env);
     expect(result.OPENAI_API_KEY).toBe('sk-gateway-key');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
     expect(result.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
