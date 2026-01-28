@@ -65,6 +65,7 @@ describe('buildEnvVars', () => {
     const result = buildEnvVars(env);
     expect(result.OPENAI_API_KEY).toBe('gateway-key');
     expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.example.com/openai');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.example.com/openai');
   });
 
   it('falls back to ANTHROPIC_* when AI_GATEWAY_* not set', () => {
