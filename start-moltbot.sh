@@ -154,9 +154,6 @@ config.agents = config.agents || {};
 config.agents.defaults = config.agents.defaults || {};
 config.agents.defaults.model = config.agents.defaults.model || {};
 config.gateway = config.gateway || {};
-
-// Set default model to Opus 4.5
-config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
 config.channels = config.channels || {};
 
 // Clean up any broken anthropic provider config from previous runs
