@@ -28,37 +28,7 @@ This project packages Moltbot to run in a [Cloudflare Sandbox](https://developer
 
 ## Architecture
 
-```
-Browser / CLI
-     │
-     ▼
-┌─────────────────────────────────────┐
-│     Cloudflare Worker               │
-│  - Starts Moltbot in sandbox        │
-│  - Proxies HTTP/WebSocket requests  │
-│  - Manages R2 backup/restore        │
-│  - Admin UI at /_admin/             │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│     Cloudflare Sandbox Container    │
-│  ┌───────────────────────────────┐  │
-│  │     Moltbot Gateway           │  │
-│  │  - Control UI on port 18789   │  │
-│  │  - WebSocket RPC protocol     │  │
-│  │  - Agent runtime              │  │
-│  └───────────────────────────────┘  │
-└─────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│     R2 Storage (Optional)           │
-│  - Persistent config & data         │
-│  - Conversation history             │
-│  - Paired device list               │
-└─────────────────────────────────────┘
-```
+![moltworker architecture](./assets/architecture.png)
 
 ## Quick Start
 
