@@ -4,6 +4,8 @@ Run [Moltbot](https://molt.bot/) personal AI assistant in a [Cloudflare Sandbox]
 
 > **Experimental:** This is a proof of concept demonstrating that Moltbot can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
 
+![moltworker architecture](./assets/logo.png)
+
 ## Requirements
 
 - [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) — required for Cloudflare Sandbox containers
@@ -28,37 +30,7 @@ This project packages Moltbot to run in a [Cloudflare Sandbox](https://developer
 
 ## Architecture
 
-```
-Browser / CLI
-     │
-     ▼
-┌─────────────────────────────────────┐
-│     Cloudflare Worker               │
-│  - Starts Moltbot in sandbox        │
-│  - Proxies HTTP/WebSocket requests  │
-│  - Manages R2 backup/restore        │
-│  - Admin UI at /_admin/             │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│     Cloudflare Sandbox Container    │
-│  ┌───────────────────────────────┐  │
-│  │     Moltbot Gateway           │  │
-│  │  - Control UI on port 18789   │  │
-│  │  - WebSocket RPC protocol     │  │
-│  │  - Agent runtime              │  │
-│  └───────────────────────────────┘  │
-└─────────────────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│     R2 Storage (Optional)           │
-│  - Persistent config & data         │
-│  - Conversation history             │
-│  - Paired device list               │
-└─────────────────────────────────────┘
-```
+![moltworker architecture](./assets/architecture.png)
 
 ## Quick Start
 
