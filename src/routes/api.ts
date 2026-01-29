@@ -9,45 +9,22 @@ const CLI_TIMEOUT_MS = 20000;
 
 /**
  * API routes
- * - /api/status - Public health check (no auth)
- * - /api/admin/* - Protected admin routes (Cloudflare Access required)
+ * - /api/admin/* - Protected admin API routes (Cloudflare Access required)
+ * 
+ * Note: /api/status is now handled by publicRoutes (no auth required)
  */
 const api = new Hono<AppEnv>();
 
-// GET /api/status - Simple health check (no auth required)
-// Returns whether the moltbot gateway is running
-api.get('/status', async (c) => {
-  const sandbox = c.get('sandbox');
-  
-  try {
-    const process = await findExistingMoltbotProcess(sandbox);
-    if (!process) {
-      return c.json({ ok: false, status: 'not_running' });
-    }
-    
-    // Process exists, check if it's actually responding
-    // Try to reach the gateway with a short timeout
-    try {
-      await process.waitForPort(18789, { mode: 'tcp', timeout: 5000 });
-      return c.json({ ok: true, status: 'running', processId: process.id });
-    } catch {
-      return c.json({ ok: false, status: 'not_responding', processId: process.id });
-    }
-  } catch (err) {
-    return c.json({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'Unknown error' });
-  }
-});
-
 /**
- * Admin routes - all protected by Cloudflare Access
+ * Admin API routes - all protected by Cloudflare Access
  */
-const admin = new Hono<AppEnv>();
+const adminApi = new Hono<AppEnv>();
 
 // Middleware: Verify Cloudflare Access JWT for all admin routes
-admin.use('*', createAccessMiddleware({ type: 'json' }));
+adminApi.use('*', createAccessMiddleware({ type: 'json' }));
 
 // GET /api/admin/devices - List pending and paired devices
-admin.get('/devices', async (c) => {
+adminApi.get('/devices', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
@@ -95,7 +72,7 @@ admin.get('/devices', async (c) => {
 });
 
 // POST /api/admin/devices/:requestId/approve - Approve a pending device
-admin.post('/devices/:requestId/approve', async (c) => {
+adminApi.post('/devices/:requestId/approve', async (c) => {
   const sandbox = c.get('sandbox');
   const requestId = c.req.param('requestId');
 
@@ -132,7 +109,7 @@ admin.post('/devices/:requestId/approve', async (c) => {
 });
 
 // POST /api/admin/devices/approve-all - Approve all pending devices
-admin.post('/devices/approve-all', async (c) => {
+adminApi.post('/devices/approve-all', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
@@ -196,7 +173,7 @@ admin.post('/devices/approve-all', async (c) => {
 });
 
 // GET /api/admin/storage - Get R2 storage status and last sync time
-admin.get('/storage', async (c) => {
+adminApi.get('/storage', async (c) => {
   const sandbox = c.get('sandbox');
   const hasCredentials = !!(
     c.env.R2_ACCESS_KEY_ID && 
@@ -242,7 +219,7 @@ admin.get('/storage', async (c) => {
 });
 
 // POST /api/admin/storage/sync - Trigger a manual sync to R2
-admin.post('/storage/sync', async (c) => {
+adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
   
   const result = await syncToR2(sandbox, c.env);
@@ -264,7 +241,7 @@ admin.post('/storage/sync', async (c) => {
 });
 
 // POST /api/admin/gateway/restart - Kill the current gateway and start a new one
-admin.post('/gateway/restart', async (c) => {
+adminApi.post('/gateway/restart', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
@@ -301,7 +278,7 @@ admin.post('/gateway/restart', async (c) => {
   }
 });
 
-// Mount admin routes under /admin
-api.route('/admin', admin);
+// Mount admin API routes under /admin
+api.route('/admin', adminApi);
 
 export { api };

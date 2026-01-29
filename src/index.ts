@@ -27,7 +27,7 @@ import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
-import { api, admin, debug, cdp } from './routes';
+import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -107,6 +107,10 @@ function buildSandboxOptions(env: MoltbotEnv): SandboxOptions {
 // Main app
 const app = new Hono<AppEnv>();
 
+// =============================================================================
+// MIDDLEWARE: Applied to ALL routes
+// =============================================================================
+
 // Middleware: Log every request
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
@@ -117,14 +121,32 @@ app.use('*', async (c, next) => {
   await next();
 });
 
-// Middleware: Validate required environment variables (skip in dev mode and for certain paths)
+// Middleware: Initialize sandbox for all requests
+app.use('*', async (c, next) => {
+  const options = buildSandboxOptions(c.env);
+  const sandbox = getSandbox(c.env.Sandbox, 'moltbot', options);
+  c.set('sandbox', sandbox);
+  await next();
+});
+
+// =============================================================================
+// PUBLIC ROUTES: No Cloudflare Access authentication required
+// =============================================================================
+
+// Mount public routes first (before auth middleware)
+// Includes: /sandbox-health, /logo.png, /logo-small.png, /api/status, /_admin/assets/*
+app.route('/', publicRoutes);
+
+// Mount CDP routes (uses shared secret auth via query param, not CF Access)
+app.route('/cdp', cdp);
+
+// =============================================================================
+// PROTECTED ROUTES: Cloudflare Access authentication required
+// =============================================================================
+
+// Middleware: Validate required environment variables (skip in dev mode and for debug routes)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
-  
-  // Skip validation for health check endpoint and static assets
-  if (url.pathname === '/sandbox-health' || url.pathname.endsWith('.png')) {
-    return next();
-  }
   
   // Skip validation for debug routes (they have their own enable check)
   if (url.pathname.startsWith('/debug')) {
@@ -159,33 +181,8 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-// Middleware: Initialize sandbox for all requests
+// Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
-  const options = buildSandboxOptions(c.env);
-  const sandbox = getSandbox(c.env.Sandbox, 'moltbot', options);
-  c.set('sandbox', sandbox);
-  await next();
-});
-
-// Middleware: Cloudflare Access authentication for all routes except /cdp/* and static assets
-app.use('*', async (c, next) => {
-  const url = new URL(c.req.url);
-  
-  // Skip auth for CDP routes (uses shared secret auth)
-  if (url.pathname.startsWith('/cdp')) {
-    return next();
-  }
-  
-  // Skip auth for admin UI static assets (CSS, JS need to load for login redirect to work)
-  if (url.pathname.startsWith('/_admin/assets/')) {
-    return next();
-  }
-  
-  // Skip auth for public static assets (logos, etc.)
-  if (url.pathname.endsWith('.png')) {
-    return next();
-  }
-  
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({ 
@@ -196,29 +193,11 @@ app.use('*', async (c, next) => {
   return middleware(c, next);
 });
 
-// Health check endpoint (before starting moltbot)
-app.get('/sandbox-health', (c) => {
-  return c.json({
-    status: 'ok',
-    service: 'moltbot-sandbox',
-    gateway_port: MOLTBOT_PORT,
-  });
-});
-
-// Logos - serve from ASSETS binding (files are in public/ directory)
-app.get('/logo.png', (c) => {
-  return c.env.ASSETS.fetch(c.req.raw);
-});
-
-app.get('/logo-small.png', (c) => {
-  return c.env.ASSETS.fetch(c.req.raw);
-});
-
 // Mount API routes (protected by Cloudflare Access)
 app.route('/api', api);
 
 // Mount Admin UI routes (protected by Cloudflare Access)
-app.route('/_admin', admin);
+app.route('/_admin', adminUi);
 
 // Mount debug routes (protected by Cloudflare Access, only when DEBUG_ROUTES is enabled)
 app.use('/debug/*', async (c, next) => {
@@ -227,14 +206,12 @@ app.use('/debug/*', async (c, next) => {
   }
   return next();
 });
-app.use('/debug/*', createAccessMiddleware({ type: 'json' }));
 app.route('/debug', debug);
 
-// Mount CDP shim routes (authenticated via shared secret, NOT Cloudflare Access)
-// This allows programmatic access from external tools
-app.route('/cdp', cdp);
+// =============================================================================
+// CATCH-ALL: Proxy to Moltbot gateway
+// =============================================================================
 
-// All other routes: check if gateway is ready, show loading page or proxy
 app.all('*', async (c) => {
   const sandbox = c.get('sandbox');
   const request = c.req.raw;
