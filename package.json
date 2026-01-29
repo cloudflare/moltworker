@@ -45,12 +45,6 @@
       },
       "MOLTBOT_GATEWAY_TOKEN": {
         "description": "Token to protect gateway access. Random string, you can generate one with `openssl rand -base64 32`, for example."
-      },
-      "DEV_MODE": {
-        "description": "Enable development mode. Leave this as `false` unless you're actively developing moltworker."
-      },
-      "DEBUG_ROUTES": {
-        "description": "Enable debug routes. Leave this as `false` unless you're actively developing moltworker."
       }
     }
   }
