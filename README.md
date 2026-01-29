@@ -76,8 +76,6 @@ You'll also likely want to [enable R2 storage](#persistent-storage-r2) so your p
 
 ## Setting Up the Admin UI
 
-![admin ui](./assets/adminui.png)
-
 To use the admin UI at `/_admin/` for device management, you need to:
 1. Enable Cloudflare Access on your worker
 2. Set the Access secrets so the worker can validate JWTs
@@ -223,6 +221,8 @@ npx wrangler secret put SANDBOX_SLEEP_AFTER
 When the container sleeps, the next request will trigger a cold start. If you have R2 storage configured, your paired devices and data will persist across restarts.
 
 ## Admin UI
+
+![admin ui](./assets/adminui.png)
 
 Access the admin UI at `/_admin/` to:
 - **R2 Storage Status** - Shows if R2 is configured, last backup time, and a "Backup Now" button
