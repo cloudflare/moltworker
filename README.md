@@ -76,6 +76,8 @@ You'll also likely want to [enable R2 storage](#persistent-storage-r2) so your p
 
 ## Setting Up the Admin UI
 
+![admin ui](./assets/adminui.png)
+
 To use the admin UI at `/_admin/` for device management, you need to:
 1. Enable Cloudflare Access on your worker
 2. Set the Access secrets so the worker can validate JWTs
