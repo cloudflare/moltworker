@@ -1,4 +1,4 @@
-# Moltbot in Cloudflare Sandbox
+# Moltbot on Cloudflare Workers
 
 Run [Moltbot](https://molt.bot/) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
 
