@@ -37,5 +37,21 @@
     "wrangler": "^4.50.0"
   },
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "cloudflare": {
+    "bindings": {
+      "ANTHROPIC_API_KEY": {
+        "description": "Your [Anthropic API key](https://console.anthropic.com/). Required for Claude access."
+      },
+      "MOLTBOT_GATEWAY_TOKEN": {
+        "description": "Token to protect gateway access. Generate with `openssl rand -base64 32`."
+      },
+      "CF_ACCESS_TEAM_DOMAIN": {
+        "description": "Your Cloudflare Access team domain (e.g., `myteam.cloudflareaccess.com`). Required for admin UI."
+      },
+      "CF_ACCESS_AUD": {
+        "description": "Application Audience (AUD) tag from your [Access application](https://one.dash.cloudflare.com/)."
+      }
+    }
+  }
 }
