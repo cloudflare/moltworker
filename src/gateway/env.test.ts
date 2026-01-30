@@ -85,6 +85,12 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_API_KEY).toBe('sk-openai-key');
   });
 
+  it('includes MINIMAX_API_KEY when set', () => {
+    const env = createMockEnv({ MINIMAX_API_KEY: 'sk-minimax-key' });
+    const result = buildEnvVars(env);
+    expect(result.MINIMAX_API_KEY).toBe('sk-minimax-key');
+  });
+
   it('maps MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN for container', () => {
     const env = createMockEnv({ MOLTBOT_GATEWAY_TOKEN: 'my-token' });
     const result = buildEnvVars(env);
