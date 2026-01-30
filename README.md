@@ -355,6 +355,35 @@ npm run deploy
 
 The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
 
+## Optional: MiniMax Provider
+
+To use the MiniMax provider, set the `MINIMAX_API_KEY` secret and configure the provider in your OpenClaw config file (`clawdbot.json`):
+
+```bash
+npx wrangler secret put MINIMAX_API_KEY
+```
+
+Then add a `minimax` entry under `models.providers` in the config (via the Control UI or by editing the config directly):
+
+```json
+{
+  "models": {
+    "providers": {
+      "minimax": {
+        "baseUrl": "<your MiniMax-compatible API base URL>",
+        "api": "anthropic-messages",
+        "apiKey": "${MINIMAX_API_KEY}",
+        "models": [
+          { "id": "<model-id>", "name": "<display name>", "contextWindow": 200000 }
+        ]
+      }
+    }
+  }
+}
+```
+
+The `MINIMAX_API_KEY` environment variable is forwarded into the container automatically. If you set `model.primary` to a minimax model in the config, it will be preserved across restarts.
+
 ## All Secrets Reference
 
 | Secret | Required | Description |

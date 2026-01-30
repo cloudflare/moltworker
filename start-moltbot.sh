@@ -235,7 +235,9 @@ if (isOpenAI) {
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
     config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
     config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    if (!config.agents.defaults.model.primary) {
+        config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    }
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
     config.models = config.models || {};
@@ -259,10 +261,14 @@ if (isOpenAI) {
     config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
     config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
     config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    if (!config.agents.defaults.model.primary) {
+        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    }
 } else {
     // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+    if (!config.agents.defaults.model.primary) {
+        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+    }
 }
 
 // Write updated config
