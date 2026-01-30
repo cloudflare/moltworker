@@ -56,5 +56,8 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
 
+  // 1Password Service Account token for `op` CLI inside the container
+  if (env.OP_SERVICE_ACCOUNT_TOKEN) envVars.OP_SERVICE_ACCOUNT_TOKEN = env.OP_SERVICE_ACCOUNT_TOKEN;
+
   return envVars;
 }
