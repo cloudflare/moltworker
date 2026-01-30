@@ -44,7 +44,7 @@
         "description": "Your [Anthropic API key](https://console.anthropic.com/)."
       },
       "MOLTBOT_GATEWAY_TOKEN": {
-        "description": "Token to protect gateway access. Random string, you can generate one with `openssl rand -base64 32`, for example."
+        "description": "Token for gateway access. Generate with: openssl rand -hex 32"
       }
     }
   }

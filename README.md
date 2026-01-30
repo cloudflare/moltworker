@@ -52,7 +52,7 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 # Generate and set a gateway token (required for remote access)
 # Save this token - you'll need it to access the Control UI
-export MOLTBOT_GATEWAY_TOKEN=$(openssl rand -base64 32 | tr -d '=+/' | head -c 32)
+export MOLTBOT_GATEWAY_TOKEN=$(openssl rand -hex 32)
 echo "Your gateway token: $MOLTBOT_GATEWAY_TOKEN"
 echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 
