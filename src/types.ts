@@ -10,6 +10,9 @@ export interface MoltbotEnv {
   // AI Gateway configuration (preferred)
   AI_GATEWAY_API_KEY?: string; // API key for the provider configured in AI Gateway
   AI_GATEWAY_BASE_URL?: string; // AI Gateway URL (e.g., https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic)
+  AI_GATEWAY_PROVIDER?: 'openai' | 'anthropic'; // Explicit provider type override
+  AI_GATEWAY_MODEL?: string; // Custom model name override
+  AI_GATEWAY_API_FORMAT?: 'openai-completions' | 'openai-responses'; // OpenAI API format (default: openai-completions)
   // Legacy direct provider configuration (fallback)
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;

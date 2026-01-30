@@ -1,8 +1,33 @@
 import type { MoltbotEnv } from '../types';
 
+// Valid AI Gateway provider values
+const VALID_PROVIDERS = ['openai', 'anthropic'] as const;
+type ValidProvider = typeof VALID_PROVIDERS[number];
+
+// Valid AI Gateway API format values
+const VALID_API_FORMATS = ['openai-completions', 'openai-responses'] as const;
+type ValidApiFormat = typeof VALID_API_FORMATS[number];
+
+function isValidProvider(value: unknown): value is ValidProvider {
+  return typeof value === 'string' && VALID_PROVIDERS.includes(value as ValidProvider);
+}
+
+function isValidApiFormat(value: unknown): value is ValidApiFormat {
+  return typeof value === 'string' && VALID_API_FORMATS.includes(value as ValidApiFormat);
+}
+
+function isValidGatewayUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Build environment variables to pass to the Moltbot container process
- * 
+ *
  * @param env - Worker environment bindings
  * @returns Environment variables record
  */
@@ -11,7 +36,21 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
 
   // Normalize the base URL by removing trailing slashes
   const normalizedBaseUrl = env.AI_GATEWAY_BASE_URL?.replace(/\/+$/, '');
-  const isOpenAIGateway = normalizedBaseUrl?.endsWith('/openai');
+
+  // Validate provider if explicitly set
+  if (env.AI_GATEWAY_PROVIDER && !isValidProvider(env.AI_GATEWAY_PROVIDER)) {
+    console.warn(`Invalid AI_GATEWAY_PROVIDER: ${env.AI_GATEWAY_PROVIDER}, falling back to URL detection`);
+  }
+
+  // Validate gateway URL if set
+  if (normalizedBaseUrl && !isValidGatewayUrl(normalizedBaseUrl)) {
+    console.warn(`Invalid AI_GATEWAY_BASE_URL format: ${normalizedBaseUrl}`);
+  }
+
+  // Detect provider type - explicit setting takes precedence over URL suffix detection
+  const isOpenAIGateway = isValidProvider(env.AI_GATEWAY_PROVIDER)
+    ? env.AI_GATEWAY_PROVIDER === 'openai'
+    : normalizedBaseUrl?.endsWith('/openai') ?? false;
 
   // AI Gateway vars take precedence
   // Map to the appropriate provider env var based on the gateway endpoint
@@ -42,6 +81,16 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
     }
   } else if (env.ANTHROPIC_BASE_URL) {
     envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
+  }
+  // Pass explicit provider type, model, and API format overrides to container
+  if (env.AI_GATEWAY_PROVIDER) envVars.AI_GATEWAY_PROVIDER = env.AI_GATEWAY_PROVIDER;
+  if (env.AI_GATEWAY_MODEL) envVars.AI_GATEWAY_MODEL = env.AI_GATEWAY_MODEL;
+  // Validate API format if explicitly set
+  if (env.AI_GATEWAY_API_FORMAT) {
+    if (!isValidApiFormat(env.AI_GATEWAY_API_FORMAT)) {
+      console.warn(`Invalid AI_GATEWAY_API_FORMAT: ${env.AI_GATEWAY_API_FORMAT}, valid values are: ${VALID_API_FORMATS.join(', ')}`);
+    }
+    envVars.AI_GATEWAY_API_FORMAT = env.AI_GATEWAY_API_FORMAT;
   }
   // Map MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN (container expects this name)
   if (env.MOLTBOT_GATEWAY_TOKEN) envVars.CLAWDBOT_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;

@@ -361,6 +361,9 @@ The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
 |--------|----------|-------------|
 | `AI_GATEWAY_API_KEY` | Yes* | API key for your AI Gateway provider (requires `AI_GATEWAY_BASE_URL`) |
 | `AI_GATEWAY_BASE_URL` | Yes* | AI Gateway endpoint URL (required when using `AI_GATEWAY_API_KEY`) |
+| `AI_GATEWAY_PROVIDER` | No | Explicit provider type: `openai` or `anthropic` (auto-detected from URL if not set) |
+| `AI_GATEWAY_MODEL` | No | Custom model name (e.g., `gpt-5-mini`) |
+| `AI_GATEWAY_API_FORMAT` | No | OpenAI API format: `openai-completions` (default) or `openai-responses` |
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (fallback if AI Gateway not configured) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL (fallback) |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |

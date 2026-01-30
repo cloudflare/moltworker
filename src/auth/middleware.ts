@@ -1,6 +1,6 @@
 import type { Context, Next } from 'hono';
 import type { AppEnv, MoltbotEnv } from '../types';
-import { verifyAccessJWT } from './jwt';
+import { verifyAccessJWT, normalizeTeamDomain } from './jwt';
 
 /**
  * Options for creating an access middleware
@@ -34,7 +34,7 @@ export function extractJWT(c: Context<AppEnv>): string | null {
 
 /**
  * Create a Cloudflare Access authentication middleware
- * 
+ *
  * @param options - Middleware options
  * @returns Hono middleware function
  */
@@ -75,9 +75,9 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
 
     if (!jwt) {
       if (type === 'html' && redirectOnMissing) {
-        return c.redirect(`https://${teamDomain}`, 302);
+        return c.redirect(`https://${normalizeTeamDomain(teamDomain)}`, 302);
       }
-      
+
       if (type === 'json') {
         return c.json({
           error: 'Unauthorized',
@@ -89,7 +89,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
             <body>
               <h1>Unauthorized</h1>
               <p>Missing Cloudflare Access token.</p>
-              <a href="https://${teamDomain}">Login</a>
+              <a href="https://${normalizeTeamDomain(teamDomain)}">Login</a>
             </body>
           </html>
         `, 401);
@@ -103,7 +103,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
       await next();
     } catch (err) {
       console.error('Access JWT verification failed:', err);
-      
+
       if (type === 'json') {
         return c.json({
           error: 'Unauthorized',
@@ -115,7 +115,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
             <body>
               <h1>Unauthorized</h1>
               <p>Your Cloudflare Access session is invalid or expired.</p>
-              <a href="https://${teamDomain}">Login again</a>
+              <a href="https://${normalizeTeamDomain(teamDomain)}">Login again</a>
             </body>
           </html>
         `, 401);
