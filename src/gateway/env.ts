@@ -55,6 +55,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
+  // aX Platform configuration
+  if (env.AX_AGENTS) envVars.AX_AGENTS = env.AX_AGENTS;
+  if (env.AX_BACKEND_URL) envVars.AX_BACKEND_URL = env.AX_BACKEND_URL;
 
   return envVars;
 }

@@ -37,6 +37,9 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+  // aX Platform configuration
+  AX_AGENTS?: string; // JSON array of agent configs: [{"id":"...","secret":"...","handle":"@...","env":"prod"}]
+  AX_BACKEND_URL?: string; // aX API URL (default: https://api.paxai.app)
 }
 
 /**
