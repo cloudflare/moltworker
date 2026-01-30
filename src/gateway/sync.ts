@@ -59,7 +59,7 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Run rsync to backup config to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && rsync -r --no-times --delete --include='MEMORY.md' --include='IDENTITY.md' --include='USER.md' --include='SOUL.md' --include='memory/***' --exclude='*' /root/clawd/ ${R2_MOUNT_PATH}/clawd/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
   
   try {
     const proc = await sandbox.startProcess(syncCmd);
@@ -67,7 +67,7 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
     // Check for success by reading the timestamp file
     // (process status may not update reliably in sandbox API)
-    // Note: backup structure is ${R2_MOUNT_PATH}/clawdbot/ and ${R2_MOUNT_PATH}/skills/
+    // Note: backup structure is ${R2_MOUNT_PATH}/clawdbot/, ${R2_MOUNT_PATH}/skills/, and ${R2_MOUNT_PATH}/clawd/
     const timestampProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync`);
     await waitForProcess(timestampProc, 5000);
     const timestampLogs = await timestampProc.getLogs();

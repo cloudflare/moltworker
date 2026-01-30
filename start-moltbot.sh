@@ -105,6 +105,24 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     fi
 fi
 
+# Restore clawd memory artifacts from R2 backup if available (only if R2 is newer)
+CLAWD_DIR="/root/clawd"
+if [ -d "$BACKUP_DIR/clawd" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring clawd memory artifacts from $BACKUP_DIR/clawd..."
+        mkdir -p "$CLAWD_DIR"
+        cp -a "$BACKUP_DIR/clawd/MEMORY.md" "$CLAWD_DIR/" 2>/dev/null || true
+        cp -a "$BACKUP_DIR/clawd/IDENTITY.md" "$CLAWD_DIR/" 2>/dev/null || true
+        cp -a "$BACKUP_DIR/clawd/USER.md" "$CLAWD_DIR/" 2>/dev/null || true
+        cp -a "$BACKUP_DIR/clawd/SOUL.md" "$CLAWD_DIR/" 2>/dev/null || true
+        if [ -d "$BACKUP_DIR/clawd/memory" ]; then
+            mkdir -p "$CLAWD_DIR/memory"
+            cp -a "$BACKUP_DIR/clawd/memory/." "$CLAWD_DIR/memory/" 2>/dev/null || true
+        fi
+        echo "Restored clawd memory artifacts from R2 backup"
+    fi
+fi
+
 # If config file still doesn't exist, create from template
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, initializing from template..."
