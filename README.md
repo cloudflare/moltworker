@@ -1,12 +1,12 @@
-# Moltbot on Cloudflare Workers
+# OpenClaw on Cloudflare Workers
 
-Run [Moltbot](https://molt.bot/) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
-
-> **Experimental:** This is a proof of concept demonstrating that Moltbot can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/moltworker)
+Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
 
 ![moltworker architecture](./assets/logo.png)
+
+> **Experimental:** This is a proof of concept demonstrating that OpenClaw can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/moltworker)
 
 ## Requirements
 
@@ -19,9 +19,9 @@ The following Cloudflare features used by this project have free tiers:
 - AI Gateway (optional, for API routing/analytics)
 - R2 Storage (optional, for persistence)
 
-## What is Moltbot?
+## What is OpenClaw?
 
-[Moltbot](https://molt.bot/) is a personal AI assistant with a gateway architecture that connects to multiple chat platforms. Key features:
+[OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) is a personal AI assistant with a gateway architecture that connects to multiple chat platforms. Key features:
 
 - **Control UI** - Web-based chat interface at the gateway
 - **Multi-channel support** - Telegram, Discord, Slack
@@ -29,7 +29,7 @@ The following Cloudflare features used by this project have free tiers:
 - **Persistent conversations** - Chat history and context across sessions
 - **Agent runtime** - Extensible AI capabilities with workspace and skills
 
-This project packages Moltbot to run in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container, providing a fully managed, always-on deployment without needing to self-host. Optional R2 storage enables persistence across container restarts.
+This project packages OpenClaw to run in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/) container, providing a fully managed, always-on deployment without needing to self-host. Optional R2 storage enables persistence across container restarts.
 
 ## Architecture
 
@@ -197,7 +197,7 @@ R2 storage uses a backup/restore approach for simplicity:
 
 **On container startup:**
 - If R2 is mounted and contains backup data, it's restored to the moltbot config directory
-- Moltbot uses its default paths (no special configuration needed)
+- OpenClaw uses its default paths (no special configuration needed)
 
 **During operation:**
 - A cron job runs every 5 minutes to sync the moltbot config to R2
@@ -267,7 +267,7 @@ npm run deploy
 
 ## Optional: Browser Automation (CDP)
 
-This worker includes a Chrome DevTools Protocol (CDP) shim that enables browser automation capabilities. This allows Moltbot to control a headless browser for tasks like web scraping, screenshots, and automated testing.
+This worker includes a Chrome DevTools Protocol (CDP) shim that enables browser automation capabilities. This allows OpenClaw to control a headless browser for tasks like web scraping, screenshots, and automated testing.
 
 ### Setup
 
@@ -386,7 +386,7 @@ The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
 
 ### Authentication Layers
 
-Moltbot in Cloudflare Sandbox uses multiple authentication layers:
+OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 1. **Cloudflare Access** - Protects admin routes (`/_admin/`, `/api/*`, `/debug/*`). Only authenticated users can manage devices.
 
@@ -414,7 +414,7 @@ Moltbot in Cloudflare Sandbox uses multiple authentication layers:
 
 ## Links
 
-- [Moltbot](https://molt.bot/)
-- [Moltbot Docs](https://docs.molt.bot)
+- [OpenClaw](https://github.com/openclaw/openclaw)
+- [OpenClaw Docs](https://docs.openclaw.ai/)
 - [Cloudflare Sandbox Docs](https://developers.cloudflare.com/sandbox/)
 - [Cloudflare Access Docs](https://developers.cloudflare.com/cloudflare-one/policies/access/)
