@@ -249,8 +249,10 @@ export function createDispatchHandler(
 
       // Collect response text
       let responseText = "";
+      let deliverCallCount = 0;
 
       api.logger.info(`[ax-platform] Calling dispatcher for session ${sessionKey}...`);
+      api.logger.info(`[ax-platform] Message length: ${message.length} chars, context: ${missionBriefing.length} chars`);
       const startTime = Date.now();
 
       // Dispatch to agent - this runs the agent and calls deliver() with response
@@ -259,29 +261,40 @@ export function createDispatchHandler(
         cfg: api.config,
         dispatcherOptions: {
           deliver: async (deliverPayload: { text?: string; mediaUrls?: string[] }) => {
+            deliverCallCount++;
+            const elapsed = Date.now() - startTime;
             // Collect the agent's response
-            api.logger.info(`[ax-platform] Got response chunk (${deliverPayload.text?.length || 0} chars)`);
+            api.logger.info(`[ax-platform] deliver() call #${deliverCallCount} at ${elapsed}ms: ${deliverPayload.text?.length || 0} chars, media: ${deliverPayload.mediaUrls?.length || 0}`);
             if (deliverPayload.text) {
               responseText += deliverPayload.text;
+              api.logger.info(`[ax-platform] Total response so far: ${responseText.length} chars`);
             }
           },
           onError: (err: unknown, info: { kind: string }) => {
-            api.logger.error(`[ax-platform] Agent error (${info.kind}): ${err}`);
+            const elapsed = Date.now() - startTime;
+            api.logger.error(`[ax-platform] Agent error at ${elapsed}ms (${info.kind}): ${err}`);
           },
         },
       });
 
       const elapsed = Date.now() - startTime;
-      api.logger.info(`[ax-platform] Dispatcher complete in ${elapsed}ms, response: ${responseText.length} chars`);
+      api.logger.info(`[ax-platform] Dispatcher complete in ${elapsed}ms, deliver calls: ${deliverCallCount}, response: ${responseText.length} chars`);
+
+      // Warn if no response was collected
+      if (!responseText) {
+        api.logger.warn(`[ax-platform] WARNING: Empty response after ${elapsed}ms and ${deliverCallCount} deliver() calls`);
+      }
 
       // Clean up session
       dispatchSessions.delete(sessionKey);
 
       // Return response
+      const finalResponse = responseText || "[No response from agent]";
+      api.logger.info(`[ax-platform] Sending response: ${finalResponse.substring(0, 100)}...`);
       sendJson(res, 200, {
         status: "success",
         dispatch_id: dispatchId,
-        response: responseText || "[No response from agent]",
+        response: finalResponse,
       } satisfies AxDispatchResponse);
 
       return true;
