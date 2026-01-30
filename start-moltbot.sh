@@ -235,8 +235,14 @@ if (isOpenAI) {
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
     config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
     config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    if (!config.agents.defaults.model.primary) {
-        config.agents.defaults.model.primary = 'openai/gpt-5.2';
+
+    // Preserve user-selected primary model only if it is valid for the current provider catalog.
+    // If the primary points to a model that isn't in the allowlist, Moltbot may reject the config.
+    const desiredPrimary = 'openai/gpt-5.2';
+    const currentPrimary = config.agents.defaults.model.primary;
+    const allowlisted = config.agents.defaults.models && currentPrimary && config.agents.defaults.models[currentPrimary];
+    if (!currentPrimary || !allowlisted) {
+        config.agents.defaults.model.primary = desiredPrimary;
     }
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
@@ -261,13 +267,34 @@ if (isOpenAI) {
     config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
     config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
     config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    if (!config.agents.defaults.model.primary) {
-        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+
+    // Preserve user-selected primary model only if it is valid for the current provider catalog.
+    // If the primary points to a model that isn't in the allowlist, Moltbot may reject the config.
+    const desiredPrimary = 'anthropic/claude-opus-4-5-20251101';
+    const currentPrimary = config.agents.defaults.model.primary;
+    const allowlisted = config.agents.defaults.models && currentPrimary && config.agents.defaults.models[currentPrimary];
+    if (!currentPrimary || !allowlisted) {
+        config.agents.defaults.model.primary = desiredPrimary;
     }
 } else {
     // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
-    if (!config.agents.defaults.model.primary) {
-        config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+    // Preserve a user-selected primary only when it is plausibly supported by the current config.
+    // If env/provider settings changed and the primary is no longer supported, Moltbot may reject the config.
+    const defaultPrimary = 'anthropic/claude-opus-4-5';
+    const currentPrimary = config.agents.defaults.model.primary;
+    const hasMinimaxProvider = !!(config.models?.providers?.minimax);
+    const hasOpenAIProvider = !!(config.models?.providers?.openai);
+    const hasAnthropicProvider = !!(config.models?.providers?.anthropic);
+
+    const keepPrimary = !!(
+        currentPrimary === defaultPrimary ||
+        (hasMinimaxProvider && currentPrimary?.startsWith('minimax/')) ||
+        (hasOpenAIProvider && currentPrimary?.startsWith('openai/')) ||
+        (hasAnthropicProvider && currentPrimary?.startsWith('anthropic/'))
+    );
+
+    if (!currentPrimary || !keepPrimary) {
+        config.agents.defaults.model.primary = defaultPrimary;
     }
 }
 
