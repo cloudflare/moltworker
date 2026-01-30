@@ -135,4 +135,39 @@ describe('buildEnvVars', () => {
       TELEGRAM_BOT_TOKEN: 'tg',
     });
   });
+
+  it('handles trailing slash in AI_GATEWAY_BASE_URL for OpenAI', () => {
+    const env = createMockEnv({
+      AI_GATEWAY_API_KEY: 'sk-gateway-key',
+      AI_GATEWAY_BASE_URL: 'https://gateway.ai.cloudflare.com/v1/123/my-gw/openai/',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_API_KEY).toBe('sk-gateway-key');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
+    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
+    expect(result.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it('handles trailing slash in AI_GATEWAY_BASE_URL for Anthropic', () => {
+    const env = createMockEnv({
+      AI_GATEWAY_API_KEY: 'sk-gateway-key',
+      AI_GATEWAY_BASE_URL: 'https://gateway.ai.cloudflare.com/v1/123/my-gw/anthropic/',
+    });
+    const result = buildEnvVars(env);
+    expect(result.ANTHROPIC_API_KEY).toBe('sk-gateway-key');
+    expect(result.ANTHROPIC_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/anthropic');
+    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/anthropic');
+    expect(result.OPENAI_API_KEY).toBeUndefined();
+  });
+
+  it('handles multiple trailing slashes in AI_GATEWAY_BASE_URL', () => {
+    const env = createMockEnv({
+      AI_GATEWAY_API_KEY: 'sk-gateway-key',
+      AI_GATEWAY_BASE_URL: 'https://gateway.ai.cloudflare.com/v1/123/my-gw/openai///',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_API_KEY).toBe('sk-gateway-key');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
+    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
+  });
 });
