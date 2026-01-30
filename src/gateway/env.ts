@@ -25,6 +25,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (!envVars.ANTHROPIC_API_KEY && env.ANTHROPIC_API_KEY) {
     envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
   }
+  if (env.ANTHROPIC_OAUTH_TOKEN) {
+    envVars.ANTHROPIC_OAUTH_TOKEN = env.ANTHROPIC_OAUTH_TOKEN;
+  }
   if (!envVars.OPENAI_API_KEY && env.OPENAI_API_KEY) {
     envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
   }
