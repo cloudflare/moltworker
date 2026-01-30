@@ -110,6 +110,12 @@ describe('buildEnvVars', () => {
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
   });
 
+  it('includes OP_SERVICE_ACCOUNT_TOKEN when set', () => {
+    const env = createMockEnv({ OP_SERVICE_ACCOUNT_TOKEN: 'ops_test_token' });
+    const result = buildEnvVars(env);
+    expect(result.OP_SERVICE_ACCOUNT_TOKEN).toBe('ops_test_token');
+  });
+
   it('maps DEV_MODE to CLAWDBOT_DEV_MODE for container', () => {
     const env = createMockEnv({
       DEV_MODE: 'true',
