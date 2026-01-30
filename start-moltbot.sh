@@ -265,6 +265,29 @@ if (isOpenAI) {
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
 }
 
+// aX Platform configuration
+// Format: AX_AGENTS='[{"id":"uuid","secret":"...","handle":"@agent","env":"prod"}]'
+if (process.env.AX_AGENTS) {
+    try {
+        const axAgents = JSON.parse(process.env.AX_AGENTS);
+        if (Array.isArray(axAgents) && axAgents.length > 0) {
+            config.plugins = config.plugins || {};
+            config.plugins.entries = config.plugins.entries || {};
+            config.plugins.entries['ax-platform'] = {
+                enabled: true,
+                config: {
+                    agents: axAgents,
+                    backendUrl: process.env.AX_BACKEND_URL || 'https://api.paxai.app'
+                }
+            };
+            console.log('aX Platform configured with', axAgents.length, 'agent(s):');
+            axAgents.forEach(a => console.log('  -', a.handle || a.id.substring(0, 8)));
+        }
+    } catch (e) {
+        console.error('Failed to parse AX_AGENTS:', e.message);
+    }
+}
+
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');

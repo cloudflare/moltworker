@@ -27,9 +27,15 @@ RUN mkdir -p /root/.clawdbot \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-01-28-v26-browser-skill
+# Build cache bust: 2026-01-30-ax-platform
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
+
+# Install ax-platform plugin for aX Platform integration
+# This enables cloud collaboration via aX webhooks
+COPY extensions/ax-platform/ /root/.clawdbot/extensions/ax-platform/
+RUN cd /root/.clawdbot/extensions/ax-platform && npm install --omit=dev \
+    && echo "ax-platform plugin installed"
 
 # Copy default configuration template
 COPY moltbot.json.template /root/.clawdbot-templates/moltbot.json.template
