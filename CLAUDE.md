@@ -128,6 +128,17 @@ Container startup takes 1-2 minutes. `SANDBOX_SLEEP_AFTER` defaults to `never` t
 ### MOLTBOT_GATEWAY_TOKEN naming
 The wrangler secret is `MOLTBOT_GATEWAY_TOKEN` but the container expects `CLAWDBOT_GATEWAY_TOKEN`. The mapping happens in `buildEnvVars()`. Don't set both.
 
+## Workflow
+
+**Never commit directly to main.** All code changes follow this process:
+
+1. Check current branch. If on `main`, create a feature branch first (`git checkout -b <branch-name>`)
+2. Make changes on the feature branch
+3. When done, run `npm test` and `npm run typecheck` — both must pass
+4. Commit with a descriptive message
+5. Push the branch and open a PR to `main` via `gh pr create` with a detailed description
+6. Deploy only happens from `main` after PR merge
+
 ## Git Remotes
 
 - `origin` — `jlevy-io/moltworker` (fork, push here)
