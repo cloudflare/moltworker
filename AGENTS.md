@@ -1,4 +1,8 @@
-# Agent Instructions
+# AGENTS.md
+
+This file provides guidance to WARP (warp.dev) when working with code in this repository.
+
+## Agent Instructions
 
 Guidelines for AI agents working on this codebase.
 
@@ -67,13 +71,18 @@ stdout.toLowerCase().includes('approved')
 ## Commands
 
 ```bash
-npm test              # Run tests (vitest)
-npm run test:watch    # Run tests in watch mode
-npm run build         # Build worker + client
-npm run deploy        # Build and deploy to Cloudflare
-npm run dev           # Vite dev server
-npm run start         # wrangler dev (local worker)
-npm run typecheck     # TypeScript check
+npm test                        # Run all tests (vitest)
+npm run test:watch              # Run tests in watch mode
+npm run test:coverage           # Run tests with coverage report
+vitest src/path/file.test.ts    # Run a single test file
+npm run build                   # Build worker + client (vite)
+npm run deploy                  # Build and deploy to Cloudflare
+npm run dev                     # Vite dev server for client UI
+npm run start                   # wrangler dev (local worker)
+npm run typecheck               # TypeScript type checking
+npx wrangler tail               # View live production logs
+npx wrangler secret list        # List configured secrets
+npx wrangler secret put <NAME>  # Set a secret value
 ```
 
 ## Testing
@@ -205,6 +214,20 @@ Moltbot has strict config validation. Common gotchas:
 
 See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
 
+## Skills System
+
+Moltbot uses a skills directory (`skills/`) with pre-installed capabilities that get bundled into the container. Each skill has a `SKILL.md` file.
+
+### cloudflare-browser
+Browser automation via CDP (Chrome DevTools Protocol) shim. Requires `CDP_SECRET` and `WORKER_URL` environment variables. Located at `/root/clawd/skills/cloudflare-browser/` in the container.
+
+**Key scripts:**
+- `screenshot.js` - Capture webpage screenshots
+- `video.js` - Create videos from multiple URLs
+- `cdp-client.js` - Reusable CDP client library
+
+When modifying browser automation, the CDP endpoints are in `src/routes/cdp.ts`.
+
 ## Common Tasks
 
 ### Adding a New API Endpoint
@@ -212,7 +235,8 @@ See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
 1. Add route handler in `src/routes/api.ts`
 2. Add types if needed in `src/types.ts`
 3. Update client API in `src/client/api.ts` if frontend needs it
-4. Add tests
+4. Add tests colocated with the module (e.g., `api.test.ts`)
+5. If the endpoint needs auth, it's automatically protected by the auth middleware for admin routes
 
 ### Adding a New Environment Variable
 
@@ -220,18 +244,33 @@ See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
 2. If passed to container, add to `buildEnvVars()` in `src/gateway/env.ts`
 3. Update `.dev.vars.example`
 4. Document in README.md secrets table
+5. Add comment to `wrangler.jsonc` secrets section
 
 ### Debugging
 
 ```bash
-# View live logs
+# View live logs from production
 npx wrangler tail
 
-# Check secrets
+# Check configured secrets
 npx wrangler secret list
+
+# Local debugging with dev mode (skips auth)
+echo "DEV_MODE=true" > .dev.vars
+echo "DEBUG_ROUTES=true" >> .dev.vars
+npm run start
 ```
 
-Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
+Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes` to see container processes.
+
+### Modifying Container Startup
+
+When changing `moltbot.json.template` or `start-moltbot.sh`:
+1. Edit the file
+2. Bump the cache bust version in `Dockerfile`: `# Build cache bust: 2026-01-26-vXX`
+3. Redeploy: `npm run deploy`
+
+Without updating the cache bust, Docker may use a cached layer and your changes won't apply.
 
 ## R2 Storage Notes
 
