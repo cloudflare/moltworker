@@ -13,23 +13,31 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   const normalizedBaseUrl = env.AI_GATEWAY_BASE_URL?.replace(/\/+$/, '');
   const isOpenAIGateway = normalizedBaseUrl?.endsWith('/openai');
 
-  // AI Gateway vars take precedence
-  // Map to the appropriate provider env var based on the gateway endpoint
+  // If key in request (user provided ANTHROPIC_API_KEY) pass ANTHROPIC_API_KEY as is
+  if (env.ANTHROPIC_API_KEY) {
+    envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+  }
+  if (env.ANTHROPIC_OAUTH_TOKEN) {
+    envVars.ANTHROPIC_OAUTH_TOKEN = env.ANTHROPIC_OAUTH_TOKEN;
+  }
+  if (env.OPENAI_API_KEY) {
+    envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
+  }
+  
+  // AI Gateway will take use auth token from either provider specific headers (x-api-key, Authorization) or cf-aig-authorization header
+  // If the user wants to use AI Gateway (authenticated)
+  // 1. If Anthropic/OpenAI key is not passed directly (stored with BYOK or if Unified Billing is used), pass AI_GATEWAY_API_KEY in vendor specific header
+  // 2. If key is passed directly pass AI_GATEWAY_API_KEY in cf-aig-authorization header
   if (env.AI_GATEWAY_API_KEY) {
-    if (isOpenAIGateway) {
+    if (isOpenAIGateway && !envVars.OPENAI_API_KEY) {
       envVars.OPENAI_API_KEY = env.AI_GATEWAY_API_KEY;
-    } else {
+    } else if (!envVars.ANTHROPIC_API_KEY && !envVars.ANTHROPIC_OAUTH_TOKEN) {
       envVars.ANTHROPIC_API_KEY = env.AI_GATEWAY_API_KEY;
+    } else {
+      envVars.AI_GATEWAY_API_KEY = env.AI_GATEWAY_API_KEY;
     }
   }
 
-  // Fall back to direct provider keys
-  if (!envVars.ANTHROPIC_API_KEY && env.ANTHROPIC_API_KEY) {
-    envVars.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
-  }
-  if (!envVars.OPENAI_API_KEY && env.OPENAI_API_KEY) {
-    envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
-  }
 
   // Pass base URL (used by start-moltbot.sh to determine provider)
   if (normalizedBaseUrl) {
@@ -58,3 +66,4 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
 
   return envVars;
 }
+

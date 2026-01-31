@@ -45,30 +45,6 @@ describe('buildEnvVars', () => {
     expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/anthropic');
   });
 
-  it('AI_GATEWAY_* takes precedence over direct provider keys for Anthropic', () => {
-    const env = createMockEnv({
-      AI_GATEWAY_API_KEY: 'gateway-key',
-      AI_GATEWAY_BASE_URL: 'https://gateway.example.com/anthropic',
-      ANTHROPIC_API_KEY: 'direct-key',
-      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
-    });
-    const result = buildEnvVars(env);
-    expect(result.ANTHROPIC_API_KEY).toBe('gateway-key');
-    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.example.com/anthropic');
-  });
-
-  it('AI_GATEWAY_* takes precedence over direct provider keys for OpenAI', () => {
-    const env = createMockEnv({
-      AI_GATEWAY_API_KEY: 'gateway-key',
-      AI_GATEWAY_BASE_URL: 'https://gateway.example.com/openai',
-      OPENAI_API_KEY: 'direct-key',
-    });
-    const result = buildEnvVars(env);
-    expect(result.OPENAI_API_KEY).toBe('gateway-key');
-    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.example.com/openai');
-    expect(result.OPENAI_BASE_URL).toBe('https://gateway.example.com/openai');
-  });
-
   it('falls back to ANTHROPIC_* when AI_GATEWAY_* not set', () => {
     const env = createMockEnv({
       ANTHROPIC_API_KEY: 'direct-key',
