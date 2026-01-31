@@ -22,6 +22,7 @@ RUN npm install -g clawdbot@2026.1.24-3 \
 # Create moltbot directories (paths still use clawdbot until upstream renames)
 # Templates are stored in /root/.clawdbot-templates for initialization
 RUN mkdir -p /root/.clawdbot \
+    && mkdir -p /root/.clawdbot/extensions \
     && mkdir -p /root/.clawdbot-templates \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
