@@ -32,10 +32,14 @@ COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
 # Install ax-platform plugin for aX Platform integration
-# This enables cloud collaboration via aX webhooks
-COPY extensions/ax-platform/ /root/.clawdbot/extensions/ax-platform/
-RUN cd /root/.clawdbot/extensions/ax-platform && npm install --omit=dev \
-    && echo "ax-platform plugin installed"
+# Fetched from source repo to avoid code duplication
+# Build cache bust: 2026-01-30-v2
+RUN apt-get install -y git \
+    && git clone --depth 1 https://github.com/ax-platform/ax-clawdbot-plugin.git /tmp/ax-plugin \
+    && cp -r /tmp/ax-plugin/extension /root/.clawdbot/extensions/ax-platform \
+    && cd /root/.clawdbot/extensions/ax-platform && npm install --omit=dev \
+    && rm -rf /tmp/ax-plugin \
+    && echo "ax-platform plugin installed from ax-clawdbot-plugin repo"
 
 # Copy default configuration template
 COPY moltbot.json.template /root/.clawdbot-templates/moltbot.json.template
