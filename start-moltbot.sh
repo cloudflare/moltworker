@@ -197,6 +197,10 @@ if (process.env.BRAVE_API_KEY) {
     config.tools.web = config.tools.web || {};
     config.tools.web.search = config.tools.web.search || {};
     config.tools.web.search.enabled = true;
+    config.tools.web.search.provider = 'brave';
+    config.tools.web.search.maxResults = 5;
+    config.tools.web.search.timeoutSeconds: 20;
+    config.tools.web.search.cacheTtlMinutes: 15;
     config.tools.web.search.apiKey = process.env.BRAVE_API_KEY;
 }
 
