@@ -70,6 +70,11 @@
   "browser": {
     "binding": "BROWSER",
   },
+  // Cloudflare Access configuration
+  "vars": {
+    "CF_ACCESS_TEAM_DOMAIN": "darthlogos",
+    "CF_ACCESS_AUD": "dfa9972648a36c738f05d08dee188ea809306afe181d68c0a729da10e7bccb1b"
+  },
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
   // - ANTHROPIC_API_KEY: Your Anthropic API key
