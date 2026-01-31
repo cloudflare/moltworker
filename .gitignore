@@ -34,5 +34,8 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 
+# Claude Code local overrides
+.claude.local.md
+
 # Docker build artifacts
 *.tar
