@@ -14,14 +14,13 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
   try {
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
-      // Only match the gateway process, not CLI commands like "clawdbot devices list"
-      // Note: CLI is still named "clawdbot" until upstream renames it
-      const isGatewayProcess = 
+      // Only match the gateway process, not CLI commands like "openclaw devices list"
+      const isGatewayProcess =
         proc.command.includes('start-moltbot.sh') ||
-        proc.command.includes('clawdbot gateway');
-      const isCliCommand = 
-        proc.command.includes('clawdbot devices') ||
-        proc.command.includes('clawdbot --version');
+        proc.command.includes('openclaw gateway');
+      const isCliCommand =
+        proc.command.includes('openclaw devices') ||
+        proc.command.includes('openclaw --version');
       
       if (isGatewayProcess && !isCliCommand) {
         if (proc.status === 'starting' || proc.status === 'running') {

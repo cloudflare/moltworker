@@ -7,7 +7,7 @@ import { createMockSandbox } from '../test-utils';
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {
     id: 'test-id',
-    command: 'clawdbot gateway',
+    command: 'openclaw gateway',
     status: 'running',
     startTime: new Date(),
     endTime: undefined,
@@ -28,8 +28,8 @@ describe('findExistingMoltbotProcess', () => {
 
   it('returns null when only CLI commands are running', async () => {
     const processes = [
-      createFullMockProcess({ command: 'clawdbot devices list --json', status: 'running' }),
-      createFullMockProcess({ command: 'clawdbot --version', status: 'completed' }),
+      createFullMockProcess({ command: 'openclaw devices list --json', status: 'running' }),
+      createFullMockProcess({ command: 'openclaw --version', status: 'completed' }),
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue(processes);
@@ -41,11 +41,11 @@ describe('findExistingMoltbotProcess', () => {
   it('returns gateway process when running', async () => {
     const gatewayProcess = createFullMockProcess({ 
       id: 'gateway-1',
-      command: 'clawdbot gateway --port 18789', 
+      command: 'openclaw gateway --port 18789', 
       status: 'running' 
     });
     const processes = [
-      createFullMockProcess({ command: 'clawdbot devices list', status: 'completed' }),
+      createFullMockProcess({ command: 'openclaw devices list', status: 'completed' }),
       gatewayProcess,
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
@@ -105,7 +105,7 @@ describe('findExistingMoltbotProcess', () => {
   it('returns first matching gateway process', async () => {
     const firstGateway = createFullMockProcess({ 
       id: 'gateway-1',
-      command: 'clawdbot gateway', 
+      command: 'openclaw gateway', 
       status: 'running' 
     });
     const secondGateway = createFullMockProcess({ 

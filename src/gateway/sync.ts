@@ -39,13 +39,13 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   // Sanity check: verify source has critical files before syncing
   // This prevents accidentally overwriting a good backup with empty/corrupted data
   try {
-    const checkProc = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json && echo "ok"');
+    const checkProc = await sandbox.startProcess('test -f /root/.openclaw/openclaw.json && echo "ok"');
     await waitForProcess(checkProc, 5000);
     const checkLogs = await checkProc.getLogs();
     if (!checkLogs.stdout?.includes('ok')) {
-      return { 
-        success: false, 
-        error: 'Sync aborted: source missing clawdbot.json',
+      return {
+        success: false,
+        error: 'Sync aborted: source missing openclaw.json',
         details: 'The local config directory is missing critical files. This could indicate corruption or an incomplete setup.',
       };
     }
@@ -59,7 +59,7 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Run rsync to backup config to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.openclaw/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
   
   try {
     const proc = await sandbox.startProcess(syncCmd);
