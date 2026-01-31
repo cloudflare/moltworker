@@ -85,10 +85,10 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_API_KEY).toBe('sk-openai-key');
   });
 
-  it('maps MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN for container', () => {
+  it('maps MOLTBOT_GATEWAY_TOKEN to OPENCLAW_GATEWAY_TOKEN for container', () => {
     const env = createMockEnv({ MOLTBOT_GATEWAY_TOKEN: 'my-token' });
     const result = buildEnvVars(env);
-    expect(result.CLAWDBOT_GATEWAY_TOKEN).toBe('my-token');
+    expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('my-token');
   });
 
   it('includes all channel tokens when set', () => {
@@ -110,15 +110,15 @@ describe('buildEnvVars', () => {
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
   });
 
-  it('maps DEV_MODE to CLAWDBOT_DEV_MODE for container', () => {
+  it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
     const env = createMockEnv({
       DEV_MODE: 'true',
-      CLAWDBOT_BIND_MODE: 'lan',
+      OPENCLAW_BIND_MODE: 'lan',
     });
     const result = buildEnvVars(env);
-    
-    expect(result.CLAWDBOT_DEV_MODE).toBe('true');
-    expect(result.CLAWDBOT_BIND_MODE).toBe('lan');
+
+    expect(result.OPENCLAW_DEV_MODE).toBe('true');
+    expect(result.OPENCLAW_BIND_MODE).toBe('lan');
   });
 
   it('combines all env vars correctly', () => {
@@ -131,7 +131,7 @@ describe('buildEnvVars', () => {
     
     expect(result).toEqual({
       ANTHROPIC_API_KEY: 'sk-key',
-      CLAWDBOT_GATEWAY_TOKEN: 'token',
+      OPENCLAW_GATEWAY_TOKEN: 'token',
       TELEGRAM_BOT_TOKEN: 'tg',
     });
   });
