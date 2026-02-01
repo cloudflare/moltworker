@@ -114,7 +114,9 @@ const app = new Hono<AppEnv>();
 // Middleware: Log every request
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
-  console.log(`[REQ] ${c.req.method} ${url.pathname}${url.search}`);
+  // Redact sensitive query params (CDP_SECRET, tokens, etc.) from logs
+  const redactedSearch = url.search.replace(/([?&])(secret|token|key|password|auth)=[^&]*/gi, '$1$2=[REDACTED]');
+  console.log(`[REQ] ${c.req.method} ${url.pathname}${redactedSearch}`);
   console.log(`[REQ] Has ANTHROPIC_API_KEY: ${!!c.env.ANTHROPIC_API_KEY}`);
   console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
   console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);

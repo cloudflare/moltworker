@@ -201,8 +201,9 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     config.channels.telegram = config.channels.telegram || {};
     config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
     config.channels.telegram.enabled = true;
-    config.channels.telegram.dm = config.channels.telegram.dm || {};
-    config.channels.telegram.dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    // Remove invalid 'dm' key if it exists from previous runs (fixes #82)
+    delete config.channels.telegram.dm;
+    delete config.channels.telegram.dmPolicy;
 }
 
 // Discord configuration
@@ -210,8 +211,8 @@ if (process.env.DISCORD_BOT_TOKEN) {
     config.channels.discord = config.channels.discord || {};
     config.channels.discord.token = process.env.DISCORD_BOT_TOKEN;
     config.channels.discord.enabled = true;
-    config.channels.discord.dm = config.channels.discord.dm || {};
-    config.channels.discord.dm.policy = process.env.DISCORD_DM_POLICY || 'pairing';
+    // Remove invalid 'dm' key if it exists from previous runs (fixes #82)
+    delete config.channels.discord.dm;
 }
 
 // Slack configuration
