@@ -244,3 +244,68 @@ R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
 - **Never delete R2 data**: The mount directory `/data/moltbot` IS the R2 bucket. Running `rm -rf /data/moltbot/*` will DELETE your backup data. Always check mount status before any destructive operations.
 
 - **Process status**: The sandbox API's `proc.status` may not update immediately after a process completes. Instead of checking `proc.status === 'completed'`, verify success by checking for expected output (e.g., timestamp file exists after sync).
+
+## Persistence & Backup
+
+The following data is persisted to R2 and restored on container startup:
+
+| Local Path | R2 Backup Path | Contents |
+|------------|----------------|----------|
+| `~/.clawdbot/` | `/data/moltbot/clawdbot/` | Config, sessions, paired devices |
+| `/root/clawd/skills/` | `/data/moltbot/skills/` | Agent skills |
+| `/root/clawd/` | `/data/moltbot/workspace/` | Memory, USER.md, SOUL.md, canvas |
+
+### R2 Backup Structure
+
+```
+/data/moltbot/
+├── .last-sync           # Timestamp for restore decisions
+├── clawdbot/            # ~/.clawdbot/ backup
+│   ├── clawdbot.json    # Main config file
+│   ├── sessions/        # Session data
+│   └── devices/         # Paired devices
+├── skills/              # /root/clawd/skills/ backup
+└── workspace/           # /root/clawd/ backup
+    ├── memory/          # Persistent memory files
+    ├── canvas/          # Working documents
+    ├── USER.md          # User profile
+    ├── SOUL.md          # Agent personality
+    └── AGENTS.md        # Agent instructions
+```
+
+### Restore Order (startup)
+
+1. Config (`~/.clawdbot/`) - restored first for gateway configuration
+2. Skills (`/root/clawd/skills/`) - agent capabilities
+3. Workspace (`/root/clawd/`) - memory, templates, and working files
+4. Gateway starts
+
+### Backup Trigger
+
+Backup is triggered via the Worker's cron schedule (configured in `wrangler.jsonc`). The sync:
+- Uses rsync with `--no-times` flag (s3fs limitation)
+- Excludes `node_modules`, `.cache`, `*.tmp`, `*.lock`, `*.log`
+- Writes `.last-sync` timestamp after successful sync
+
+### Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| R2 not mounted | Skip restore, log warning, start fresh |
+| Partial backup | Restore what exists, skip missing with log |
+| Local newer than R2 | Skip restore, keep local data |
+| Container dies before backup | Data lost until next cron-triggered sync |
+| Large workspace (>100MB) | May slow startup due to rsync overhead |
+
+### Testing Persistence
+
+```bash
+# Before restart - create test file
+echo "test memory" > /root/clawd/memory/test.md
+
+# Trigger manual sync via admin UI or wait for cron
+# (check /data/moltbot/.last-sync for sync timestamp)
+
+# After restart - verify file exists
+cat /root/clawd/memory/test.md
+```

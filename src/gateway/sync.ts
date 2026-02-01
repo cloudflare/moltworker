@@ -12,14 +12,19 @@ export interface SyncResult {
 }
 
 /**
- * Sync moltbot config from container to R2 for persistence.
- * 
+ * Sync moltbot config, skills, and workspace from container to R2 for persistence.
+ *
  * This function:
  * 1. Mounts R2 if not already mounted
  * 2. Verifies source has critical files (prevents overwriting good backup with empty data)
- * 3. Runs rsync to copy config to R2
+ * 3. Runs rsync to copy config, skills, and workspace to R2
  * 4. Writes a timestamp file for tracking
- * 
+ *
+ * Backup structure:
+ *   /data/moltbot/clawdbot/  - ~/.clawdbot/ (config, sessions, devices)
+ *   /data/moltbot/skills/    - /root/clawd/skills/ (agent skills)
+ *   /data/moltbot/workspace/ - /root/clawd/ (memory, USER.md, canvas, etc.)
+ *
  * @param sandbox - The sandbox instance
  * @param env - Worker environment bindings
  * @returns SyncResult with success status and optional error details
@@ -57,9 +62,22 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
-  // Run rsync to backup config to R2
+  // Run rsync to backup config, skills, and workspace to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Backup structure:
+  //   /data/moltbot/clawdbot/  - ~/.clawdbot/ (config, sessions, devices)
+  //   /data/moltbot/skills/    - /root/clawd/skills/ (agent skills)
+  //   /data/moltbot/workspace/ - /root/clawd/ (memory, USER.md, canvas, etc.)
+  const syncCmd = [
+    // Sync config directory
+    `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/`,
+    // Sync skills directory
+    `rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/`,
+    // Sync workspace (memory, canvas, USER.md, etc.) - exclude node_modules and cache
+    `rsync -r --no-times --delete --exclude='node_modules' --exclude='.cache' --exclude='*.tmp' --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/`,
+    // Write sync timestamp
+    `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`,
+  ].join(' && ');
   
   try {
     const proc = await sandbox.startProcess(syncCmd);
@@ -67,7 +85,6 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
     // Check for success by reading the timestamp file
     // (process status may not update reliably in sandbox API)
-    // Note: backup structure is ${R2_MOUNT_PATH}/clawdbot/ and ${R2_MOUNT_PATH}/skills/
     const timestampProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync`);
     await waitForProcess(timestampProc, 5000);
     const timestampLogs = await timestampProc.getLogs();

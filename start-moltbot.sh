@@ -105,6 +105,25 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     fi
 fi
 
+# Restore workspace from R2 backup if available (only if R2 is newer)
+# This includes memory/, canvas/, USER.md, SOUL.md, and other workspace files
+WORKSPACE_DIR="/root/clawd"
+WORKSPACE_BACKUP="$BACKUP_DIR/workspace"
+if [ -d "$WORKSPACE_BACKUP" ] && [ "$(ls -A $WORKSPACE_BACKUP 2>/dev/null)" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring workspace from $WORKSPACE_BACKUP..."
+        mkdir -p "$WORKSPACE_DIR"
+        # Exclude node_modules, .cache, and temp files to speed up restore
+        rsync -r --no-times --exclude='node_modules' --exclude='.cache' --exclude='*.tmp' \
+            "$WORKSPACE_BACKUP/" "$WORKSPACE_DIR/"
+        echo "Restored workspace (memory, USER.md, canvas) from R2 backup"
+    else
+        echo "Local workspace newer than R2, skipping restore"
+    fi
+else
+    echo "No workspace backup found in R2"
+fi
+
 # If config file still doesn't exist, create from template
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, initializing from template..."
