@@ -46,6 +46,21 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
   }
 
   try {
+    // Check if mount point has existing files - warn if so since they'll be hidden
+    const checkProc = await sandbox.startProcess(`ls -A ${R2_MOUNT_PATH} 2>/dev/null | head -5`);
+    let checkAttempts = 0;
+    while (checkProc.status === 'running' && checkAttempts < 5) {
+      await new Promise(r => setTimeout(r, 100));
+      checkAttempts++;
+    }
+    const checkLogs = await checkProc.getLogs();
+    if (checkLogs.stdout?.trim()) {
+      console.warn(
+        `Warning: Mount point ${R2_MOUNT_PATH} contains local files that will be hidden after mounting:`,
+        checkLogs.stdout.trim().split('\n').slice(0, 3).join(', ')
+      );
+    }
+
     console.log('Mounting R2 bucket at', R2_MOUNT_PATH);
     await sandbox.mountBucket(R2_BUCKET_NAME, R2_MOUNT_PATH, {
       endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
