@@ -356,6 +356,47 @@ npm run deploy
 
 The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
 
+## Optional: Amazon Bedrock
+
+You can use Claude models via Amazon Bedrock through an OpenAI-compatible proxy like the [AWS Bedrock Access Gateway](https://github.com/aws-samples/bedrock-access-gateway).
+
+### Setup
+
+1. Deploy the [Bedrock Access Gateway](https://github.com/aws-samples/bedrock-access-gateway) in your AWS account
+2. Note your gateway URL and API key
+3. Set the secrets:
+
+```bash
+# Your Bedrock Access Gateway URL
+npx wrangler secret put AI_GATEWAY_BASE_URL
+# Enter: https://your-bedrock-gateway-url.amazonaws.com
+
+# Your gateway API key
+npx wrangler secret put AI_GATEWAY_API_KEY
+
+# Force OpenAI-compatible mode
+npx wrangler secret put OPENAI_COMPATIBLE
+# Enter: true
+
+# Specify the Claude model ID on Bedrock
+npx wrangler secret put OPENAI_MODEL_ID
+# Enter: anthropic.claude-sonnet-4-5-20250929-v1:0
+```
+
+4. Redeploy:
+
+```bash
+npm run deploy
+```
+
+### Available Bedrock Claude Models
+
+| Model | Bedrock Model ID |
+|-------|------------------|
+| Claude Opus 4.5 | `anthropic.claude-opus-4-5-20251101-v1:0` |
+| Claude Sonnet 4.5 | `anthropic.claude-sonnet-4-5-20250929-v1:0` |
+| Claude Haiku 4.5 | `anthropic.claude-haiku-4-5-20251001-v1:0` |
+
 ## All Secrets Reference
 
 | Secret | Required | Description |
@@ -366,6 +407,7 @@ The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL (fallback) |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
 | `OPENAI_COMPATIBLE` | No | Set to `true` to force OpenAI mode for custom gateways (e.g., z.ai) |
+| `OPENAI_MODEL_ID` | No | Custom model ID for OpenAI-compatible gateways (e.g., Bedrock Claude) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
 | `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |

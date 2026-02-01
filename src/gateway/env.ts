@@ -61,6 +61,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
+  // OpenAI-compatible gateway settings (for Bedrock Access Gateway, LiteLLM, etc.)
+  if (env.OPENAI_COMPATIBLE) envVars.OPENAI_COMPATIBLE = env.OPENAI_COMPATIBLE;
+  if (env.OPENAI_MODEL_ID) envVars.OPENAI_MODEL_ID = env.OPENAI_MODEL_ID;
 
   return envVars;
 }

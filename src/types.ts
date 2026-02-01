@@ -11,6 +11,7 @@ export interface MoltbotEnv {
   AI_GATEWAY_API_KEY?: string; // API key for the provider configured in AI Gateway
   AI_GATEWAY_BASE_URL?: string; // AI Gateway URL (e.g., https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic)
   OPENAI_COMPATIBLE?: string; // Set to 'true' to force OpenAI-compatible mode for custom gateways (fixes #97)
+  OPENAI_MODEL_ID?: string; // Custom model ID for OpenAI-compatible gateways (e.g., Bedrock: 'anthropic.claude-sonnet-4-5-20250929-v1:0')
   // Legacy direct provider configuration (fallback)
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;

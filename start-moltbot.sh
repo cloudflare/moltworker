@@ -243,21 +243,40 @@ if (isOpenAI) {
     console.log('Configuring OpenAI provider with base URL:', baseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
-    config.models.providers.openai = {
-        baseUrl: baseUrl,
-        api: 'openai-responses',
-        models: [
-            { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
-            { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
-            { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
-        ]
-    };
-    // Add models to the allowlist so they appear in /models
-    config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
-    config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
-    config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    config.agents.defaults.model.primary = 'openai/gpt-5.2';
+
+    // Check for custom model ID (e.g., for Bedrock: 'anthropic.claude-sonnet-4-5-20250929-v1:0')
+    const customModelId = process.env.OPENAI_MODEL_ID;
+    if (customModelId) {
+        // Use custom model ID (for Bedrock Access Gateway, LiteLLM, etc.)
+        console.log('Using custom model ID:', customModelId);
+        const modelName = customModelId.includes('claude') ? 'Claude (Bedrock)' : customModelId;
+        config.models.providers.openai = {
+            baseUrl: baseUrl,
+            api: 'openai-responses',
+            models: [
+                { id: customModelId, name: modelName, contextWindow: 200000 },
+            ]
+        };
+        config.agents.defaults.models = config.agents.defaults.models || {};
+        config.agents.defaults.models['openai/' + customModelId] = { alias: modelName };
+        config.agents.defaults.model.primary = 'openai/' + customModelId;
+    } else {
+        // Default to GPT models
+        config.models.providers.openai = {
+            baseUrl: baseUrl,
+            api: 'openai-responses',
+            models: [
+                { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
+                { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
+                { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
+            ]
+        };
+        config.agents.defaults.models = config.agents.defaults.models || {};
+        config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
+        config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
+        config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
+        config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    }
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
     config.models = config.models || {};
