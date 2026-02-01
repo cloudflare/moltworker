@@ -238,15 +238,18 @@ if (isOpenAI) {
     config.agents.defaults.model.primary = 'openai/gpt-5.2';
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
+    const opusModel = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || 'claude-opus-4-5-20251101';
+    const sonnetModel = process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || 'claude-sonnet-4-5-20250929';
+    const haikuModel = process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || 'claude-haiku-4-5-20251001';
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
     const providerConfig = {
         baseUrl: baseUrl,
         api: 'anthropic-messages',
         models: [
-            { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
-            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+            { id: opusModel, name: opusModel, contextWindow: 200000 },
+            { id: sonnetModel, name: sonnetModel, contextWindow: 200000 },
+            { id: haikuModel, name: haikuModel, contextWindow: 200000 },
         ]
     };
     // Include API key in provider config if set (required when using custom baseUrl)
@@ -255,11 +258,10 @@ if (isOpenAI) {
     }
     config.models.providers.anthropic = providerConfig;
     // Add models to the allowlist so they appear in /models
-    config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
-    config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
-    config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    config.agents.defaults.models['anthropic/' + opusModel] = { alias: 'Opus' };
+    config.agents.defaults.models['anthropic/' + sonnetModel] = { alias: 'Sonnet' };
+    config.agents.defaults.models['anthropic/' + haikuModel] = { alias: 'Haiku' };
+    config.agents.defaults.model.primary = 'anthropic/' + opusModel;
 } else {
     // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
