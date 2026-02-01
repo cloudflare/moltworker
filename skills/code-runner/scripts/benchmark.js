@@ -12,6 +12,23 @@ const os = require('os');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into benchmark options.
+ *
+ * Supports flags:
+ * - `--lang <value>`: language identifier (e.g., "js", "python")
+ * - `--iterations <n>`: number of measured iterations
+ * - `--warmup <n>`: number of warmup iterations
+ * - `--file <path>`: path to a file containing code
+ * A standalone non-flag token is treated as inline code.
+ *
+ * @returns {{code: string, lang: string, iterations: number, warmup: number, file: string|null}} An options object:
+ * - `code`: inline code string (empty if not provided)
+ * - `lang`: language identifier (default: "js")
+ * - `iterations`: measured iterations count (default: 100)
+ * - `warmup`: warmup iterations count (default: 10)
+ * - `file`: file path when `--file` is used, or `null`
+ */
 function parseArgs() {
   const result = {
     code: '',
@@ -42,6 +59,11 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Resolve a language identifier to its execution configuration.
+ * @param {string} lang - Language identifier (e.g., "js", "javascript", "py", "python").
+ * @returns {{cmd: string, ext: string, name: string}} Configuration containing the command to run the interpreter (`cmd`), file extension to use (`ext`), and normalized language name (`name`). Defaults to the JavaScript configuration when the identifier is unrecognized.
+ */
 function getLanguageConfig(lang) {
   const configs = {
     js: { cmd: 'node', ext: '.js', name: 'javascript' },
@@ -52,6 +74,15 @@ function getLanguageConfig(lang) {
   return configs[lang] || configs.js;
 }
 
+/**
+ * Generate language-specific wrapper code that runs the provided snippet multiple times and prints per-iteration timings as a JSON array.
+ *
+ * @param {string} code - The source snippet to benchmark (inline code). For Python, newlines will be indented to fit the wrapper.
+ * @param {string} lang - Target language identifier (e.g., 'js', 'javascript', 'python', 'py').
+ * @param {number} iterations - Number of benchmark iterations to run.
+ * @returns {string} A source code string for the specified language which, when executed, runs the snippet `iterations` times and prints a JSON array of per-iteration durations in milliseconds.
+ * @throws {Error} If benchmarking is not supported for the given language.
+ */
 function wrapCodeForBenchmark(code, lang, iterations) {
   if (lang === 'js' || lang === 'javascript') {
     return `
@@ -90,6 +121,20 @@ print(json.dumps(times))
   throw new Error(`Benchmarking not supported for language: ${lang}`);
 }
 
+/**
+ * Compute descriptive statistics from an array of timing values.
+ *
+ * @param {number[]} times - Array of timing values in milliseconds.
+ * @returns {{min: number, max: number, mean: number, median: number, stdDev: number, p95: number, p99: number}}
+ * An object containing:
+ *  - min: smallest observed time (rounded to two decimals),
+ *  - max: largest observed time (rounded to two decimals),
+ *  - mean: arithmetic mean (rounded to two decimals),
+ *  - median: median value (rounded to two decimals),
+ *  - stdDev: population standard deviation (rounded to two decimals),
+ *  - p95: 95th percentile value (rounded to two decimals),
+ *  - p99: 99th percentile value (rounded to two decimals).
+ */
 function calculateStats(times) {
   const sorted = [...times].sort((a, b) => a - b);
   const n = times.length;
@@ -119,6 +164,15 @@ function calculateStats(times) {
   };
 }
 
+/**
+ * Execute the provided benchmark code in a temporary file using the given execution configuration and return the per-iteration timings.
+ *
+ * @param {string} code - The source code to execute (already wrapped to emit JSON timings).
+ * @param {{cmd: string, ext: string}} config - Execution configuration: `cmd` is the command to run (e.g., "node", "python3"), `ext` is the file extension for the temporary file (e.g., ".js", ".py").
+ * @param {number} iterations - Number of iterations requested for the benchmark (used when wrapping the code prior to calling this function).
+ * @returns {number[]} An array of per-iteration durations (milliseconds).
+ * @throws {Error} The returned Promise rejects if the process exits with a non-zero code, if the benchmark output cannot be parsed as JSON, or if the spawned process encounters an error.
+ */
 async function runBenchmark(code, config, iterations) {
   return new Promise((resolve, reject) => {
     const tempFile = path.join(os.tmpdir(), `bench_${Date.now()}${config.ext}`);
@@ -166,6 +220,16 @@ async function runBenchmark(code, config, iterations) {
   });
 }
 
+/**
+ * Parse CLI arguments, run warmup and benchmark of the provided code, and print a JSON summary.
+ *
+ * Reads code from an inline argument or a file, performs optional warmup runs, executes the benchmark
+ * for the requested number of iterations, computes statistics, and writes a JSON object to stdout
+ * containing language, iterations, warmupRuns, results, unit (`ms`), and totalTime.
+ *
+ * On missing required arguments the function prints usage text and exits with code 1. On error it
+ * prints a JSON error object to stderr (including the language) and exits with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

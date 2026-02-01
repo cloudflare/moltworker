@@ -7,6 +7,16 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an options object for fetching and processing a URL.
+ * @returns {{url: string, output: string, timeout: number, userAgent: string, headers: Object<string,string>, follow: boolean}} An options object with:
+ * - `url`: the target URL (from the first non-flag argument).
+ * - `output`: one of 'text', 'markdown', or 'html' indicating desired output format.
+ * - `timeout`: request timeout in milliseconds.
+ * - `userAgent`: the User-Agent header value to send.
+ * - `headers`: additional headers parsed from a JSON string passed via `--headers`.
+ * - `follow`: `true` to follow redirects (default), `false` when `--no-follow` is supplied.
+ */
 function parseArgs() {
   const result = {
     url: '',
@@ -40,6 +50,11 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Produce a plain-text representation of an HTML document.
+ * @param {string} html - The HTML source to convert.
+ * @returns {string} The extracted plain-text content with common HTML entities decoded and whitespace normalized.
+ */
 function htmlToText(html) {
   // Remove scripts and styles
   let text = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
@@ -69,6 +84,15 @@ function htmlToText(html) {
   return text;
 }
 
+/**
+ * Convert an HTML string into Markdown-formatted text.
+ *
+ * Strips scripts and styles, converts headers, links, images, emphasis, code blocks,
+ * lists, paragraphs, blockquotes, line breaks, and horizontal rules, decodes common HTML
+ * entities, and normalizes whitespace.
+ * @param {string} html - The HTML content to convert.
+ * @returns {string} The resulting Markdown string.
+ */
 function htmlToMarkdown(html) {
   let md = html;
 
@@ -130,11 +154,28 @@ function htmlToMarkdown(html) {
   return md;
 }
 
+/**
+ * Extracts the text content of the first <title> element from an HTML string.
+ * @param {string} html - The HTML source to search.
+ * @returns {string|null} The trimmed title text if a <title> element is present, or `null` otherwise.
+ */
 function extractTitle(html) {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match ? match[1].trim() : null;
 }
 
+/**
+ * Fetches a URL (from CLI options), converts or returns the page content per the selected output format, and writes the result to stdout.
+ *
+ * The command-line options determine output format (`text`, `html`, `markdown`), timeout, User-Agent, custom headers, and redirect-following behavior.
+ *
+ * Behavior:
+ * - If no URL is provided, prints usage text to stderr and exits with code 1.
+ * - On success:
+ *   - If output is `html`, writes the raw HTML to stdout.
+ *   - Otherwise, writes a JSON object to stdout with the keys: `url`, `finalUrl`, `title`, `status`, `contentType`, `content`, and `length`.
+ * - On error (including timeout), writes a JSON error object to stderr with `error` and `url`, and exits with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

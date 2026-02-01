@@ -13,6 +13,18 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse CLI arguments into an HTTP request configuration.
+ *
+ * @param {string[]} args - Command-line arguments (excluding `node` and script name). Positional arguments are interpreted as: method, URL, and optional body; options supported are `--header "Key: Value"`, `--output <file>`, and `--timeout <ms>`.
+ * @returns {{method: string, url: string, body: string|null, headers: Object.<string,string>, output: string|null, timeout: number}} Configuration object containing:
+ * - `method`: HTTP method (uppercased, default `"GET"`).
+ * - `url`: Request URL (empty string if not provided).
+ * - `body`: Request body string or `null`.
+ * - `headers`: Plain object of header key/value pairs.
+ * - `output`: File path to write response to, or `null`.
+ * - `timeout`: Timeout in milliseconds (default `30000`).
+ */
 function parseArgs(args) {
   const result = {
     method: 'GET',
@@ -63,6 +75,11 @@ function parseArgs(args) {
   return result;
 }
 
+/**
+ * Run the CLI: parse command-line arguments, perform the HTTP request, and emit a structured result or save the response to a file.
+ *
+ * Validates that a URL was provided (exits with code 1 if missing). If a request body is present and no Content-Type header is set, attempts to detect JSON and set Content-Type to application/json. Uses a timeout (config.timeout) to abort the request. On success prints a JSON object to stdout containing status, statusText, headers, and body; if --output is used the response is written to the specified file and the body contains a brief saved-file summary. On timeout prints a JSON error { error: "Request timeout", timeout } to stderr and exits with code 1; on other errors prints { error: "<message>" } to stderr and exits with code 1.
+ */
 async function main() {
   const config = parseArgs(args);
 

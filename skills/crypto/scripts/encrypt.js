@@ -18,6 +18,18 @@ const SALT_LENGTH = 16;
 const TAG_LENGTH = 16;
 const PBKDF2_ITERATIONS = 600000;
 
+/**
+ * Parse command-line arguments into an options object.
+ *
+ * Recognizes the flags `--password <value>`, `--key <value>`, and `--output <file>`.
+ * Any first positional argument that does not start with `--` is treated as the data to encrypt.
+ *
+ * @returns {{data: string, password: string|null, key: string|null, output: string|null}} An object containing:
+ *  - `data`: the positional data string (empty string if not provided),
+ *  - `password`: the password value or `null`,
+ *  - `key`: the raw hex key string or `null`,
+ *  - `output`: the output file path or `null`.
+ */
 function parseArgs() {
   const result = {
     data: '',
@@ -44,10 +56,22 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Derives a 256-bit encryption key from a password and salt using PBKDF2 with SHA-256.
+ * @param {string|Buffer} password - The password to derive the key from.
+ * @param {string|Buffer} salt - The salt to use for key derivation.
+ * @returns {Buffer} The derived 32-byte (256-bit) key.
+ */
 function deriveKey(password, salt) {
   return crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256');
 }
 
+/**
+ * Encrypts UTF-8 plaintext with AES-256-GCM using the provided 32-byte key.
+ * @param {string} data - Plaintext to encrypt (UTF-8).
+ * @param {Buffer} key - 32-byte encryption key.
+ * @returns {{iv: Buffer, encrypted: Buffer, tag: Buffer}} Object containing the initialization vector (`iv`), ciphertext (`encrypted`), and authentication tag (`tag`), all as Buffers.
+ */
 function encrypt(data, key) {
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv, { authTagLength: TAG_LENGTH });
@@ -62,6 +86,11 @@ function encrypt(data, key) {
   return { iv, encrypted, tag };
 }
 
+/**
+ * Run the CLI: validate arguments, derive or parse the encryption key, perform AES-256-GCM encryption, and emit the resulting JSON.
+ *
+ * If a password is provided, a random salt is generated and PBKDF2 (SHA-256) is used to derive a 256-bit key; if a raw key is provided it must be a 64-character hex string and is used directly. The command outputs a JSON object containing algorithm, base64-encoded iv, tag, and ciphertext, and—when password-based derivation was used—salt (base64), kdf, and iterations. When `--output` is given the JSON is written to the specified file and a short success JSON is printed; on invalid usage or runtime errors the function prints an error JSON and exits the process with code 1.
+ */
 function main() {
   const options = parseArgs();
 

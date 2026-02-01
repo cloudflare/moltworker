@@ -7,6 +7,19 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an options object containing text, schema, and model.
+ *
+ * Recognizes:
+ * - `--schema <value>`: parses the following value as JSON; if parsing fails, returns the raw string.
+ * - `--model <value>`: sets the model name.
+ * - the first non-flag argument: treated as the text input.
+ *
+ * @returns {{ text: string, schema: Object|string|null, model: string }} An object with:
+ *  - `text`: the input text (empty string if not provided),
+ *  - `schema`: a parsed object, raw schema string, or `null` if not provided,
+ *  - `model`: the model name (defaults to `'claude-3-5-sonnet-20241022'`).
+ */
 function parseArgs() {
   const result = {
     text: '',
@@ -33,6 +46,17 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Extract structured data from unstructured text according to a JSON schema.
+ *
+ * Sends the text and schema to the configured Anthropic-compatible API and returns the parsed JSON result (or a parse error payload) along with model and token usage.
+ *
+ * @param {string} text - The input text to extract data from.
+ * @param {Object|string} schema - The expected JSON schema (object or preformatted JSON string) describing the output structure.
+ * @param {string} model - The model identifier to use for the API request.
+ * @returns {{extracted: Object, model: string, usage: {input_tokens: number, output_tokens: number}}} The extraction result: `extracted` is the parsed JSON (or `{ raw, parseError: true }` on parse failure), `model` is the model used, and `usage` contains token counts.
+ * @throws {Error} If no API key is configured or the API responds with a non-OK status.
+ */
 async function extractStructured(text, schema, model) {
   const apiKey = process.env.ANTHROPIC_API_KEY || process.env.AI_GATEWAY_API_KEY;
   const baseUrl = process.env.AI_GATEWAY_BASE_URL || 'https://api.anthropic.com';
@@ -99,6 +123,11 @@ Return only the JSON object with extracted values. Use null for fields that cann
   };
 }
 
+/**
+ * Parse command-line arguments, validate required inputs, run structured extraction, and print the result or an error.
+ *
+ * If required arguments are missing or extraction fails, prints usage or an error object and exits the process with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

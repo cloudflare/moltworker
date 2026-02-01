@@ -8,6 +8,12 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into start/end date strings and a unit option.
+ *
+ * Recognizes a `--unit <value>` option (defaults to `"auto"`) and treats the first two non-flag arguments as the `start` and `end` positional values; missing positionals become empty strings.
+ * @returns {{start: string, end: string, unit: string}} An object with `start` and `end` as the first and second positional arguments (or `""` if absent) and `unit` set to the provided `--unit` value or `"auto"`.
+ */
 function parseArgs() {
   const result = {
     start: '',
@@ -32,6 +38,13 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Parse a date/time string into a valid Date object.
+ *
+ * @param {string} str - The date/time string to parse (any format accepted by the Date constructor).
+ * @returns {Date} The parsed Date object.
+ * @throws {Error} If the input cannot be parsed as a valid date.
+ */
 function parseDate(str) {
   const date = new Date(str);
   if (isNaN(date.getTime())) {
@@ -40,6 +53,13 @@ function parseDate(str) {
   return date;
 }
 
+/**
+ * Produce a human-readable duration string for a millisecond difference.
+ *
+ * @param {number} ms - Time difference in milliseconds; may be negative to indicate past.
+ * @param {string} unit - Desired unit: 'auto' (default), 'days', 'hours', 'minutes', or 'seconds'.
+ * @returns {string} A signed, human-readable duration. In 'seconds' or 'minutes' the value is rounded; in 'hours' or 'days' it shows two decimals. In 'auto' mode it chooses a friendly representation such as "X days, Y hours", "X hours, Y minutes", "X minutes", or "X seconds".
+ */
 function formatDuration(ms, unit) {
   const seconds = Math.abs(ms) / 1000;
   const minutes = seconds / 60;
@@ -84,6 +104,17 @@ function formatDuration(ms, unit) {
   return `${sign}${Math.round(Math.abs(seconds))} seconds`;
 }
 
+/**
+ * Parse command-line arguments, compute the duration between two dates, and print a JSON result.
+ *
+ * Validates presence of start and end arguments; on missing arguments it prints usage/help and exits with code 1.
+ * On successful parsing, prints a pretty-printed JSON object containing:
+ *  - start: { input, iso }
+ *  - end: { input, iso }
+ *  - duration: { human, milliseconds, seconds, minutes, hours, days }
+ *  - direction: 'future' or 'past'
+ * On invalid date input or other errors, prints an error message and exits with code 1.
+ */
 function main() {
   const options = parseArgs();
 

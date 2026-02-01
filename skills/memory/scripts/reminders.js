@@ -16,12 +16,22 @@ const crypto = require('crypto');
 const STORAGE_DIR = path.join(os.homedir(), '.moltbot', 'memory');
 const REMINDERS_FILE = path.join(STORAGE_DIR, 'reminders.json');
 
+/**
+ * Ensure the reminders storage directory exists by creating STORAGE_DIR and any missing parent directories.
+ */
 function ensureStorageDir() {
   if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
   }
 }
 
+/**
+ * Load reminders from the persistent reminders file.
+ *
+ * Ensures the storage directory exists, attempts to read and parse the reminders JSON,
+ * and falls back to an empty reminders list if the file is missing or contains invalid JSON.
+ * @returns {{reminders: Array<Object>}} An object containing the `reminders` array; returns `{ reminders: [] }` if no valid file is available.
+ */
 function loadReminders() {
   ensureStorageDir();
   if (fs.existsSync(REMINDERS_FILE)) {
@@ -34,15 +44,33 @@ function loadReminders() {
   return { reminders: [] };
 }
 
+/**
+ * Persist reminders data to the reminders storage file.
+ *
+ * Ensures the storage directory exists and writes the provided data as pretty-printed JSON
+ * to the reminders file (REMINDERS_FILE).
+ *
+ * @param {Object} data - The data object to persist; expected shape: `{ reminders: Array }`.
+ */
 function saveReminders(data) {
   ensureStorageDir();
   fs.writeFileSync(REMINDERS_FILE, JSON.stringify(data, null, 2));
 }
 
+/**
+ * Produce a short hexadecimal identifier.
+ * @returns {string} An 8-character hexadecimal string generated from 4 cryptographically strong random bytes.
+ */
 function generateId() {
   return crypto.randomBytes(4).toString('hex');
 }
 
+/**
+ * Parse an input date/time string into a JavaScript Date object.
+ * @param {string} str - A date/time string acceptable to the JavaScript Date constructor (e.g., ISO 8601).
+ * @returns {Date} The parsed Date instance.
+ * @throws {Error} If the input cannot be parsed into a valid date.
+ */
 function parseDate(str) {
   const date = new Date(str);
   if (isNaN(date.getTime())) {
@@ -54,6 +82,20 @@ function parseDate(str) {
 const args = process.argv.slice(2);
 const command = args[0];
 
+/**
+ * Entry point for the reminders CLI: parses command-line arguments and performs add, list, complete, or delete operations against the persistent reminders store.
+ *
+ * Supported commands:
+ * - add <content> --at <datetime> : create a new reminder with a due date (outputs the created reminder as JSON).
+ * - list [--all]                 : list reminders (defaults to pending only); each item includes status and a human-friendly dueRelative string.
+ * - complete <id>                : mark the reminder with the given id as completed (outputs the updated reminder as JSON).
+ * - delete <id>                  : remove the reminder with the given id (outputs the deleted reminder as JSON).
+ *
+ * Observables:
+ * - Reads and writes reminders from the JSON storage file.
+ * - Prints usage and error messages to stderr and structured JSON results to stdout.
+ * - Exits the process with a non-zero status on invalid input or failures.
+ */
 function main() {
   if (!command) {
     console.error('Usage:');
@@ -196,6 +238,15 @@ function main() {
   }
 }
 
+/**
+ * Produce a human-friendly relative time string for a target date compared to a reference time.
+ *
+ * The result expresses the difference using minutes, hours, or days and indicates past or future
+ * (e.g., "5 minutes ago", "in 2 hours", "3 days ago").
+ *
+ * @param {Date} date - The target date to describe.
+ * @param {Date} now - The reference date/time to compare against.
+ * @returns {string} A relative time string: uses minutes when within 60 minutes, hours when within 24 hours, and days otherwise; values are rounded to the nearest whole unit.
 function formatRelative(date, now) {
   const diffMs = date.getTime() - now.getTime();
   const diffMins = Math.round(diffMs / 60000);

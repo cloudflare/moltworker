@@ -10,6 +10,15 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse CLI arguments into image, prompt, model, and detail options.
+ *
+ * @returns {{image: string, prompt: string, model: string, detail: string}} An object with:
+ *  - image: the first positional argument or an empty string,
+ *  - prompt: the remaining positional arguments joined by spaces or the default "Describe this image in detail.",
+ *  - model: the value following `--model` or the default "claude-3-5-sonnet-20241022",
+ *  - detail: the value following `--detail` or the default "auto".
+ */
 function parseArgs() {
   const result = {
     image: '',
@@ -37,6 +46,12 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Prepare image payload from a URL or local file path for API consumption.
+ * @param {string} imagePath - Remote image URL (starting with `http://` or `https://`) or a local filesystem path.
+ * @returns {{type: 'url', url: string} | {type: 'base64', media_type: string, data: string}} If `imagePath` is a URL, returns an object with `type: 'url'` and `url`. If it's a local file, returns `type: 'base64'` with the file's MIME `media_type` and base64-encoded `data`.
+ * @throws {Error} If `imagePath` is a local path and the file does not exist.
+ */
 function getImageData(imagePath) {
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
     return { type: 'url', url: imagePath };
@@ -63,6 +78,16 @@ function getImageData(imagePath) {
   return { type: 'base64', media_type: mediaType, data: base64 };
 }
 
+/**
+ * Send an image and prompt to an Anthropic-compatible API and return the model's text analysis and token usage.
+ *
+ * @param {{type: 'url', url: string} | {type: 'base64', media_type: string, data: string}} imageData - Image payload: either a URL `{type: 'url', url}` or base64 `{type: 'base64', media_type, data}`.
+ * @param {string} prompt - The text prompt to send alongside the image.
+ * @param {string} model - The model identifier to use for the request.
+ * @returns {{model: string, analysis: string, usage: {input_tokens: number, output_tokens: number}}} The chosen model, the model's textual analysis, and token usage counts.
+ * @throws {Error} If neither ANTHROPIC_API_KEY nor AI_GATEWAY_API_KEY is set.
+ * @throws {Error} If the API responds with a non-OK status (message includes HTTP status and response body).
+ */
 async function analyzeWithClaude(imageData, prompt, model) {
   const apiKey = process.env.ANTHROPIC_API_KEY || process.env.AI_GATEWAY_API_KEY;
   const baseUrl = process.env.AI_GATEWAY_BASE_URL || 'https://api.anthropic.com';
@@ -121,6 +146,11 @@ async function analyzeWithClaude(imageData, prompt, model) {
   };
 }
 
+/**
+ * Orchestrates CLI operation: parses command-line arguments, runs image analysis with the configured model, and outputs the result as JSON.
+ *
+ * On success prints the analysis JSON to stdout. If required arguments are missing or an error occurs, prints an error object to stderr and exits with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

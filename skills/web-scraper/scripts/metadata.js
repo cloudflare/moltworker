@@ -7,6 +7,12 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments to extract a target URL and an optional timeout.
+ *
+ * Looks for a non-flag argument to use as the `url` and the `--timeout <ms>` flag to set the request timeout.
+ * @returns {{url: string, timeout: number}} An object with `url` (empty string if not provided) and `timeout` in milliseconds (default 30000).
+ */
 function parseArgs() {
   const result = {
     url: '',
@@ -25,6 +31,11 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Extracts meta tag values from an HTML string into a key-value map.
+ * @param {string} html - The HTML source to parse.
+ * @returns {Object} An object mapping meta names and properties (for example `"description"`, `"og:title"`, or `"charset"`) to their string values; returns an empty object if no meta tags are found.
+ */
 function extractMetaTags(html) {
   const meta = {};
   const regex = /<meta[^>]+>/gi;
@@ -57,6 +68,12 @@ function extractMetaTags(html) {
   return meta;
 }
 
+/**
+ * Extracts Open Graph properties from a meta map.
+ * Strips the `og:` prefix from any meta keys that start with `og:` and returns an object of those properties.
+ * @param {Object<string, any>} meta - Map of meta keys to values (e.g., `{ "og:title": "Example" }`).
+ * @returns {Object<string, any>|null} An object whose keys are Open Graph property names without the `og:` prefix (e.g., `{ title: "Example" }`), or `null` if no Open Graph properties are present.
+ */
 function extractOpenGraph(meta) {
   const og = {};
   for (const [key, value] of Object.entries(meta)) {
@@ -67,6 +84,12 @@ function extractOpenGraph(meta) {
   return Object.keys(og).length > 0 ? og : null;
 }
 
+/**
+ * Extracts Twitter Card metadata from a map of meta entries.
+ *
+ * @param {Object} meta - Map of meta keys to values (e.g., `'twitter:card': 'summary'`).
+ * @returns {Object|null} An object of Twitter Card properties with the `twitter:` prefix removed (e.g., `{ card: 'summary' }`), or `null` if no Twitter Card entries are present.
+ */
 function extractTwitterCard(meta) {
   const twitter = {};
   for (const [key, value] of Object.entries(meta)) {
@@ -77,6 +100,11 @@ function extractTwitterCard(meta) {
   return Object.keys(twitter).length > 0 ? twitter : null;
 }
 
+/**
+ * Extracts and parses all JSON-LD blocks from an HTML document.
+ * @param {string} html - The HTML source to scan for JSON-LD <script> blocks.
+ * @returns {Object[]|null} An array of parsed JSON-LD objects if any are present, `null` otherwise.
+ */
 function extractJsonLd(html) {
   const jsonLd = [];
   const regex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
@@ -98,11 +126,21 @@ function extractJsonLd(html) {
   return jsonLd.length > 0 ? jsonLd : null;
 }
 
+/**
+ * Extracts and normalizes the content of the first <title> tag from an HTML string.
+ * @param {string} html - The HTML source to search.
+ * @returns {string|null} The page title with collapsed whitespace and trimmed ends, or `null` if no title tag is found.
+ */
 function extractTitle(html) {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return match ? match[1].trim().replace(/\s+/g, ' ') : null;
 }
 
+/**
+ * Finds the canonical URL declared in an HTML document.
+ * @param {string} html - The HTML source to search for a canonical link tag.
+ * @returns {string|null} The canonical URL if a `<link rel="canonical" href="...">` is present, otherwise `null`.
+ */
 function extractCanonical(html) {
   const match = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i);
   if (match) return match[1];
@@ -111,6 +149,13 @@ function extractCanonical(html) {
   return match2 ? match2[1] : null;
 }
 
+/**
+ * Finds the page's favicon URL in the provided HTML, or returns the default /favicon.ico resolved against baseUrl.
+ *
+ * @param {string} html - The page's HTML source to search for favicon link tags.
+ * @param {string} baseUrl - Base URL used to resolve protocol-relative (`//...`) and root-relative (`/...`) hrefs.
+ * @returns {string} The resolved favicon URL.
+ */
 function extractFavicon(html, baseUrl) {
   const patterns = [
     /<link[^>]+rel=["'](?:shortcut )?icon["'][^>]+href=["']([^"']+)["']/i,
@@ -130,6 +175,11 @@ function extractFavicon(html, baseUrl) {
   return new URL('/favicon.ico', baseUrl).href;
 }
 
+/**
+ * Fetches the configured URL, extracts structured metadata from the HTML, and prints the consolidated result as pretty-printed JSON to stdout.
+ *
+ * If no URL is provided, prints usage information and exits with code 1. Respects the configured request timeout; on timeout or other failures prints a JSON object containing an `error` string and the original `url`, then exits with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

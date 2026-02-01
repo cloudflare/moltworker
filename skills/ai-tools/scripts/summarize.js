@@ -10,6 +10,20 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an options object for the summarizer.
+ *
+ * Recognizes these flags: `--length <n>`, `--style <style>`, `--file`, `--model <model>`.
+ * Any non-option argument (not starting with `--`) is treated as the input text.
+ *
+ * @returns {{text: string, length: number, style: string, isFile: boolean, model: string}}
+ * An object containing parsed options:
+ * - `text`: the input text or file path (when `isFile` is true).
+ * - `length`: target summary length in words (default 100).
+ * - `style`: summary style (e.g., "brief", "detailed", "bullets"; default "brief").
+ * - `isFile`: `true` if the input should be read from a file (set by `--file`), otherwise `false`.
+ * - `model`: model name to use for summarization (default "claude-3-5-sonnet-20241022").
+ */
 function parseArgs() {
   const result = {
     text: '',
@@ -39,6 +53,25 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Generate a summary for given text using the configured Anthropic-compatible API.
+ *
+ * @param {string} text - The input text to summarize.
+ * @param {number} length - Target summary length in words.
+ * @param {string} style - One of "brief", "detailed", or "bullets" controlling summary format.
+ * @param {string} model - Model identifier to use for the API request.
+ * @returns {Promise<{
+ *   summary: string,
+ *   style: string,
+ *   targetWords: number,
+ *   actualWords: number,
+ *   originalLength: number,
+ *   model: string,
+ *   usage: { input_tokens: number, output_tokens: number }
+ * }>} An object containing the generated summary, metadata about lengths and model, and token usage.
+ * @throws {Error} If neither ANTHROPIC_API_KEY nor AI_GATEWAY_API_KEY is set.
+ * @throws {Error} If the API responds with a non-OK status (includes HTTP status and response body).
+ */
 async function summarize(text, length, style, model) {
   const apiKey = process.env.ANTHROPIC_API_KEY || process.env.AI_GATEWAY_API_KEY;
   const baseUrl = process.env.AI_GATEWAY_BASE_URL || 'https://api.anthropic.com';
@@ -95,6 +128,11 @@ async function summarize(text, length, style, model) {
   };
 }
 
+/**
+ * Orchestrates the CLI: parse command-line options, read input text or file, call `summarize`, and print the JSON result.
+ *
+ * Exits with code 1 after printing usage if no input is provided, or after printing an error object when summarization fails.
+ */
 async function main() {
   const options = parseArgs();
 

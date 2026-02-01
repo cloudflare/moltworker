@@ -10,6 +10,14 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an options object for timezone, output format, and JSON output.
+ *
+ * @returns {{timezone: string|null, format: 'iso'|'unix'|'human', json: boolean}} The parsed options:
+ * - timezone: IANA timezone identifier or `null` if not provided.
+ * - format: one of `'iso'`, `'unix'`, or `'human'` (defaults to `'human'`).
+ * - json: `true` if `--json` was provided, `false` otherwise.
+ */
 function parseArgs() {
   const result = {
     timezone: null,
@@ -32,6 +40,13 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Format a Date into 'iso', 'unix', or a human-readable string, optionally using a specific IANA timezone.
+ * @param {Date} date - The Date to format.
+ * @param {string|undefined|null} timezone - IANA timezone identifier (e.g., "America/New_York"); if omitted the system timezone is used.
+ * @param {'iso'|'unix'|'human'} format - Desired output format: 'iso', 'unix', or 'human'.
+ * @returns {string} For 'iso', an ISO 8601 string (when no timezone) or an ISO-like locale string including a short timezone (when timezone is provided); for 'unix', the epoch seconds as a string; for 'human', a long English date/time with weekday and short timezone.
+ */
 function formatDate(date, timezone, format) {
   const options = {
     timeZone: timezone || undefined,
@@ -72,6 +87,14 @@ function formatDate(date, timezone, format) {
   return formatter.format(date);
 }
 
+/**
+ * Parse command-line options and write the current date/time to stdout as either a formatted string or a structured JSON object.
+ *
+ * When called, this function:
+ * - reads CLI options (`--timezone`, `--format`, `--json`),
+ * - formats the current time accordingly, and
+ * - prints either a single formatted value or a rich JSON object containing local/UTC representations, unix epoch, and date components.
+ */
 function main() {
   const options = parseArgs();
   const now = new Date();
@@ -120,6 +143,11 @@ function main() {
   }
 }
 
+/**
+ * Compute the ISO-8601 week number for a given date (weeks start on Monday; week 1 is the week containing January 4).
+ * @param {Date} date - The date to evaluate.
+ * @returns {number} The ISO week number (1–53) for the year of the provided date.
+ */
 function getWeekNumber(date) {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNum = d.getUTCDay() || 7;

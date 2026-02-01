@@ -7,6 +7,13 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an input text string and a model name.
+ *
+ * @returns {{text: string, model: string}} An object with:
+ *  - `text`: the positional input text (empty string if none provided).
+ *  - `model`: the model name (defaults to "claude-3-5-haiku-20241022" if not specified via `--model`).
+ */
 function parseArgs() {
   const result = {
     text: '',
@@ -26,6 +33,17 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Perform sentiment analysis on a text string using an Anthropic-compatible API and return structured results.
+ * @param {string} text - The text to analyze.
+ * @param {string} model - The model identifier to use for the API request.
+ * @returns {{text: string, analysis: Object, model: string, usage: {input_tokens: number, output_tokens: number}}} An object containing:
+ *  - `text`: a 100-character preview of the input text (with "..." if truncated),
+ *  - `analysis`: the parsed JSON analysis produced by the model, or `{ raw, parseError: true }` if parsing failed,
+ *  - `model`: the model identifier used,
+ *  - `usage`: token usage with `input_tokens` and `output_tokens`.
+ * @throws {Error} If no API key is set in `ANTHROPIC_API_KEY` or `AI_GATEWAY_API_KEY`, or if the API responds with a non-OK status.
+ */
 async function analyzeSentiment(text, model) {
   const apiKey = process.env.ANTHROPIC_API_KEY || process.env.AI_GATEWAY_API_KEY;
   const baseUrl = process.env.AI_GATEWAY_BASE_URL || 'https://api.anthropic.com';
@@ -90,6 +108,11 @@ async function analyzeSentiment(text, model) {
   };
 }
 
+/**
+ * Entry point for the script: parses CLI arguments, validates input text, invokes sentiment analysis, prints JSON result, and exits on error.
+ *
+ * Prints usage and exits with code 1 when no text is provided. On success prints the analysis as formatted JSON to stdout; on failure prints an error object to stderr and exits with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

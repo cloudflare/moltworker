@@ -9,6 +9,19 @@ const os = require('os');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line flags into an options object.
+ *
+ * Supported flags:
+ * - --show-values : enable inclusion of values
+ * - --check <list> : comma-separated list of variable names (trimmed) to check
+ * - --filter <pattern> : string pattern used for filtering variable names
+ *
+ * @returns {{showValues: boolean, check: (string[]|null), filter: (string|null)}} The parsed options:
+ * - showValues: whether to include values
+ * - check: an array of variable names to check, or null if not provided
+ * - filter: the filter pattern string, or null if not provided
+ */
 function parseArgs() {
   const result = {
     showValues: false,
@@ -31,6 +44,12 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Obfuscates a value when its key name suggests sensitive content.
+ * @param {string} key - The environment variable name to evaluate for sensitivity.
+ * @param {string} value - The original value to potentially mask.
+ * @returns {string} The masked value when `key` matches sensitive patterns: `****` if `value` length is 4 or less, otherwise the first two characters + `****` + the last two characters; returns the original `value` if `key` is not considered sensitive.
+ */
 function maskValue(key, value) {
   // Mask potentially sensitive values
   const sensitivePatterns = [
@@ -46,6 +65,15 @@ function maskValue(key, value) {
   return value;
 }
 
+/**
+ * Collects environment information or validates required environment variables and outputs a JSON report.
+ *
+ * When invoked with a --check list, emits a structured report for each requested variable (presence, non-empty status,
+ * and optionally masked value) and exits the process with code 0 if all requested variables are present and non-empty,
+ * otherwise exits with code 1. When not using --check, emits a JSON object enumerating environment variables (optionally
+ * filtered and with optionally masked values) along with metadata such as timestamp, platform, user, cwd, Node version,
+ * counts, and simple category breakdowns.
+ */
 function main() {
   const options = parseArgs();
 

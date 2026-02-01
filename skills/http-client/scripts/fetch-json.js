@@ -6,6 +6,11 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments, perform an HTTP JSON request to the specified URL, and print the parsed JSON response or a structured error.
+ *
+ * Recognizes `--post <body>` and `--put <body>` to send a request body and switches the method to POST or PUT respectively; defaults to GET when no method flag is provided. Requires a URL argument; if missing, prints usage and exits with code 1. On success, prints the response JSON pretty-printed. On HTTP errors or runtime failures, prints a JSON error object and exits with code 1.
+ */
 async function main() {
   let url = '';
   let method = 'GET';

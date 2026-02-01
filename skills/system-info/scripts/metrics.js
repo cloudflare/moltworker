@@ -9,6 +9,17 @@ const os = require('os');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line options for output format, metric prefix, and reporting interval.
+ *
+ * Recognizes `--format <value>`, `--prefix <value>`, and `--interval <seconds>` and applies defaults when flags are absent.
+ * The `--interval` value is parsed as an integer.
+ * 
+ * @returns {{format: string, prefix: string, interval: number|null}} An object with:
+ *  - `format`: output format (default `"json"`),
+ *  - `prefix`: metric name prefix (default `"system"`),
+ *  - `interval`: reporting interval in seconds as an integer, or `null` if not specified.
+ */
 function parseArgs() {
   const result = {
     format: 'json',
@@ -32,6 +43,17 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Collects current system and process metrics and returns them as a structured object.
+ *
+ * The returned object contains a Unix millisecond timestamp and nested metric groups:
+ * - `cpu`: usage_percent (number), cores (number), load_1m/load_5m/load_15m (numbers)
+ * - `memory`: total_bytes/used_bytes/free_bytes (numbers), usage_percent (number)
+ * - `process`: heap_used_bytes/heap_total_bytes/rss_bytes (numbers), uptime_seconds (number)
+ * - `system`: uptime_seconds (number), platform (string), arch (string)
+ *
+ * @returns {Object} An object with the current metrics described above.
+ */
 function collectMetrics() {
   const cpus = os.cpus();
   let cpuIdle = 0;
@@ -79,6 +101,19 @@ function collectMetrics() {
   };
 }
 
+/**
+ * Convert a metrics object into Prometheus exposition format using the provided prefix.
+ *
+ * @param {Object} metrics - Collected metrics object containing `cpu`, `memory`, `process`, and `system` sections.
+ *   - metrics.cpu.usage_percent: CPU usage percentage.
+ *   - metrics.cpu.cores: Number of CPU cores.
+ *   - metrics.cpu.load_1m, metrics.cpu.load_5m, metrics.cpu.load_15m: Load averages.
+ *   - metrics.memory.total_bytes, metrics.memory.used_bytes, metrics.memory.usage_percent: Memory metrics.
+ *   - metrics.process.heap_used_bytes, metrics.process.heap_total_bytes, metrics.process.rss_bytes: Process memory metrics.
+ *   - metrics.system.uptime_seconds: System uptime in seconds.
+ * @param {string} prefix - Metric name prefix to prepend to all Prometheus metric names.
+ * @returns {string} Prometheus exposition-format text containing HELP/TYPE headers and metric lines for the provided metrics.
+ */
 function formatPrometheus(metrics, prefix) {
   const lines = [];
 
@@ -128,6 +163,15 @@ function formatPrometheus(metrics, prefix) {
   return lines.join('\n');
 }
 
+/**
+ * Format collected system metrics as StatsD gauge lines using the given prefix.
+ *
+ * Produces one gauge line per metric for CPU, load averages, memory, process memory, and system uptime.
+ *
+ * @param {Object} metrics - Collected metrics object (timestamped) containing `cpu`, `memory`, `process`, and `system` sections.
+ * @param {string} prefix - Metric name prefix to prepend to each StatsD key.
+ * @return {string} A newline-separated string of StatsD gauge lines for the provided metrics.
+ */
 function formatStatsd(metrics, prefix) {
   const lines = [];
 
@@ -143,6 +187,13 @@ function formatStatsd(metrics, prefix) {
   return lines.join('\n');
 }
 
+/**
+ * Read CLI options, collect system metrics, format them, and print the result to stdout.
+ *
+ * Uses parsed command-line options to choose output format (json, prometheus, or statsd)
+ * and an optional interval; when an interval is provided the metrics are emitted immediately
+ * and then repeatedly at that interval.
+ */
 function main() {
   const options = parseArgs();
 

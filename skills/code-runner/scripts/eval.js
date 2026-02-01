@@ -7,6 +7,17 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Evaluate a JavaScript expression supplied via command-line arguments and print a JSON result or error.
+ *
+ * If no expression is provided, prints usage examples to stderr and exits with code 1. Otherwise evaluates
+ * the expression inside a restricted context (common globals and helpers), then writes a pretty-printed JSON
+ * object to stdout containing `expression`, `result`, `type`, and `timestamp`. Normalizes `undefined` and
+ * `null` to the strings "undefined" and "null", and converts function results to their source string.
+ *
+ * On evaluation error, writes a JSON error object (including `expression`, `error`, and `type`) to stderr
+ * and exits with code 1.
+ */
 function main() {
   const expression = args.join(' ');
 

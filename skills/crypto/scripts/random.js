@@ -9,6 +9,10 @@ const crypto = require('crypto');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an options object for random data generation.
+ * @returns {{bytes: number, encoding: string, count: number}} An options object where `bytes` is the number of bytes to generate (default 32), `encoding` is the output format (default "hex"), and `count` is how many values to produce (default 1).
+ */
 function parseArgs() {
   const result = {
     bytes: 32,
@@ -32,6 +36,13 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Generate a random value in the requested format using cryptographically secure randomness.
+ *
+ * @param {number} bytes - Number of random bytes to use for byte-based encodings; for `words`, determines word count as `Math.ceil(bytes / 4)`; ignored for `uuid`.
+ * @param {string} encoding - Output format: one of `'uuid'`, `'words'`, `'hex'`, `'base64'`, `'base64url'`, `'binary'`, or `'decimal'`.
+ * @returns {string} For `'uuid'`, a UUID string; for `'words'`, a hyphen-separated passphrase; otherwise an encoded string representation of `bytes` random bytes using the requested encoding.
+ */
 function generateRandom(bytes, encoding) {
   if (encoding === 'uuid') {
     return crypto.randomUUID();
@@ -79,6 +90,18 @@ function generateRandom(bytes, encoding) {
   }
 }
 
+/**
+ * Parse command-line options, validate them, generate cryptographically secure random values, and print a JSON result to stdout.
+ *
+ * Validates that `bytes` is between 1 and 1024 and `count` is between 1 and 100; on validation failure an error is written to stderr and the process exits with code 1.
+ *
+ * The printed JSON object contains:
+ * - `bytes`: the requested byte length,
+ * - `encoding`: the requested output encoding,
+ * - `count`: the number of values generated,
+ * - `values`: a single string if `count` is 1, otherwise an array of strings,
+ * - `bits`: included when `encoding` is not `"uuid"` or `"words"`, equal to `bytes * 8`.
+ */
 function main() {
   const options = parseArgs();
 

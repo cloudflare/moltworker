@@ -12,6 +12,22 @@ const os = require('os');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an execution options object.
+ *
+ * Parses known flags (--lang, --file, --timeout, --stdin, --args, --env) and
+ * treats the first non-flag token as inline code. Unknown flags are ignored.
+ *
+ * @returns {{code: string, lang: string|null, file: string|null, timeout: number, stdin: string|null, args: string[], env: Object}}
+ * An options object with the following properties:
+ * - code: Inline code provided as a non-flag argument, or an empty string.
+ * - lang: Lowercased language identifier from `--lang`, or `null`.
+ * - file: File path from `--file`, or `null`.
+ * - timeout: Timeout in milliseconds (parsed from `--timeout`), default 30000.
+ * - stdin: String to write to the child process stdin (from `--stdin`), or `null`.
+ * - args: Array of additional positional arguments (from `--args`, comma-separated), default [].
+ * - env: Environment variables parsed from JSON provided to `--env`, default {}.
+ */
 function parseArgs() {
   const result = {
     code: '',
@@ -50,6 +66,13 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Map a language identifier to its execution configuration.
+ * 
+ * Returns an object describing the command to run, file extension, and canonical language name for the given identifier.
+ * @param {string} lang - Language identifier (e.g., "js", "typescript", "python", "bash"). Matching is done against known keys.
+ * @returns {{cmd: string, cmdArgs?: string[], ext: string, name: string} | null} The execution configuration, or `null` if the language is not supported.
+ */
 function getLanguageConfig(lang) {
   const configs = {
     js: { cmd: 'node', ext: '.js', name: 'javascript' },
@@ -68,6 +91,30 @@ function getLanguageConfig(lang) {
   return configs[lang] || null;
 }
 
+/**
+ * Execute the provided code using the given language configuration and options, capturing output and execution metadata.
+ *
+ * @param {string} code - Source code to write to a temporary file and execute.
+ * @param {{ cmd: string, cmdArgs?: string[], ext: string, name: string }} config - Execution configuration for the target language:
+ *   - cmd: command to run (e.g., 'node', 'python3'),
+ *   - cmdArgs: additional command arguments to prepend before the temp file path,
+ *   - ext: file extension for the temporary file (e.g., '.js'),
+ *   - name: human-readable language name.
+ * @param {{ timeout: number, args?: string[], env?: Object.<string,string>, stdin?: string }} options - Execution options:
+ *   - timeout: maximum runtime in milliseconds,
+ *   - args: additional CLI arguments appended after the temp file path,
+ *   - env: environment variables to merge with the current process.env,
+ *   - stdin: string to write to the child process stdin.
+ * @returns {{ success: boolean, language: string, exitCode: number|null, stdout: string, stderr: string, duration: number, timedOut: boolean, error: string|null }} An object describing the execution result:
+ *   - success: `true` if the process exited with code 0 and did not time out, `false` otherwise.
+ *   - language: the configured language name.
+ *   - exitCode: process exit code, or `null` if the run timed out or failed to start.
+ *   - stdout: captured standard output (trimmed).
+ *   - stderr: captured standard error (trimmed).
+ *   - duration: execution duration in milliseconds.
+ *   - timedOut: `true` if the process was killed due to timeout.
+ *   - error: a descriptive error message when applicable (`'Execution timed out'`, process exit description, or spawn error), or `null` on success.
+ */
 async function runCode(code, config, options) {
   return new Promise((resolve) => {
     const tempDir = os.tmpdir();
@@ -151,6 +198,11 @@ async function runCode(code, config, options) {
   });
 }
 
+/**
+ * Orchestrates command-line parsing, validation, code loading, execution, and process exit.
+ *
+ * Parses CLI options, validates the requested language and input (inline code or file), executes the code with the resolved language configuration, prints the execution result as JSON to stdout, and exits the process with code 0 on success or 1 on failure. On validation errors or missing inputs it writes an error message (plain text or JSON) to stderr and exits with code 1.
+ */
 async function main() {
   const options = parseArgs();
 

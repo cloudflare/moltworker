@@ -10,6 +10,14 @@ const os = require('os');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into an options object for process listing.
+ * @returns {{sort: string, limit: number, filter: string|null, tree: boolean}} The parsed options:
+ *  - sort: sorting key ('cpu', 'pid', 'name', or 'memory'; defaults to 'memory')
+ *  - limit: maximum number of processes to return (defaults to 20)
+ *  - filter: lowercase substring to filter process commands by, or `null` if not set
+ *  - tree: `true` if the --tree flag was provided, `false` otherwise
+ */
 function parseArgs() {
   const result = {
     sort: 'memory',
@@ -36,6 +44,26 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Gather current system processes into an array of normalized process objects.
+ *
+ * Collects processes using platform-appropriate system commands (ps on Linux/macOS, tasklist on Windows)
+ * and returns an array of objects containing pid, command, memory and other metadata. On error, returns a single
+ * fallback entry describing the running Node.js process with limited information.
+ *
+ * @returns {Array<Object>} An array of process objects. Each object may contain:
+ * - `pid` {number} - Process ID.
+ * - `command` {string} - The command or executable name.
+ * - `user` {string|undefined} - Owning user (present on Unix).
+ * - `cpu` {number} - CPU usage percentage (if available; otherwise 0).
+ * - `memory` {number} - Memory usage percentage (Unix `%MEM`) or 0 for Windows/tasklist entries.
+ * - `vsz` {number|undefined} - Virtual memory size in bytes (present on Unix).
+ * - `rss` {number} - Resident set size in bytes.
+ * - `state` {string|undefined} - Process state/flags (present on Unix).
+ * - `started` {string|undefined} - Process start time (present on Unix).
+ * - `time` {string|undefined} - CPU time string (present on Unix).
+ * - `note` {string|undefined} - Present on fallback entries to indicate limited information.
+ */
 function getProcesses() {
   const platform = os.platform();
   const processes = [];
@@ -109,6 +137,11 @@ function getProcesses() {
   return processes;
 }
 
+/**
+ * Format a byte count as a human-readable string with an appropriate unit.
+ * @param {number} bytes - The number of bytes to format.
+ * @returns {string} A string formatted as "<value> <unit>" with one decimal place; units are B, KB, MB, or GB (e.g., "1.0 KB").
+ */
 function formatBytes(bytes) {
   if (bytes === 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -120,6 +153,13 @@ function formatBytes(bytes) {
   return `${bytes.toFixed(1)} ${units[i]}`;
 }
 
+/**
+ * Gather processes, apply filter/sort/limit options, and print a JSON summary to stdout.
+ *
+ * The printed JSON contains a timestamp, count, sortedBy, and a processes array.
+ * Each process entry is augmented with `rssFormatted` (human-readable RSS) and
+ * `commandShort` (command truncated to 60 characters, with an ellipsis if truncated).
+ */
 function main() {
   const options = parseArgs();
 

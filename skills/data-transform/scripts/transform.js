@@ -10,6 +10,19 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into a structured options object for the data transformation pipeline.
+ *
+ * @returns {Object} An options object with the following properties:
+ *  - input {string} - Input file path or raw input string.
+ *  - map {string|null} - Expression to transform each item, or `null` if not provided.
+ *  - filter {string|null} - Expression to filter items, or `null` if not provided.
+ *  - sort {string|null} - Field name to sort by, or `null` if not provided.
+ *  - reverse {boolean} - `true` if the `--reverse` flag was passed, otherwise `false`.
+ *  - unique {string|null} - Field name to deduplicate by, or `null` if not provided.
+ *  - group {string|null} - Field name to group by, or `null` if not provided.
+ *  - limit {number|null} - Numeric limit for results, or `null` if not provided.
+ */
 function parseArgs() {
   const result = {
     input: '',
@@ -51,6 +64,14 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Evaluate a user-supplied expression with `x` and `index` available, using a restricted set of standard globals.
+ *
+ * @param {string} expr - JavaScript expression to evaluate; should be an expression (not a full function body).
+ * @param {*} x - The current item value exposed to the expression as `x`.
+ * @param {number} index - The current item index exposed to the expression as `index` (also passed as `i`).
+ * @returns {*} The value produced by evaluating `expr`.
+ */
 function safeEval(expr, x, index) {
   // Create a safe evaluation context
   const fn = new Function('x', 'i', 'index', `
@@ -68,6 +89,11 @@ function safeEval(expr, x, index) {
   return fn(x, index, index);
 }
 
+/**
+ * Execute the CLI data transformation pipeline: read JSON input, apply configured transforms, and output the result.
+ *
+ * Processes input from a file path or a raw JSON string, evaluates user-provided JavaScript expressions for mapping and filtering, and supports deduplication, sorting, reversing, grouping, and limiting of results. Writes the transformed JSON to stdout. On missing input prints usage to stderr and exits with status 1; on runtime error prints a JSON error to stderr and exits with status 1.
+ */
 function main() {
   const options = parseArgs();
 

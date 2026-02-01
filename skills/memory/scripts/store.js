@@ -16,12 +16,20 @@ const os = require('os');
 const STORAGE_DIR = path.join(os.homedir(), '.moltbot', 'memory');
 const STORE_FILE = path.join(STORAGE_DIR, 'store.json');
 
+/**
+ * Ensures the configured storage directory exists, creating it and any missing parent directories when absent.
+ */
 function ensureStorageDir() {
   if (!fs.existsSync(STORAGE_DIR)) {
     fs.mkdirSync(STORAGE_DIR, { recursive: true });
   }
 }
 
+/**
+ * Load the persistent key-value store from disk, ensuring the storage directory exists.
+ * Calls ensureStorageDir before attempting to read the store file.
+ * @returns {Object} The parsed store object; an empty object if the store file is missing or contains invalid JSON.
+ */
 function loadStore() {
   ensureStorageDir();
   if (fs.existsSync(STORE_FILE)) {
@@ -34,6 +42,12 @@ function loadStore() {
   return {};
 }
 
+/**
+ * Persist the given key-value store to the configured store file.
+ *
+ * Ensures the storage directory exists and writes `data` as pretty-printed JSON to the store file.
+ * @param {Object} data - An object mapping keys to their stored values.
+ */
 function saveStore(data) {
   ensureStorageDir();
   fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2));
@@ -42,6 +56,11 @@ function saveStore(data) {
 const args = process.argv.slice(2);
 const command = args[0];
 
+/**
+ * Entry point for the CLI: parses command-line arguments and executes the key-value store commands: get, set, delete, list, and clear.
+ *
+ * Loads the persistent store, performs the requested operation, persists changes when applicable, prints JSON-formatted results or error messages to stdout/stderr, and exits the process with a non-zero code on incorrect usage or missing keys.
+ */
 function main() {
   if (!command) {
     console.error('Usage:');

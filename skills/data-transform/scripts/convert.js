@@ -10,6 +10,16 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse CLI arguments into an options object for the converter.
+ *
+ * @returns {Object} result - Parsed options.
+ * @property {string} result.input - Input path or inline data (empty string if not provided).
+ * @property {string|null} result.to - Target format (lowercased) or `null` if not specified.
+ * @property {string|null} result.from - Source format (lowercased) or `null` if not specified.
+ * @property {string|null} result.output - Output file path or `null` to write to stdout.
+ * @property {boolean} result.pretty - Whether to pretty-print JSON output.
+ */
 function parseArgs() {
   const result = {
     input: '',
@@ -39,6 +49,12 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Infers the data format from a filename extension or from the input content.
+ * @param {string} input - The text content used for content-based detection.
+ * @param {string} [filename] - Optional filename whose extension will be used first to determine format.
+ * @returns {string} The detected format: one of 'json', 'csv', 'tsv', 'yaml', 'xml', or 'markdown'.
+ */
 function detectFormat(input, filename) {
   if (filename) {
     const ext = path.extname(filename).toLowerCase();
@@ -63,6 +79,12 @@ function detectFormat(input, filename) {
   return 'json';
 }
 
+/**
+ * Parse delimited text into an array of objects using the first line as column headers.
+ * @param {string} input - Delimited text where the first line contains column headers.
+ * @param {string} [delimiter=','] - Field delimiter character (for example ',' for CSV or '\t' for TSV).
+ * @returns {Array<Object<string, string|number|boolean>>} An array of objects mapping header names to values; numeric fields are converted to numbers, `"true"`/`"false"` (case-insensitive) are converted to booleans, and empty fields become empty strings.
+ */
 function parseCSV(input, delimiter = ',') {
   const lines = input.trim().split('\n');
   if (lines.length === 0) return [];
@@ -92,6 +114,15 @@ function parseCSV(input, delimiter = ',') {
   return data;
 }
 
+/**
+ * Parse a single CSV/TSV line into an array of field values, respecting quoted fields and escaped quotes.
+ *
+ * Handles fields enclosed in double quotes ("" escapes a quote), splits on the provided delimiter
+ * unless the delimiter appears inside quotes, and trims whitespace from each resulting field.
+ * @param {string} line - The input line to parse.
+ * @param {string} delimiter - The field delimiter (e.g., ',' for CSV or '\t' for TSV).
+ * @returns {string[]} An array of parsed field values.
+ */
 function parseCSVLine(line, delimiter) {
   const result = [];
   let current = '';
@@ -118,6 +149,16 @@ function parseCSVLine(line, delimiter) {
   return result;
 }
 
+/**
+ * Serialize an array of objects into delimited text using the first object's keys as headers.
+ *
+ * Fields that contain the delimiter, double quotes, or newlines are wrapped in double quotes
+ * and internal double quotes are doubled. Null or undefined values become empty fields.
+ *
+ * @param {Array<Object>} data - Array of objects to serialize; object keys from the first item are used as headers.
+ * @param {string} [delimiter=','] - Field separator to use (e.g., ',' for CSV or '\t' for TSV).
+ * @returns {string} The generated delimited text (headers line followed by one line per object), or an empty string if `data` is not a non-empty array.
+ */
 function toCSV(data, delimiter = ',') {
   if (!Array.isArray(data) || data.length === 0) return '';
 
@@ -140,6 +181,11 @@ function toCSV(data, delimiter = ',') {
   return lines.join('\n');
 }
 
+/**
+ * Create a Markdown-formatted table from an array of objects.
+ * @param {Array<Object>} data - Array of objects where the first object's keys are used as table headers; missing values are rendered as empty cells.
+ * @returns {string} A Markdown table string (headers from the first object, rows for each array item) or an empty string if `data` is not a non-empty array.
+ */
 function toMarkdownTable(data) {
   if (!Array.isArray(data) || data.length === 0) return '';
 
@@ -157,6 +203,14 @@ function toMarkdownTable(data) {
   return lines.join('\n');
 }
 
+/**
+ * Generate an HTML table from an array of objects.
+ *
+ * Uses the first object's keys as column headers; missing or undefined values render as empty cells.
+ * If `data` is not a non-empty array, returns an empty `<table></table>`.
+ * @param {Array<Object>} data - Array of row objects; each object's keys become column headers.
+ * @returns {string} An HTML string representing the table.
+ */
 function toHTMLTable(data) {
   if (!Array.isArray(data) || data.length === 0) return '<table></table>';
 
@@ -175,6 +229,11 @@ function toHTMLTable(data) {
   return html;
 }
 
+/**
+ * Escape HTML-sensitive characters in a string for safe inclusion in HTML.
+ * @param {string} str - The input string to escape.
+ * @returns {string} The input with `&`, `<`, `>`, and `"` replaced by their HTML entity equivalents.
+ */
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -182,6 +241,20 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+/**
+ * Serialize a JavaScript object or array into an XML document.
+ *
+ * Produces a standard XML declaration and a hierarchical representation of the input:
+ * - Objects become nested elements.
+ * - Arrays produce repeated child elements named by `itemName`.
+ * - `null` and `undefined` become empty elements.
+ * - Primitive values are converted to text content with HTML-unsafe characters escaped.
+ *
+ * @param {*} data - The value to convert (object or array of objects).
+ * @param {string} [rootName='root'] - Element name for the document root.
+ * @param {string} [itemName='item'] - Element name for array items when `data` is an array.
+ * @returns {string} The serialized XML document.
+ */
 function toXML(data, rootName = 'root', itemName = 'item') {
   function objectToXml(obj, indent = '  ') {
     let xml = '';
@@ -220,6 +293,19 @@ function toXML(data, rootName = 'root', itemName = 'item') {
   return xml;
 }
 
+/**
+ * Convert a JavaScript value into a YAML-formatted string.
+ *
+ * Produces a YAML representation for primitives, arrays, and objects with indentation control.
+ * - null becomes `null`; undefined becomes an empty string.
+ * - Strings containing newlines, colons, or hash characters are quoted and internal quotes escaped.
+ * - Arrays produce dash-prefixed sequences; empty arrays become `[]`.
+ * - Objects produce key/value mappings; empty objects become `{}`.
+ *
+ * @param {*} data - The value to convert to YAML.
+ * @param {number} [indent=0] - Current indentation level (each level equals two spaces).
+ * @returns {string} The YAML-formatted string representing `data`.
+ */
 function toYAML(data, indent = 0) {
   const spaces = '  '.repeat(indent);
 
@@ -262,6 +348,14 @@ function toYAML(data, indent = 0) {
   return String(data);
 }
 
+/**
+ * Run the CLI workflow to convert input data between supported formats.
+ *
+ * Reads input from a file path or inline string, detects or uses the provided source format,
+ * parses the data, converts it to the requested target format, and writes the result to stdout
+ * or to a file when `--output` is provided. Prints usage and exits when required arguments
+ * are missing; reports errors as JSON and exits with a non-zero code. Stdin ("-") is not supported.
+ */
 function main() {
   const options = parseArgs();
 

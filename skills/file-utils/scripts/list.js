@@ -14,6 +14,11 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into listing options.
+ *
+ * @returns {{path: string, recursive: boolean, tree: boolean, hidden: boolean, json: boolean}} The parsed options object where `path` is the target path (default '.'), `recursive` enables recursive traversal, `tree` enables tree view (and implies `recursive`), `hidden` includes hidden entries, and `json` selects JSON output.
+ */
 function parseArgs() {
   const result = {
     path: '.',
@@ -41,6 +46,24 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Recursively enumerates directory contents and returns a flat list of item objects.
+ *
+ * @param {string} dirPath - Filesystem path of the directory to list.
+ * @param {Object} options - Listing options.
+ * @param {boolean} options.recursive - If true, descend into subdirectories.
+ * @param {boolean} options.hidden - If true, include entries whose names start with a dot.
+ * @param {number} [depth=0] - Current recursion depth; used to record each item's depth in the tree.
+ * @returns {Array<Object>} An array of items where each item contains:
+ *   - `name` (string): entry name,
+ *   - `path` (string): absolute path to the entry,
+ *   - `type` (string): either `'directory'` or `'file'`,
+ *   - `size` (number): entry size in bytes,
+ *   - `modified` (string): ISO timestamp of last modification,
+ *   - `depth` (number): depth level relative to the initial directory.
+ *
+ * Logs an error to stderr and returns any items collected so far if a directory cannot be read.
+ */
 function listDir(dirPath, options, depth = 0) {
   const results = [];
 
@@ -75,6 +98,12 @@ function listDir(dirPath, options, depth = 0) {
   return results;
 }
 
+/**
+ * Print a hierarchical tree view of file and directory items.
+ *
+ * Renders the provided items with tree connectors (├──, └──), directory/file icons, and indentation reflecting each item's `depth`.
+ * @param {Array<Object>} items - Array of item objects (expected fields: `name`, `path`, `type` ('directory' | 'file'), and `depth`).
+ */
 function printTree(items) {
   const byPath = new Map();
   items.forEach(item => byPath.set(item.path, item));
@@ -121,6 +150,19 @@ function printTree(items) {
   printLevel('', items);
 }
 
+/**
+ * Print a plain, indented listing of items to stdout with icons and file sizes.
+ *
+ * Each item is printed on its own line with a folder or file icon, indentation
+ * proportional to its `depth` (two spaces per level), and a human-readable
+ * size appended for files using `formatSize`.
+ *
+ * @param {Array<Object>} items - Array of item objects to print. Each item should include:
+ *   - {string} name: the entry name
+ *   - {string} type: either `'directory'` or `'file'`
+ *   - {number} size: file size in bytes (used only for files)
+ *   - {number} depth: nesting depth (0 for root)
+ */
 function printList(items) {
   for (const item of items) {
     const icon = item.type === 'directory' ? '📁' : '📄';
@@ -130,12 +172,24 @@ function printList(items) {
   }
 }
 
+/**
+ * Convert a byte count into a human-readable size string.
+ * @param {number} bytes - Number of bytes.
+ * @returns {string} A formatted size string using `B` for bytes, `KB` with one decimal for kilobytes, or `MB` with one decimal for megabytes.
+ */
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Entry point that parses CLI options, collects directory items, and writes the chosen output format to stdout.
+ *
+ * Parses command-line arguments to determine the target path and options, resolves and validates the path
+ * (exiting the process with code 1 if the path does not exist), gathers directory items via listDir, and
+ * prints them as JSON, a tree view, or a plain indented list according to the selected option.
+ */
 function main() {
   const options = parseArgs();
   const targetPath = path.resolve(options.path);

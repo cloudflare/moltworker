@@ -6,6 +6,11 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into a datetime string and optional source/target timezones.
+ *
+ * @returns {{datetime: string, from: string|null, to: string|null}} An object where `datetime` is the first non-flag argument (or an empty string if none), `from` is the value after `--from` (or `null`), and `to` is the value after `--to` (or `null`).
+ */
 function parseArgs() {
   const result = {
     datetime: '',
@@ -28,6 +33,13 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Parse a datetime string into a JavaScript Date, accepting ISO or "YYYY-MM-DD HH:mm" (optional ":ss") formats.
+ * @param {string} str - The input datetime string to parse.
+ * @param {string} [timezone] - Optional timezone identifier (accepted for compatibility but not used by this parser).
+ * @returns {Date} The parsed Date object.
+ * @throws {Error} If the input string cannot be parsed as a valid datetime.
+ */
 function parseDateTime(str, timezone) {
   // Try ISO format first
   let date = new Date(str);
@@ -49,6 +61,13 @@ function parseDateTime(str, timezone) {
   return date;
 }
 
+/**
+ * Format a Date into a localized timestamp string for a given IANA timezone.
+ *
+ * @param {Date} date - The date to format.
+ * @param {string} timezone - IANA timezone identifier (e.g., "America/New_York") used for formatting.
+ * @returns {string} A string in the form `YYYY-MM-DD HH:mm:ss <TZNAME>` representing the date in the specified timezone.
+ */
 function formatInTimezone(date, timezone) {
   const options = {
     timeZone: timezone,
@@ -73,6 +92,13 @@ function formatInTimezone(date, timezone) {
   return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second} ${values.timeZoneName}`;
 }
 
+/**
+ * Parse CLI arguments, perform a timezone conversion for the given datetime, and print the result as JSON.
+ *
+ * Prints usage information to stderr and exits with code 1 when required arguments are missing.
+ * On success prints a pretty-printed JSON object to stdout containing `input`, `from` (or `'local'`), `to`, `result` (formatted in the target timezone), and `iso`.
+ * On error prints an error message to stderr and exits with code 1.
+ */
 function main() {
   const options = parseArgs();
 

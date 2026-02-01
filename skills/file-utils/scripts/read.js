@@ -14,6 +14,19 @@ const path = require('path');
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse process arguments into an options object for the read-file command.
+ *
+ * The returned object contains the resolved file path and any requested line-selection or JSON flag.
+ *
+ * @returns {{path: string, lines: {start: number, end: number}|null, head: number|null, tail: number|null, json: boolean}}
+ * An object with:
+ * - path: the first non-flag argument, treated as the file path (empty string if none).
+ * - lines: `{ start, end }` when `--lines start:end` was provided (1-based start; `end` may be `Infinity`), or `null`.
+ * - head: number when `--head n` was provided, or `null`.
+ * - tail: number when `--tail n` was provided, or `null`.
+ * - json: `true` if `--json` was provided, `false` otherwise.
+ */
 function parseArgs() {
   const result = {
     path: '',
@@ -44,6 +57,14 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Parse command-line options, read and optionally filter or pretty-print a file, and write results to stdout.
+ *
+ * Reads the file at the provided path (from parsed argv), optionally parses and pretty-prints JSON when `--json`
+ * is specified, or selects lines using `--lines`, `--head`, or `--tail` and prints them with left-padded line numbers.
+ * On error (missing path, nonexistent path, path is a directory, read failure, or invalid JSON) prints an error to stderr
+ * and exits the process with code 1.
+ */
 function main() {
   const options = parseArgs();
 

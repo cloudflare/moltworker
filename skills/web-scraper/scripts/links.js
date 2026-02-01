@@ -7,6 +7,18 @@
 
 const args = process.argv.slice(2);
 
+/**
+ * Parse command-line arguments into the scraper options object.
+ *
+ * @returns {{url: string, internal: boolean, external: boolean, filter: string|null, format: string, timeout: number}}
+ * An options object with the following properties:
+ * @property {string} url - Target URL (first non-option argument) or empty string if none provided.
+ * @property {boolean} internal - `true` when `--internal` was passed; otherwise `false`.
+ * @property {boolean} external - `true` when `--external` was passed; otherwise `false`.
+ * @property {string|null} filter - Pattern provided after `--filter`, or `null` if not set.
+ * @property {string} format - Output format provided after `--format` (`json` by default).
+ * @property {number} timeout - Request timeout in milliseconds provided after `--timeout` (30000 by default).
+ */
 function parseArgs() {
   const result = {
     url: '',
@@ -39,6 +51,19 @@ function parseArgs() {
   return result;
 }
 
+/**
+ * Extracts and normalizes anchor links from HTML using a base URL to resolve relative and protocol-relative hrefs.
+ * @param {string} html - HTML content to scan for anchor (`<a>`) elements.
+ * @param {string} baseUrl - Base URL used to resolve relative and protocol-relative href values.
+ * @returns {Array<Object>} An array of link objects. Each object contains:
+ *  - `url` (string): normalized absolute URL with any fragment removed,
+ *  - `text` (string): visible link text trimmed to 100 characters,
+ *  - `internal` (boolean): `true` if the link's hostname matches the base URL's hostname,
+ *  - `external` (boolean): `true` if the link's hostname differs from the base URL's hostname,
+ *  - `domain` (string): the link's hostname,
+ *  - `path` (string): the link's pathname.
+ * The function skips `javascript:`, `mailto:`, and `tel:` links and deduplicates identical URLs.
+ */
 function extractLinks(html, baseUrl) {
   const links = [];
   const regex = /<a[^>]+href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -93,6 +118,15 @@ function extractLinks(html, baseUrl) {
   return links;
 }
 
+/**
+ * Fetches a web page, extracts and filters its links, and prints the results in the requested format.
+ *
+ * Reads CLI options (URL, --internal, --external, --filter, --format, --timeout) via parseArgs().
+ * If no URL is provided, prints usage information and exits with status 1. Otherwise, it requests
+ * the page, extracts links, applies the requested filters, and prints output as JSON (default),
+ * CSV, or a simple list. On network or processing errors (including timeouts) it prints a JSON
+ * error object to stderr and exits with status 1.
+ */
 async function main() {
   const options = parseArgs();
 
