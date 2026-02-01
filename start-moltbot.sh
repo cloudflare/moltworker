@@ -275,6 +275,11 @@ EOFNODE
 # START GATEWAY
 # ============================================================
 # Note: R2 backup sync is handled by the Worker's cron trigger
+
+# Auto-heal config by stripping unrecognized keys (self-heals on schema changes)
+echo "Running config doctor to validate and fix configuration..."
+clawdbot doctor --fix || echo "Warning: doctor --fix failed, continuing anyway"
+
 echo "Starting Moltbot Gateway..."
 echo "Gateway will be available on port 18789"
 
