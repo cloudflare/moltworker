@@ -306,6 +306,20 @@ All endpoints require the `CDP_SECRET` header for authentication.
 
 The container includes pre-installed skills in `/root/clawd/skills/`:
 
+| Skill | Description |
+|-------|-------------|
+| **cloudflare-browser** | Browser automation via CDP for screenshots, scraping, video capture |
+| **ai-tools** | AI/ML utilities: embeddings, vision analysis, summarization, sentiment |
+| **crypto** | Cryptographic utilities: encryption, hashing, key generation |
+| **data-transform** | Data conversion: JSON, CSV, XML, YAML, Markdown with JSONPath queries |
+| **system-info** | System monitoring: CPU, memory, disk, health checks, Prometheus metrics |
+| **web-scraper** | Web scraping: content extraction, metadata, links, structured data |
+| **code-runner** | Code execution: JavaScript, TypeScript, Python, Shell with sandboxing |
+| **http-client** | HTTP requests: GET, POST, PUT, DELETE with headers and timeouts |
+| **file-utils** | File operations: list, read, write, search with glob patterns |
+| **datetime** | Date/time utilities: timezone conversion, duration calculation |
+| **memory** | Persistent storage: key-value store, notes, reminders |
+
 ### cloudflare-browser
 
 Browser automation via the CDP shim. Requires `CDP_SECRET` and `WORKER_URL` to be set (see [Browser Automation](#optional-browser-automation-cdp) above).
@@ -324,7 +338,115 @@ node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js https://example
 node /root/clawd/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4 --scroll
 ```
 
-See `skills/cloudflare-browser/SKILL.md` for full documentation.
+### ai-tools
+
+AI/ML capabilities including embeddings, vision analysis, summarization, and sentiment analysis. Requires `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+
+**Scripts:**
+- `embeddings.js` - Generate vector embeddings for semantic search
+- `vision.js` - Analyze images with multimodal AI
+- `extract.js` - Extract structured data from text
+- `summarize.js` - Intelligent text summarization
+- `sentiment.js` - Sentiment and emotion analysis
+
+**Usage:**
+```bash
+# Generate embeddings
+node /root/clawd/skills/ai-tools/scripts/embeddings.js "Your text here"
+
+# Analyze an image
+node /root/clawd/skills/ai-tools/scripts/vision.js image.png "Describe this image"
+
+# Extract structured data
+node /root/clawd/skills/ai-tools/scripts/extract.js "John, 30, NYC" --schema '{"name":"string","age":"number"}'
+```
+
+### crypto
+
+Modern cryptographic utilities for encryption, hashing, and key generation.
+
+**Scripts:**
+- `hash.js` - SHA-256/384/512 hashing with HMAC support
+- `encrypt.js` / `decrypt.js` - AES-256-GCM encryption
+- `random.js` - Cryptographically secure random generation
+- `keygen.js` - RSA, ECDSA, Ed25519 key pair generation
+
+**Usage:**
+```bash
+# Hash data
+node /root/clawd/skills/crypto/scripts/hash.js "data" --algorithm sha256
+
+# Encrypt with password
+node /root/clawd/skills/crypto/scripts/encrypt.js "secret" --password "mypass"
+
+# Generate API key
+node /root/clawd/skills/crypto/scripts/random.js --bytes 32 --encoding base64url
+```
+
+### data-transform
+
+Convert and query data between JSON, CSV, XML, YAML, and Markdown formats.
+
+**Scripts:**
+- `convert.js` - Format conversion (JSON ↔ CSV ↔ XML ↔ Markdown)
+- `query.js` - JSONPath queries on data
+- `transform.js` - Map, filter, sort, group operations
+- `diff.js` - Compare two data files
+
+**Usage:**
+```bash
+# Convert JSON to CSV
+node /root/clawd/skills/data-transform/scripts/convert.js data.json --to csv
+
+# Query with JSONPath
+node /root/clawd/skills/data-transform/scripts/query.js data.json "$.users[*].name"
+```
+
+### system-info
+
+System monitoring and health checking utilities.
+
+**Scripts:**
+- `overview.js` - Full system information (CPU, memory, disk, network)
+- `health.js` - HTTP health checks for services
+- `processes.js` - Process listing and monitoring
+- `metrics.js` - Export metrics (JSON, Prometheus, StatsD)
+- `env.js` - Environment variable diagnostics
+
+**Usage:**
+```bash
+# System overview
+node /root/clawd/skills/system-info/scripts/overview.js
+
+# Health check
+node /root/clawd/skills/system-info/scripts/health.js https://api.example.com/health
+
+# Prometheus metrics
+node /root/clawd/skills/system-info/scripts/metrics.js --format prometheus
+```
+
+### code-runner
+
+Execute code snippets in multiple languages with timeout protection.
+
+**Scripts:**
+- `run.js` - Execute code in JS, TS, Python, Shell
+- `eval.js` - Quick JavaScript expression evaluation
+- `benchmark.js` - Benchmark code execution time
+
+**Usage:**
+```bash
+# Run JavaScript
+node /root/clawd/skills/code-runner/scripts/run.js --lang js "console.log('Hello')"
+
+# Run Python
+node /root/clawd/skills/code-runner/scripts/run.js --lang python "print('Hello')"
+
+# Quick eval
+node /root/clawd/skills/code-runner/scripts/eval.js "Math.sqrt(16) * 2"
+```
+
+See each skill's `SKILL.md` file for full documentation.
 
 ## Optional: Cloudflare AI Gateway
 
