@@ -94,14 +94,28 @@ else
     echo "R2 not mounted, starting fresh"
 fi
 
-# Restore skills from R2 backup if available (only if R2 is newer)
+# Restore full workspace from R2 backup if available (only if R2 is newer)
+# This includes memory, tools, and custom files created by agents
+WORKSPACE_DIR="/root/clawd"
+if [ -d "$BACKUP_DIR/clawd" ] && [ "$(ls -A $BACKUP_DIR/clawd 2>/dev/null)" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring full workspace from $BACKUP_DIR/clawd..."
+        mkdir -p "$WORKSPACE_DIR"
+        cp -a "$BACKUP_DIR/clawd/." "$WORKSPACE_DIR/"
+        echo "Restored workspace from R2 backup"
+    fi
+fi
+
+# Restore skills from R2 backup if available (legacy path, backwards compatibility)
+# Note: skills are now included in the full workspace backup above, but we keep this
+# for backwards compatibility with existing R2 backups that only have skills/
 SKILLS_DIR="/root/clawd/skills"
 if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ]; then
     if should_restore_from_r2; then
-        echo "Restoring skills from $BACKUP_DIR/skills..."
+        echo "Restoring skills from legacy path $BACKUP_DIR/skills..."
         mkdir -p "$SKILLS_DIR"
         cp -a "$BACKUP_DIR/skills/." "$SKILLS_DIR/"
-        echo "Restored skills from R2 backup"
+        echo "Restored skills from R2 backup (legacy)"
     fi
 fi
 
