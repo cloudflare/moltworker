@@ -11,7 +11,13 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
 
   // Normalize the base URL by removing trailing slashes
   const normalizedBaseUrl = env.AI_GATEWAY_BASE_URL?.replace(/\/+$/, '');
-  const isOpenAIGateway = normalizedBaseUrl?.endsWith('/openai');
+  // Detect OpenAI-compatible gateways (fixes #97)
+  // Check for: explicit env var, /openai suffix, or known OpenAI-compatible domains
+  const isOpenAIGateway = env.OPENAI_COMPATIBLE === 'true' ||
+    normalizedBaseUrl?.endsWith('/openai') ||
+    normalizedBaseUrl?.includes('openai.com') ||
+    normalizedBaseUrl?.includes('z.ai') ||
+    normalizedBaseUrl?.includes('openrouter.ai');
 
   // AI Gateway vars take precedence
   // Map to the appropriate provider env var based on the gateway endpoint

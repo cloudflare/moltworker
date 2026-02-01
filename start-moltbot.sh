@@ -227,8 +227,15 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 // Usage: Set AI_GATEWAY_BASE_URL or ANTHROPIC_BASE_URL to your endpoint like:
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
+// For OpenAI-compatible gateways that don't end in /openai (e.g., z.ai), set OPENAI_COMPATIBLE=true
 const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
-const isOpenAI = baseUrl.endsWith('/openai');
+// Detect OpenAI-compatible gateways (fixes #97)
+// Check for: explicit env var, /openai suffix, or known OpenAI-compatible domains
+const isOpenAI = process.env.OPENAI_COMPATIBLE === 'true' ||
+    baseUrl.endsWith('/openai') ||
+    baseUrl.includes('openai.com') ||
+    baseUrl.includes('z.ai') ||
+    baseUrl.includes('openrouter.ai');
 
 if (isOpenAI) {
     // Create custom openai provider config with baseUrl override

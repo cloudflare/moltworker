@@ -93,6 +93,7 @@ The easiest way to protect your worker is using the built-in Cloudflare Access i
 5. Click **Manage Cloudflare Access** to configure who can access:
    - Add your email address to the allow list
    - Or configure other identity providers (Google, GitHub, etc.)
+   - **Note:** If the link doesn't work, go to the [Zero Trust Dashboard](https://one.dash.cloudflare.com/) → **Access** → **Applications** to find your application
 6. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
 
 ### 2. Set Access Secrets
@@ -300,7 +301,7 @@ npm run deploy
 | `GET /cdp/json/new` | Create a new browser target |
 | `WS /cdp/devtools/browser/{id}` | WebSocket connection for CDP commands |
 
-All endpoints require the `CDP_SECRET` header for authentication.
+All endpoints require authentication via the `secret` query parameter (e.g., `?secret=<CDP_SECRET>`).
 
 ## Built-in Skills
 
@@ -364,6 +365,7 @@ The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (fallback if AI Gateway not configured) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL (fallback) |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
+| `OPENAI_COMPATIBLE` | No | Set to `true` to force OpenAI mode for custom gateways (e.g., z.ai) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
 | `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
