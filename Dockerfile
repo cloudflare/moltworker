@@ -27,7 +27,7 @@ RUN mkdir -p /root/.clawdbot \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-01-28-v26-browser-skill
+# Build cache bust: 2026-02-01-v27-workspace-specs
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
@@ -36,6 +36,10 @@ COPY moltbot.json.template /root/.clawdbot-templates/moltbot.json.template
 
 # Copy custom skills
 COPY skills/ /root/clawd/skills/
+
+# Copy workspace templates (specs, config)
+# These provide baseline files that will be overwritten by R2 restore if backup exists
+COPY workspace/ /root/clawd/
 
 # Set working directory
 WORKDIR /root/clawd
