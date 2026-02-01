@@ -84,9 +84,7 @@ describe('mountR2Storage', () => {
             accessKeyId: 'key123',
             secretAccessKey: 'secret',
           },
-          s3fsOptions: {
-            nonempty: '1',
-          },
+          s3fsOptions: ['nonempty'],
         }
       );
     });

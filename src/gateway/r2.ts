@@ -70,9 +70,8 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
         secretAccessKey: env.R2_SECRET_ACCESS_KEY,
       },
       // Allow mounting even if the directory is not empty
-      s3fsOptions: {
-        nonempty: '1',
-      },
+      // s3fsOptions expects an array of strings (s3fs mount options)
+      s3fsOptions: ['nonempty'],
     });
     console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
     return true;
