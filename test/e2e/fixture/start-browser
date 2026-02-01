@@ -1,0 +1,27 @@
+#!/bin/bash
+# Start playwright-cli browser session for E2E testing
+
+set -e
+
+SESSION_NAME="moltworker-e2e"
+
+# Stop and delete any existing session (delete needed to change headed/headless mode)
+playwright-cli session-stop "$SESSION_NAME" >/dev/null 2>&1 || true
+playwright-cli session-delete "$SESSION_NAME" >/dev/null 2>&1 || true
+
+# Build the open command args
+GLOBAL_ARGS=("--session=$SESSION_NAME")
+
+# Run headed if PLAYWRIGHT_HEADED is set
+if [ "${PLAYWRIGHT_HEADED:-}" = "1" ] || [ "${PLAYWRIGHT_HEADED:-}" = "true" ]; then
+    GLOBAL_ARGS+=("--headed")
+fi
+
+# Open the browser to a blank page first (will navigate later in tests)
+# Redirect all playwright output to /dev/null since it's very verbose
+playwright-cli "${GLOBAL_ARGS[@]}" open "about:blank" >/dev/null 2>&1 &
+
+# Give it a moment to start
+sleep 2
+
+echo "ready"

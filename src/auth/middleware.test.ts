@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isDevMode, extractJWT } from './middleware';
+import { isDevMode, isE2ETestMode, extractJWT } from './middleware';
 import type { MoltbotEnv } from '../types';
 import type { Context } from 'hono';
 import type { AppEnv } from '../types';
@@ -29,6 +29,28 @@ describe('isDevMode', () => {
   it('returns false when DEV_MODE is empty string', () => {
     const env = createMockEnv({ DEV_MODE: '' });
     expect(isDevMode(env)).toBe(false);
+  });
+});
+
+describe('isE2ETestMode', () => {
+  it('returns true when E2E_TEST_MODE is "true"', () => {
+    const env = createMockEnv({ E2E_TEST_MODE: 'true' });
+    expect(isE2ETestMode(env)).toBe(true);
+  });
+
+  it('returns false when E2E_TEST_MODE is undefined', () => {
+    const env = createMockEnv();
+    expect(isE2ETestMode(env)).toBe(false);
+  });
+
+  it('returns false when E2E_TEST_MODE is "false"', () => {
+    const env = createMockEnv({ E2E_TEST_MODE: 'false' });
+    expect(isE2ETestMode(env)).toBe(false);
+  });
+
+  it('returns false when E2E_TEST_MODE is any other value', () => {
+    const env = createMockEnv({ E2E_TEST_MODE: 'yes' });
+    expect(isE2ETestMode(env)).toBe(false);
   });
 });
 
@@ -149,6 +171,17 @@ describe('createAccessMiddleware', () => {
 
   it('skips auth and sets dev user when DEV_MODE is true', async () => {
     const { c, setMock } = createFullMockContext({ env: { DEV_MODE: 'true' } });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(setMock).toHaveBeenCalledWith('accessUser', { email: 'dev@localhost', name: 'Dev User' });
+  });
+
+  it('skips auth and sets dev user when E2E_TEST_MODE is true', async () => {
+    const { c, setMock } = createFullMockContext({ env: { E2E_TEST_MODE: 'true' } });
     const middleware = createAccessMiddleware({ type: 'json' });
     const next = vi.fn();
 

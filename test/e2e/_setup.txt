@@ -1,0 +1,26 @@
+===
+start moltworker server
+===
+./start-server -v
+---
+{{ s }}
+---
+where
+* strip(s) endswith "ready"
+
+===
+start playwright browser
+===
+./start-browser
+---
+ready
+
+===
+start video recording
+===
+./pw --session=moltworker-e2e video-start
+---
+{{ output }}
+---
+where
+* output contains "Video recording started"

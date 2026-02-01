@@ -1,0 +1,37 @@
+#!/bin/bash
+# Stop the moltworker and clean up
+
+set -e
+
+# Stop wrangler if running
+if [ -f "$CCTR_FIXTURE_DIR/wrangler.pid" ]; then
+    pid=$(cat "$CCTR_FIXTURE_DIR/wrangler.pid")
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        # Wait for it to die
+        for i in {1..10}; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                break
+            fi
+            sleep 0.5
+        done
+        # Force kill if still running
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$CCTR_FIXTURE_DIR/wrangler.pid"
+fi
+
+# Kill any remaining wrangler processes on our port
+pkill -f "wrangler.*--port.*8686" 2>/dev/null || true
+pkill -f "wrangler dev" 2>/dev/null || true
+
+# Stop and remove sandbox containers
+docker ps -q --filter "name=workerd-moltbot-sandbox" 2>/dev/null | xargs -r docker stop 2>/dev/null || true
+docker ps -aq --filter "name=workerd-moltbot-sandbox" 2>/dev/null | xargs -r docker rm 2>/dev/null || true
+
+# Clean up temp files
+rm -f "$CCTR_FIXTURE_DIR/.dev.vars.e2e"
+rm -f "$CCTR_FIXTURE_DIR/wrangler.log"
+rm -f "$CCTR_FIXTURE_DIR/gateway-token.txt"
+
+echo "stopped"

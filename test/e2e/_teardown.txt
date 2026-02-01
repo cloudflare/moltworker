@@ -1,0 +1,46 @@
+===
+stop video recording
+===
+./pw --session=moltworker-e2e video-stop
+---
+{{ output }}
+---
+where
+* output contains "Video"
+
+===
+save video recording
+===
+mkdir -p /tmp/moltworker-e2e-videos
+datetime=$(date +%Y%m%d-%H%M%S)
+for f in ./.playwright-cli/*.webm; do
+  if [ -f "$f" ]; then
+    cp "$f" "/tmp/moltworker-e2e-videos/${datetime}.webm"
+    echo "video saved to /tmp/moltworker-e2e-videos/${datetime}.webm"
+  fi
+done
+---
+{{ output }}
+---
+where
+* output contains "video saved to"
+
+===
+stop playwright browser
+===
+./stop-browser
+---
+{{ output }}
+---
+where
+* output contains "stopped"
+
+===
+stop moltworker server
+===
+./stop-server
+---
+{{ s }}
+---
+where
+* strip(s) endswith "stopped"

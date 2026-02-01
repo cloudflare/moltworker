@@ -6,6 +6,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true
 
+# E2E test mode - skips Cloudflare Access auth but keeps device pairing enabled
+# Use this for automated tests that need to test the real pairing flow
+# E2E_TEST_MODE=true
+
 # Enable debug routes at /debug/* (optional)
 # DEBUG_ROUTES=true
 

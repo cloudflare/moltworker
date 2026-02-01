@@ -1,0 +1,28 @@
+#!/bin/bash
+# Wrapper for playwright-cli that returns non-zero exit code on errors.
+#
+# playwright-cli has a bug where it ignores the isError flag returned from
+# the daemon. In program.js line ~279, it only does:
+#
+#   console.log(result.text);
+#   session.close();
+#
+# But it should also do:
+#
+#   if (result.isError) process.exit(1);
+#
+# Until this is fixed upstream, we detect errors by checking for "### Error"
+# in the output (which is the format used by browserServerBackend.js).
+#
+# See: https://github.com/microsoft/playwright/blob/main/packages/playwright/src/mcp/terminal/program.ts
+
+output=$(playwright-cli "$@" 2>&1)
+exit_code=$?
+
+echo "$output"
+
+if echo "$output" | grep -q "^### Error"; then
+  exit 1
+fi
+
+exit $exit_code
