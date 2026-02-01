@@ -1,8 +1,10 @@
-/* App layout styles */
+/* App layout styles – Modern CSS Grid version (better than flex for page structure) */
+
 .app {
   min-height: 100vh;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr;     /* header: content size, main: remaining space */
+  background-color: var(--bg-color, #f8f9fa); /* optional fallback bg */
 }
 
 .app-header {
@@ -13,34 +15,60 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+  position: relative;           /* useful if you add sticky later */
+  z-index: 10;                  /* keeps header above main content if needed */
 }
 
 .header-logo {
   height: 36px;
   width: auto;
+  object-fit: contain;          /* better logo scaling */
 }
 
 .app-header h1 {
   font-size: 1.5rem;
   font-weight: 600;
   color: var(--text-primary);
+  margin: 0;                    /* reset default margin */
 }
 
 .app-main {
-  flex: 1;
   padding: 2rem;
   max-width: 1200px;
   margin: 0 auto;
   width: 100%;
+  overflow-y: auto;             /* smooth scroll if content overflows */
+  background-color: var(--main-bg, transparent); /* optional */
 }
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
   .app-header {
     padding: 1rem;
+    flex-wrap: wrap;            /* logo + title stack nicely on small screens */
+    justify-content: center;    /* center on mobile if needed */
   }
 
   .app-main {
     padding: 1rem;
   }
+
+  .app-header h1 {
+    font-size: 1.3rem;          /* slightly smaller on mobile */
+  }
 }
+
+/* Optional nice-to-have additions (comment out if not needed) */
+/* 
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-main {
+    scroll-behavior: smooth;
+  }
+}
+*/
