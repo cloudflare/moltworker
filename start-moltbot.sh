@@ -258,10 +258,12 @@ if (isOpenAI) {
     }
     config.models.providers.anthropic = providerConfig;
     // Add models to the allowlist so they appear in /models
-    config.agents.defaults.models['zai/' + opusModel] = { alias: 'Opus' };
-    config.agents.defaults.models['zai/' + sonnetModel] = { alias: 'Sonnet' };
-    config.agents.defaults.models['zai/' + haikuModel] = { alias: 'Haiku' };
-    config.agents.defaults.model.primary = 'zai/' + opusModel;
+    // Ensure models object exists for this code path
+    config.agents.defaults.models = config.agents.defaults.models || {};
+    config.agents.defaults.models['anthropic/' + opusModel] = { alias: 'Opus' };
+    config.agents.defaults.models['anthropic/' + sonnetModel] = { alias: 'Sonnet' };
+    config.agents.defaults.models['anthropic/' + haikuModel] = { alias: 'Haiku' };
+    config.agents.defaults.model.primary = 'anthropic/' + opusModel;
 } else {
     // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
