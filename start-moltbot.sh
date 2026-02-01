@@ -187,8 +187,12 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     config.channels.telegram = config.channels.telegram || {};
     config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
     config.channels.telegram.enabled = true;
-    config.channels.telegram.dm = config.channels.telegram.dm || {};
-    config.channels.telegram.dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    const telegramDmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    config.channels.telegram.dmPolicy = telegramDmPolicy;
+    // "open" policy requires allowFrom: ["*"]
+    if (telegramDmPolicy === 'open') {
+        config.channels.telegram.allowFrom = ['*'];
+    }
 }
 
 // Discord configuration
@@ -196,8 +200,7 @@ if (process.env.DISCORD_BOT_TOKEN) {
     config.channels.discord = config.channels.discord || {};
     config.channels.discord.token = process.env.DISCORD_BOT_TOKEN;
     config.channels.discord.enabled = true;
-    config.channels.discord.dm = config.channels.discord.dm || {};
-    config.channels.discord.dm.policy = process.env.DISCORD_DM_POLICY || 'pairing';
+    config.channels.discord.dmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
 }
 
 // Slack configuration
