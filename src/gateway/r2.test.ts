@@ -84,6 +84,9 @@ describe('mountR2Storage', () => {
             accessKeyId: 'key123',
             secretAccessKey: 'secret',
           },
+          s3fsOptions: {
+            nonempty: '1',
+          },
         }
       );
     });
@@ -119,9 +122,10 @@ describe('mountR2Storage', () => {
       const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox({ mounted: false });
       mountBucketMock.mockRejectedValue(new Error('Mount failed'));
       startProcessMock
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess(''));
-      
+        .mockResolvedValueOnce(createMockProcess('')) // isR2Mounted check
+        .mockResolvedValueOnce(createMockProcess('')) // ls -A check for existing files
+        .mockResolvedValueOnce(createMockProcess('')); // isR2Mounted check after error
+
       const env = createMockEnvWithR2();
 
       const result = await mountR2Storage(sandbox, env);
@@ -136,11 +140,12 @@ describe('mountR2Storage', () => {
     it('returns true if mount fails but check shows it is actually mounted', async () => {
       const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox();
       startProcessMock
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'));
-      
+        .mockResolvedValueOnce(createMockProcess('')) // isR2Mounted check
+        .mockResolvedValueOnce(createMockProcess('')) // ls -A check for existing files
+        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n')); // isR2Mounted check after error
+
       mountBucketMock.mockRejectedValue(new Error('Transient error'));
-      
+
       const env = createMockEnvWithR2();
 
       const result = await mountR2Storage(sandbox, env);
