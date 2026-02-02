@@ -40,8 +40,15 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - name: base
+          - name: aig-byok
             env: {}
+          - name: anthropic-direct
+            env:
+              USE_ANTHROPIC_DIRECT: "true"
+          - name: aig-authenticated
+            env:
+              USE_ANTHROPIC_DIRECT: "true"
+              USE_AI_GATEWAY: "true"
           - name: telegram
             env:
               TELEGRAM_BOT_TOKEN: "fake-telegram-bot-token-for-e2e"
@@ -80,8 +87,12 @@ jobs:
         id: e2e
         continue-on-error: true
         env:
-          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
-          AI_GATEWAY_BASE_URL: ${{ secrets.AI_GATEWAY_BASE_URL }}
+          # aig-byok uses AI Gateway with BYOK/Unified Billing (no direct key)
+          # anthropic-direct uses ANTHROPIC_API_KEY only (no gateway)
+          # aig-authenticated uses both (authenticated gateway + direct key)
+          AI_GATEWAY_API_KEY: ${{ (matrix.config.env.USE_ANTHROPIC_DIRECT != 'true' || matrix.config.env.USE_AI_GATEWAY == 'true') && secrets.AI_GATEWAY_API_KEY || '' }}
+          AI_GATEWAY_BASE_URL: ${{ (matrix.config.env.USE_ANTHROPIC_DIRECT != 'true' || matrix.config.env.USE_AI_GATEWAY == 'true') && secrets.AI_GATEWAY_BASE_URL || '' }}
+          ANTHROPIC_API_KEY: ${{ matrix.config.env.USE_ANTHROPIC_DIRECT == 'true' && secrets.ANTHROPIC_API_KEY || '' }}
           TELEGRAM_BOT_TOKEN: ${{ matrix.config.env.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
           DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}
