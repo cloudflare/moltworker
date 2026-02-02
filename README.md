@@ -328,32 +328,53 @@ See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
 ## Optional: Cloudflare AI Gateway
 
-You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. AI Gateway supports multiple providers — configure your preferred provider in the gateway and use these env vars:
+You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. AI Gateway supports multiple providers simultaneously using the unified `/compat` endpoint.
 
-### Setup
+### Multi-Provider Setup
 
 1. Create an AI Gateway in the [AI Gateway section](https://dash.cloudflare.com/?to=/:account/ai/ai-gateway/create-gateway) of the Cloudflare Dashboard.
-2. Add a provider (e.g., Anthropic) to your gateway
-3. Set the gateway secrets:
-
-You'll find the base URL on the Overview tab of your newly created gateway. At the bottom of the page, expand the **Native API/SDK Examples** section and select "Anthropic".
+2. Add your providers to the gateway (Anthropic, Google AI Studio, OpenAI, etc.)
+3. Configure API keys for each provider in the AI Gateway dashboard (Cloudflare stores them securely)
+4. Set the `/compat` endpoint URL:
 
 ```bash
-# Your provider's API key (e.g., Anthropic API key)
-npx wrangler secret put AI_GATEWAY_API_KEY
-
-# Your AI Gateway endpoint URL
+# Your AI Gateway /compat endpoint URL (supports all providers)
 npx wrangler secret put AI_GATEWAY_BASE_URL
-# Enter: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
+# Enter: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat
+
+# Your Cloudflare API token (for authenticating to AI Gateway)
+npx wrangler secret put ANTHROPIC_API_KEY
+# Note: Despite the name, this is your Cloudflare API token when using AI Gateway
 ```
 
-4. Redeploy:
+5. (Optional) To use Google Gemini models, set the API key:
+
+```bash
+npx wrangler secret put GOOGLE_API_KEY
+# This switches the primary model to Gemini Flash with fallbacks
+```
+
+6. Redeploy:
 
 ```bash
 npm run deploy
 ```
 
-The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
+### How It Works
+
+The `/compat` endpoint uses OpenAI-compatible format with provider-prefixed model names:
+- `anthropic/claude-haiku-4-5` (alias: `haiku`)
+- `anthropic/claude-sonnet-4-5` (alias: `sonnet`)
+- `google-ai-studio/gemini-3-flash-preview` (alias: `flash`)
+- `openai/gpt-5.2` (alias: `gpt`)
+
+Switch models in chat using `/model flash` or `/model haiku`.
+
+**Primary model selection:**
+- Without `GOOGLE_API_KEY`: Claude Haiku → Sonnet → Opus fallback chain
+- With `GOOGLE_API_KEY`: Gemini Flash → Gemini Pro → Haiku → Sonnet → Opus fallback chain
+
+See [Cloudflare AI Gateway Dynamic Routing](https://developers.cloudflare.com/ai-gateway/features/dynamic-routing/) for advanced routing options.
 
 ## All Secrets Reference
 

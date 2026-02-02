@@ -60,14 +60,19 @@ should_restore_from_r2() {
     echo "Local last sync: $LOCAL_TIME"
     
     # Convert to epoch seconds for comparison
-    R2_EPOCH=$(date -d "$R2_TIME" +%s 2>/dev/null || echo "0")
-    LOCAL_EPOCH=$(date -d "$LOCAL_TIME" +%s 2>/dev/null || echo "0")
+    # Note: Alpine/BusyBox doesn't support `date -d`, use string comparison instead
+    # Timestamps are in ISO 8601 format which sorts lexicographically
+    if [ -z "$R2_TIME" ] || [ -z "$LOCAL_TIME" ]; then
+        echo "Missing timestamp, cannot compare"
+        return 1
+    fi
     
-    if [ "$R2_EPOCH" -gt "$LOCAL_EPOCH" ]; then
-        echo "R2 backup is newer, will restore"
+    # ISO 8601 timestamps sort lexicographically
+    if [ "$R2_TIME" \> "$LOCAL_TIME" ]; then
+        echo "R2 backup is newer ($R2_TIME > $LOCAL_TIME), will restore"
         return 0
     else
-        echo "Local data is newer or same, skipping restore"
+        echo "Local data is newer or same ($LOCAL_TIME >= $R2_TIME), skipping restore"
         return 1
     fi
 }
@@ -133,7 +138,16 @@ fi
 # ============================================================
 # UPDATE CONFIG FROM ENVIRONMENT VARIABLES
 # ============================================================
-node << EOFNODE
+echo "Verifying config file exists before Node.js update..."
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: Config file $CONFIG_FILE does not exist!"
+    exit 1
+fi
+
+echo "Config file exists, size: $(wc -c < "$CONFIG_FILE") bytes"
+echo "Updating config via Node.js..."
+
+node << 'EOFNODE'
 const fs = require('fs');
 
 const configPath = '/root/.clawdbot/clawdbot.json';
@@ -205,6 +219,8 @@ if (process.env.DISCORD_BOT_TOKEN) {
     config.channels.discord = config.channels.discord || {};
     config.channels.discord.token = process.env.DISCORD_BOT_TOKEN;
     config.channels.discord.enabled = true;
+    // Set groupPolicy to 'disabled' to not allow any guild channels (DMs only)
+    config.channels.discord.groupPolicy = 'disabled';
     const discordDmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
     config.channels.discord.dm = config.channels.discord.dm || {};
     config.channels.discord.dm.policy = discordDmPolicy;
@@ -222,61 +238,167 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     config.channels.slack.enabled = true;
 }
 
-// Base URL override (e.g., for Cloudflare AI Gateway)
-// Usage: Set AI_GATEWAY_BASE_URL or ANTHROPIC_BASE_URL to your endpoint like:
-//   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
-//   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
-const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
-const isOpenAI = baseUrl.endsWith('/openai');
+// Cloudflare AI Gateway configuration
+// The /compat endpoint supports all providers with model names like:
+//   anthropic/claude-sonnet-4-5
+//   google-ai-studio/gemini-2.5-flash
+//   mistral/mistral-large-latest
+// Usage: Set AI_GATEWAY_BASE_URL to:
+//   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/compat
+const aiGatewayBaseUrl = (process.env.AI_GATEWAY_BASE_URL || '').replace(/\/+$/, '');
 
-if (isOpenAI) {
-    // Create custom openai provider config with baseUrl override
-    // Omit apiKey so moltbot falls back to OPENAI_API_KEY env var
-    console.log('Configuring OpenAI provider with base URL:', baseUrl);
-    config.models = config.models || {};
-    config.models.providers = config.models.providers || {};
-    config.models.providers.openai = {
-        baseUrl: baseUrl,
-        api: 'openai-responses',
-        models: [
-            { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
-            { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
-            { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
-        ]
-    };
-    // Add models to the allowlist so they appear in /models
-    config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
-    config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
-    config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    config.agents.defaults.model.primary = 'openai/gpt-5.2';
-} else if (baseUrl) {
-    console.log('Configuring Anthropic provider with base URL:', baseUrl);
-    config.models = config.models || {};
-    config.models.providers = config.models.providers || {};
-    const providerConfig = {
-        baseUrl: baseUrl,
-        api: 'anthropic-messages',
-        models: [
-            { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
-            { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
-            { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
-        ]
-    };
-    // Include API key in provider config if set (required when using custom baseUrl)
-    if (process.env.ANTHROPIC_API_KEY) {
-        providerConfig.apiKey = process.env.ANTHROPIC_API_KEY;
+// Multi-provider model configuration
+config.agents.defaults.models = config.agents.defaults.models || {};
+config.models = config.models || {};
+config.models.providers = config.models.providers || {};
+
+if (aiGatewayBaseUrl) {
+    console.log('Configuring multi-provider via Cloudflare AI Gateway:', aiGatewayBaseUrl);
+    
+    // Build headers for AI Gateway authenticated requests
+    const aiGatewayHeaders = {};
+    if (process.env.AI_GATEWAY_API_KEY) {
+        console.log('Adding cf-aig-authorization header for authenticated gateway');
+        aiGatewayHeaders['cf-aig-authorization'] = `Bearer ${process.env.AI_GATEWAY_API_KEY}`;
     }
-    config.models.providers.anthropic = providerConfig;
-    // Add models to the allowlist so they appear in /models
-    config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
-    config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
-    config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    
+    // Anthropic provider via AI Gateway
+    if (process.env.ANTHROPIC_API_KEY) {
+        config.models.providers.anthropic = {
+            baseUrl: aiGatewayBaseUrl,
+            api: 'openai-responses',
+            apiKey: process.env.ANTHROPIC_API_KEY,
+            headers: aiGatewayHeaders,
+            models: [
+                { id: 'anthropic/claude-opus-4-5', name: 'Claude Opus 4.5', contextWindow: 200000 },
+                { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
+                { id: 'anthropic/claude-haiku-4-5', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+            ]
+        };
+    }
+    
+    // Google AI provider via AI Gateway
+    if (process.env.GEMINI_API_KEY) {
+        // Google uses x-goog-api-key header instead of Authorization
+        const geminiHeaders = {
+            ...aiGatewayHeaders,
+            'x-goog-api-key': process.env.GEMINI_API_KEY
+        };
+        config.models.providers['google-ai-studio'] = {
+            baseUrl: aiGatewayBaseUrl,
+            api: 'openai-responses',
+            headers: geminiHeaders,
+            models: [
+                { id: 'google-ai-studio/gemini-3-flash-preview', name: 'Gemini 3 Flash', contextWindow: 1000000 },
+                { id: 'google-ai-studio/gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 2000000 },
+            ]
+        };
+    }
+    
+    // OpenAI provider via AI Gateway
+    if (process.env.OPENAI_API_KEY) {
+        config.models.providers.openai = {
+            baseUrl: aiGatewayBaseUrl,
+            api: 'openai-responses',
+            apiKey: process.env.OPENAI_API_KEY,
+            headers: aiGatewayHeaders,
+            models: [
+                { id: 'openai/gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
+                { id: 'openai/gpt-5.2-codex', name: 'GPT-5.2 Codex', contextWindow: 200000 },
+                { id: 'openai/gpt-5', name: 'GPT-5', contextWindow: 200000 },
+            ]
+        };
+    }
+    
+    // Model aliases (models from providers are automatically available)
+    config.agents.defaults.models['anthropic/claude-opus-4-5'] = { alias: 'opus' };
+    config.agents.defaults.models['anthropic/claude-sonnet-4-5'] = { alias: 'sonnet' };
+    config.agents.defaults.models['anthropic/claude-haiku-4-5'] = { alias: 'haiku' };
+    config.agents.defaults.models['google-ai-studio/gemini-3-flash-preview'] = { alias: 'flash' };
+    config.agents.defaults.models['google-ai-studio/gemini-3-pro-preview'] = { alias: 'gemini' };
+    config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'gpt' };
+    config.agents.defaults.models['openai/gpt-5.2-codex'] = { alias: 'codex' };
+    config.agents.defaults.models['openai/gpt-5'] = { alias: 'gpt5' };
+    
+    // Primary model with fallback chain
+    // When using AI Gateway BYOK, always use Gemini Flash as primary
+    console.log('Using AI Gateway BYOK with Gemini Flash as primary');
+    config.agents.defaults.model.primary = 'google-ai-studio/gemini-3-flash-preview';
+    config.agents.defaults.model.fallbacks = [
+        'google-ai-studio/gemini-3-pro-preview',
+        'anthropic/claude-haiku-4-5',
+        'anthropic/claude-sonnet-4-5',
+        'anthropic/claude-opus-4-5'
+    ];
 } else {
-    // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+    // No AI Gateway: Configure direct provider access if API keys are provided
+    console.log('No AI Gateway configured, using direct provider access');
+    
+    // Configure Anthropic directly if API key provided
+    if (process.env.ANTHROPIC_API_KEY) {
+        console.log('Configuring Anthropic provider with direct access');
+        config.models.providers.anthropic = {
+            api: 'anthropic-messages',
+            models: [
+                { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', contextWindow: 200000 },
+                { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
+                { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+            ]
+        };
+        config.models.providers.anthropic.apiKey = process.env.ANTHROPIC_API_KEY;
+        
+        // Add model aliases
+        config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'opus' };
+        config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'sonnet' };
+        config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'haiku' };
+    }
+    
+    // Configure Google Gemini directly if API key provided
+    if (process.env.GEMINI_API_KEY) {
+        console.log('Configuring Google Gemini provider with direct access');
+        config.models.providers.google = {
+            api: 'google-generative-ai',
+            models: [
+                { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash', contextWindow: 1000000 },
+                { id: 'gemini-2.0-flash-thinking-exp-1219', name: 'Gemini 2.0 Flash Thinking', contextWindow: 32000 },
+            ]
+        };
+        config.models.providers.google.apiKey = process.env.GEMINI_API_KEY;
+        
+        // Add model aliases
+        config.agents.defaults.models['google/gemini-2.0-flash-exp'] = { alias: 'flash' };
+        config.agents.defaults.models['google/gemini-2.0-flash-thinking-exp-1219'] = { alias: 'gemini-thinking' };
+    }
+    
+    // Configure OpenAI directly if API key provided
+    if (process.env.OPENAI_API_KEY) {
+        console.log('Configuring OpenAI provider with direct access');
+        config.models.providers.openai = {
+            api: 'openai-responses',
+            models: [
+                { id: 'gpt-4o', name: 'GPT-4o', contextWindow: 128000 },
+                { id: 'gpt-4o-mini', name: 'GPT-4o Mini', contextWindow: 128000 },
+            ]
+        };
+        config.models.providers.openai.apiKey = process.env.OPENAI_API_KEY;
+        
+        // Add model aliases
+        config.agents.defaults.models['openai/gpt-4o'] = { alias: 'gpt4o' };
+        config.agents.defaults.models['openai/gpt-4o-mini'] = { alias: 'gpt4o-mini' };
+    }
+    
+    // Set primary model based on available providers
+    if (process.env.GEMINI_API_KEY) {
+        console.log('Using Gemini Flash as primary (direct access)');
+        config.agents.defaults.model.primary = 'google/gemini-2.0-flash-exp';
+    } else if (process.env.ANTHROPIC_API_KEY) {
+        console.log('Using Claude Haiku as primary (direct access)');
+        config.agents.defaults.model.primary = 'anthropic/claude-haiku-4-5-20251001';
+    } else {
+        // Fallback to built-in pi-ai catalog
+        console.log('No API keys configured, using built-in catalog');
+        config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5';
+    }
 }
 
 // Write updated config
@@ -284,6 +406,18 @@ fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
 console.log('Config:', JSON.stringify(config, null, 2));
 EOFNODE
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: Node.js config update failed!"
+    exit 1
+fi
+
+echo "Verifying config file after Node.js update..."
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERROR: Config file disappeared after Node.js update!"
+    exit 1
+fi
+echo "Config file verified, size: $(wc -c < "$CONFIG_FILE") bytes"
 
 # ============================================================
 # START GATEWAY
