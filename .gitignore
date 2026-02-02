@@ -36,6 +36,9 @@ Thumbs.db
 .secrets.json
 secrets.json
 
+# Convex generated files
+convex/_generated/
+
 # TypeScript
 *.tsbuildinfo
 

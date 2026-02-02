@@ -6,7 +6,7 @@
   "description": "Run Moltbot personal AI assistant in a Cloudflare Sandbox",
   "scripts": {
     "build": "vite build && npm run build:dashboard",
-    "build:dashboard": "cd dashboard && npm install && npx vite build && cp -r dist ../dist/client/mission",
+    "build:dashboard": "cd dashboard && npm install && ln -sfn ../convex convex && npx vite build && cp -r dist ../dist/client/mission",
     "setup": "bash scripts/setup.sh",
     "setup:minimal": "bash scripts/setup.sh --minimal",
     "wizard": "node scripts/wizard.mjs",
