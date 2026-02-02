@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { redactSensitiveParams } from './index';
+import { redactSensitiveParams } from './utils/logging';
 
 describe('redactSensitiveParams', () => {
   it('returns empty string for URL with no query params', () => {
