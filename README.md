@@ -2,7 +2,8 @@
 
 Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) personal AI assistant in a [Cloudflare Sandbox](https://developers.cloudflare.com/sandbox/).
 
-![moltworker architecture](./assets/logo.png)
+![GitHub Repo Banner](https://ghrb.waren.build/banner?header=%F0%9F%A6%9EOpenClaw&subheader=Your+Personal+AI+Assistant+on+Cloudflare+Workers&bg=FEE2E2&color=BB2C2C&headerfont=Inter&subheaderfont=Kinewave&support=true&watermarkpos=bottom-right)
+<!-- Created with GitHub Repo Banner by Waren Gonzaga: https://ghrb.waren.build -->
 
 > **Experimental:** This is a proof of concept demonstrating that OpenClaw can run in Cloudflare Sandbox. It is not officially supported and may break without notice. Use at your own risk.
 
