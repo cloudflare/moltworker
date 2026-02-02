@@ -188,6 +188,9 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
     config.channels.telegram.botToken = process.env.TELEGRAM_BOT_TOKEN;
     config.channels.telegram.enabled = true;
     config.channels.telegram.dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    if (process.env.TELEGRAM_DM_ALLOW_FROM) {
+        config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',');
+    }
 }
 
 // Discord configuration
