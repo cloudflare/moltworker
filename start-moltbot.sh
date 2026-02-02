@@ -285,23 +285,95 @@ if (isOpenAI) {
     config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
 } else {
-    // Default to DeepSeek via OpenRouter for cost efficiency
-    console.log('Configuring OpenRouter with multiple models...');
+    // Default to OpenRouter Auto for intelligent routing
+    console.log('Configuring OpenRouter with comprehensive model catalog...');
 
-    // Add all model aliases
+    // Add all model aliases with descriptions
+    // Format: alias, description (Specialty | Score | Cost In/Out)
     config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['openrouter/deepseek/deepseek-v3.2'] = { alias: 'deep' };
-    config.agents.defaults.models['openrouter/x-ai/grok-code-fast-1'] = { alias: 'grokcode' };
-    config.agents.defaults.models['openrouter/x-ai/grok-4.1-fast'] = { alias: 'grok' };
-    config.agents.defaults.models['openrouter/moonshotai/kimi-k2.5'] = { alias: 'kimi' };
-    config.agents.defaults.models['openrouter/anthropic/claude-haiku-4.5'] = { alias: 'haiku' };
-    config.agents.defaults.models['openrouter/anthropic/claude-sonnet-4.5'] = { alias: 'sonnet' };
-    config.agents.defaults.models['openrouter/google/gemini-3-flash-preview'] = { alias: 'gem3' };
-    config.agents.defaults.models['openrouter/google/gemini-2.5-flash-lite'] = { alias: 'lite' };
-    config.agents.defaults.models['anthropic/claude-opus-4-5'] = { alias: 'opus' };
 
-    // Set DeepSeek as default for cost efficiency
-    config.agents.defaults.model.primary = 'openrouter/deepseek/deepseek-v3.2';
+    // Auto-routing
+    config.agents.defaults.models['openrouter/openrouter/auto'] = {
+        alias: 'auto',
+        description: 'Auto-route | Variable | Variable cost'
+    };
+
+    // General purpose / Default
+    config.agents.defaults.models['openrouter/deepseek/deepseek-chat-v3-0324'] = {
+        alias: 'deep',
+        description: 'Default/General | 68% SWE | $0.25/$0.38'
+    };
+
+    // Coding specialists
+    config.agents.defaults.models['openrouter/qwen/qwen-2.5-coder-32b-instruct'] = {
+        alias: 'qwen',
+        description: 'Coding | 81% SWE | $0.07/$0.16'
+    };
+    config.agents.defaults.models['openrouter/qwen/qwen-2.5-coder-32b-instruct:free'] = {
+        alias: 'qwenfree',
+        description: 'Coding (Free) | 81% SWE | FREE'
+    };
+    config.agents.defaults.models['openrouter/mistralai/devstral-small:free'] = {
+        alias: 'devstral',
+        description: 'Agentic Code | 70% SWE | FREE'
+    };
+    config.agents.defaults.models['openrouter/xiaomi/mimo-vl-7b:free'] = {
+        alias: 'mimo',
+        description: 'Budget/Free Coding | Strong free-tier | FREE'
+    };
+    config.agents.defaults.models['openrouter/x-ai/grok-code-fast-1'] = {
+        alias: 'grokcode',
+        description: 'Code | ~65% SWE | $0.20/$0.50'
+    };
+
+    // Agentic / Tools
+    config.agents.defaults.models['openrouter/x-ai/grok-4.1-fast'] = {
+        alias: 'grok',
+        description: 'Tools/Search/Agentic | #1 τ²-bench | $0.20/$0.50'
+    };
+    config.agents.defaults.models['openrouter/moonshotai/kimi-k2.5'] = {
+        alias: 'kimi',
+        description: 'Visual+Agents | 77% SWE, 78% MMMU | $0.15/$2.50'
+    };
+
+    // Speed / Fast
+    config.agents.defaults.models['openrouter/google/gemini-2.0-flash-001'] = {
+        alias: 'flash',
+        description: 'Speed/Fast Q&A | 1M context | $0.10/$0.40'
+    };
+
+    // Claude models
+    config.agents.defaults.models['openrouter/anthropic/claude-3.5-haiku'] = {
+        alias: 'haiku',
+        description: 'Fast Claude | 73% SWE | $1.00/$5.00'
+    };
+    config.agents.defaults.models['openrouter/anthropic/claude-sonnet-4'] = {
+        alias: 'sonnet',
+        description: 'Premium Reasoning | 77% SWE | $3.00/$15.00'
+    };
+
+    // OpenAI models
+    config.agents.defaults.models['openrouter/openai/gpt-4o-mini'] = {
+        alias: 'mini',
+        description: 'Light Tasks | Good all-round | $0.15/$0.60'
+    };
+    config.agents.defaults.models['openrouter/openai/gpt-4o'] = {
+        alias: 'gpt',
+        description: 'Vision/Tools | 84% MMMU | $2.50/$10.00'
+    };
+
+    // Reasoning models
+    config.agents.defaults.models['openrouter/deepseek/deepseek-reasoner'] = {
+        alias: 'think',
+        description: 'Deep Reasoning | 74% AIME | $0.55/$2.19'
+    };
+    config.agents.defaults.models['openrouter/qwen/qwq-32b-preview'] = {
+        alias: 'qwq',
+        description: 'Budget Reasoning/Math | Strong math | $0.15/$0.40'
+    };
+
+    // Set OpenRouter Auto as default for intelligent routing
+    config.agents.defaults.model.primary = 'openrouter/openrouter/auto';
 }
 
 // Write updated config
