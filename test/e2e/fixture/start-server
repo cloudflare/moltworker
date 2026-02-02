@@ -79,6 +79,13 @@ if [ -f "$PROJECT_DIR/.dev.vars" ]; then
     grep -v -E "^(E2E_TEST_MODE|DEV_MODE|DEBUG_ROUTES|MOLTBOT_GATEWAY_TOKEN)=" "$PROJECT_DIR/.dev.vars" >> "$CCTR_FIXTURE_DIR/.dev.vars.e2e" 2>/dev/null || true
 fi
 
+# Also pick up API keys from environment (for CI)
+for var in AI_GATEWAY_API_KEY AI_GATEWAY_BASE_URL ANTHROPIC_API_KEY OPENAI_API_KEY; do
+    if [ -n "${!var}" ]; then
+        echo "$var=${!var}" >> "$CCTR_FIXTURE_DIR/.dev.vars.e2e"
+    fi
+done
+
 if [ "$VERBOSE" = true ]; then
     log "Generated .dev.vars.e2e contents:"
     cat "$CCTR_FIXTURE_DIR/.dev.vars.e2e" >&2
@@ -126,6 +133,8 @@ for i in {1..180}; do
         log "Open: http://localhost:$PORT/?token=$GATEWAY_TOKEN"
         # Kill the tail process if running
         [ -n "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
+        # Small delay to let stderr flush before stdout
+        sleep 0.1
         echo "ready"
         exit 0
     fi
