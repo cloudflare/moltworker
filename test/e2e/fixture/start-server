@@ -79,8 +79,11 @@ if [ -f "$PROJECT_DIR/.dev.vars" ]; then
     grep -v -E "^(E2E_TEST_MODE|DEV_MODE|DEBUG_ROUTES|MOLTBOT_GATEWAY_TOKEN)=" "$PROJECT_DIR/.dev.vars" >> "$CCTR_FIXTURE_DIR/.dev.vars.e2e" 2>/dev/null || true
 fi
 
-# Also pick up API keys from environment (for CI)
-for var in AI_GATEWAY_API_KEY AI_GATEWAY_BASE_URL ANTHROPIC_API_KEY OPENAI_API_KEY; do
+# Also pick up API keys and channel tokens from environment (for CI)
+for var in AI_GATEWAY_API_KEY AI_GATEWAY_BASE_URL ANTHROPIC_API_KEY OPENAI_API_KEY \
+           TELEGRAM_BOT_TOKEN TELEGRAM_DM_POLICY TELEGRAM_DM_ALLOW_FROM \
+           DISCORD_BOT_TOKEN DISCORD_DM_POLICY \
+           SLACK_BOT_TOKEN SLACK_APP_TOKEN; do
     if [ -n "${!var}" ]; then
         echo "$var=${!var}" >> "$CCTR_FIXTURE_DIR/.dev.vars.e2e"
     fi
@@ -125,11 +128,22 @@ fi
 
 # Wait for server to be ready (container startup can take 1-2 minutes)
 log "Waiting for server to be ready..."
-for i in {1..180}; do
+consecutive_503=0
+TIMEOUT_SECONDS=180
+START_TIME=$(date +%s)
+while true; do
+    ELAPSED=$(($(date +%s) - START_TIME))
+    if [ "$ELAPSED" -ge "$TIMEOUT_SECONDS" ]; then
+        log "Timeout waiting for server after ${ELAPSED}s"
+        [ -n "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
+        cat "$CCTR_FIXTURE_DIR/wrangler.log" >&2
+        exit 1
+    fi
+
     # Check for 200 response, not just any response
     status=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/?token=$GATEWAY_TOKEN" 2>/dev/null || echo "000")
     if [ "$status" = "200" ]; then
-        log "Server is ready! (HTTP $status)"
+        log "Server is ready! (HTTP $status after ${ELAPSED}s)"
         log "Open: http://localhost:$PORT/?token=$GATEWAY_TOKEN"
         # Kill the tail process if running
         [ -n "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
@@ -138,14 +152,26 @@ for i in {1..180}; do
         echo "ready"
         exit 0
     fi
-    if [ "$VERBOSE" = true ] && [ $((i % 10)) -eq 0 ]; then
-        log "Still waiting... ($i seconds, last status: $status)"
+    
+    # Track consecutive 503 errors - these indicate the gateway is failing repeatedly
+    if [ "$status" = "503" ]; then
+        consecutive_503=$((consecutive_503 + 1))
+        # After 3 consecutive 503s, check for fatal errors in the log
+        if [ "$consecutive_503" -ge 3 ]; then
+            if grep -q "Config invalid" "$CCTR_FIXTURE_DIR/wrangler.log" 2>/dev/null; then
+                log "Fatal error: Gateway config is invalid"
+                [ -n "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
+                echo "ERROR: Gateway failed to start due to invalid config:" >&2
+                grep -A5 "Config invalid" "$CCTR_FIXTURE_DIR/wrangler.log" | head -20 >&2
+                exit 1
+            fi
+        fi
+    else
+        consecutive_503=0
+    fi
+    
+    if [ "$VERBOSE" = true ] && [ $((ELAPSED % 10)) -lt 2 ]; then
+        log "Still waiting... (${ELAPSED}s elapsed, last status: $status)"
     fi
     sleep 1
 done
-
-log "Timeout waiting for server"
-# Kill the tail process if running
-[ -n "$TAIL_PID" ] && kill $TAIL_PID 2>/dev/null || true
-cat "$CCTR_FIXTURE_DIR/wrangler.log" >&2
-exit 1

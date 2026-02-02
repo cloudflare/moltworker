@@ -36,6 +36,23 @@ jobs:
       contents: write
       pull-requests: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: base
+            env: {}
+          - name: telegram
+            env:
+              TELEGRAM_BOT_TOKEN: "fake-telegram-bot-token-for-e2e"
+              TELEGRAM_DM_POLICY: "pairing"
+          - name: discord
+            env:
+              DISCORD_BOT_TOKEN: "fake-discord-bot-token-for-e2e"
+              DISCORD_DM_POLICY: "pairing"
+
+    name: e2e (${{ matrix.config.name }})
+
     steps:
       - uses: actions/checkout@v4
 
@@ -59,12 +76,16 @@ jobs:
         with:
           tool: cctr
 
-      - name: Run E2E tests
+      - name: Run E2E tests (${{ matrix.config.name }})
         id: e2e
         continue-on-error: true
         env:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_GATEWAY_BASE_URL: ${{ secrets.AI_GATEWAY_BASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ matrix.config.env.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
+          DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}
+          DISCORD_DM_POLICY: ${{ matrix.config.env.DISCORD_DM_POLICY }}
         run: cctr -vv test/e2e
 
       - name: Convert video and generate thumbnail
@@ -109,11 +130,11 @@ jobs:
         id: prepare
         if: always() && steps.convert.outputs.has_video == 'true'
         run: |
-          mkdir -p /tmp/e2e-video-upload/videos/${{ github.run_id }}
-          cp "${{ steps.convert.outputs.video_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}/
-          cp "${{ steps.convert.outputs.thumb_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}/
-          echo "video_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts/videos/${{ github.run_id }}/${{ steps.convert.outputs.video_name }}" >> $GITHUB_OUTPUT
-          echo "thumb_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts/videos/${{ github.run_id }}/${{ steps.convert.outputs.thumb_name }}" >> $GITHUB_OUTPUT
+          mkdir -p /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}
+          cp "${{ steps.convert.outputs.video_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
+          cp "${{ steps.convert.outputs.thumb_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
+          echo "video_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.convert.outputs.video_name }}" >> $GITHUB_OUTPUT
+          echo "thumb_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.convert.outputs.thumb_name }}" >> $GITHUB_OUTPUT
 
       - name: Upload video to e2e-artifacts branch
         if: always() && steps.convert.outputs.has_video == 'true'
@@ -130,7 +151,7 @@ jobs:
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
-            ## E2E Test Recording
+            ## E2E Test Recording (${{ matrix.config.name }})
 
             ${{ steps.e2e.outcome == 'success' && '✅ Tests passed' || '❌ Tests failed' }}
 
