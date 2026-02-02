@@ -86,20 +86,4 @@
   // - R2_ACCESS_KEY_ID: R2 access key ID (from R2 API tokens)
   // - R2_SECRET_ACCESS_KEY: R2 secret access key (from R2 API tokens)
   // - CF_ACCOUNT_ID: Your Cloudflare account ID (for R2 endpoint URL)
-
-  // Canary environment for safe testing before production
-  // Deploy with: wrangler deploy --env canary
-  // See guides/CANARY-DEPLOYMENT.md for full workflow
-  "env": {
-    "canary": {
-      "name": "ax-moltworker-canary",
-      // Canary uses separate R2 bucket to isolate state
-      "r2_buckets": [
-        {
-          "binding": "MOLTBOT_BUCKET",
-          "bucket_name": "moltbot-data-canary"
-        }
-      ]
-    }
-  }
 }

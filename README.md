@@ -12,8 +12,6 @@ This project packages OpenClaw with the [aX Platform Plugin](https://github.com/
 
 > **Production Ready:** This is the standard deployment method for aX Platform MCP agents.
 
-> **Safe Deployments:** See [Canary Deployment Guide](guides/CANARY-DEPLOYMENT.md) for testing changes before production.
-
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ax-platform/ax-moltworker)
 
 **Need help?** Visit [ax-platform.com](https://ax-platform.com) to contact the team.
