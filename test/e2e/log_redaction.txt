@@ -23,10 +23,12 @@ PASS: secret value not found in logs
 ===
 verify REDACTED placeholder IS in logs (issue #85)
 ===
-if grep -q "\[REDACTED\]" "$CCTR_FIXTURE_DIR/wrangler.log"; then
+# The [REDACTED] value appears URL-encoded in logs as %5BREDACTED%5D
+if grep -qE "(\[REDACTED\]|%5BREDACTED%5D)" "$CCTR_FIXTURE_DIR/wrangler.log"; then
   echo "PASS: [REDACTED] found in logs"
 else
   echo "FAIL: [REDACTED] not found in logs"
+  grep -i redact "$CCTR_FIXTURE_DIR/wrangler.log" || echo "(no redact matches)"
   exit 1
 fi
 ---
