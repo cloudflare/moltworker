@@ -88,6 +88,27 @@ echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
 npm run deploy
 ```
 
+### Option C: Bulk Secrets File
+
+```bash
+# 1. Copy the production template
+cp .prod.vars.example .prod.vars
+
+# 2. Edit .prod.vars with your real values
+#    Generate a gateway token: openssl rand -hex 32
+
+# 3. Upload all secrets at once
+wrangler secret bulk .prod.vars
+
+# 4. Deploy
+npm run deploy
+
+# 5. Delete the secrets file immediately!
+rm .prod.vars
+```
+
+> **Security:** Never commit `.prod.vars` to git. Delete it after uploading secrets.
+
 After deploying, open the Control UI with your token:
 
 ```

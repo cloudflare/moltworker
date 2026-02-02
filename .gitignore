@@ -8,6 +8,7 @@ build-info.json
 # Wrangler
 .wrangler/
 .dev.vars
+.prod.vars
 
 # Logs
 *.log
@@ -26,11 +27,14 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Environment files (secrets should use wrangler secret)
+# Secrets & environment files — NEVER commit actual secrets
 .env
 .env.*
 !.env.example
+*.vars
+!*.vars.example
 .secrets.json
+secrets.json
 
 # TypeScript
 *.tsbuildinfo

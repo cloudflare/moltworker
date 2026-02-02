@@ -1,0 +1,79 @@
+# ============================================================
+# MOLTWORKER PRODUCTION SECRETS
+# ============================================================
+#
+# SETUP:
+#   1. cp .prod.vars.example .prod.vars
+#   2. Fill in your values below
+#   3. wrangler secret bulk .prod.vars
+#   4. npm run deploy
+#   5. rm .prod.vars   (delete immediately — do NOT commit!)
+#
+# NEVER commit .prod.vars to git. This is a PUBLIC repository.
+# ============================================================
+
+# --------------------------------------------------------------
+# REQUIRED: AI Provider (pick one)
+# --------------------------------------------------------------
+
+# Option A: Direct Anthropic API key
+ANTHROPIC_API_KEY=sk-ant-REPLACE_ME
+
+# Option B: Claude Pro/Max subscription token (from `claude setup-token`)
+# ANTHROPIC_OAUTH_TOKEN=REPLACE_ME
+
+# Option C: Cloudflare AI Gateway (comment out Option A/B)
+# AI_GATEWAY_API_KEY=REPLACE_ME
+# AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/YOUR_ACCOUNT_ID/YOUR_GATEWAY_ID/anthropic
+
+# Option D: AI Gateway + BYOK (set both a direct key above AND gateway key)
+# The direct key authenticates with the provider; the gateway key authenticates
+# with AI Gateway via cf-aig-authorization header.
+
+# --------------------------------------------------------------
+# REQUIRED: Gateway Authentication
+# --------------------------------------------------------------
+# Generate with: openssl rand -hex 32
+MOLTBOT_GATEWAY_TOKEN=GENERATE_WITH_openssl_rand_-hex_32
+
+# --------------------------------------------------------------
+# RECOMMENDED: Persistent Storage (R2)
+# --------------------------------------------------------------
+# Without R2, all conversations and memory are lost on container restart.
+#
+# Create R2 API token: Dashboard > R2 > Manage R2 API Tokens
+#   - Permission: Object Read & Write
+#   - Bucket: moltbot-data
+#
+# Account ID: Dashboard > click account name > copy Account ID
+R2_ACCESS_KEY_ID=REPLACE_ME
+R2_SECRET_ACCESS_KEY=REPLACE_ME
+CF_ACCOUNT_ID=REPLACE_ME
+
+# --------------------------------------------------------------
+# RECOMMENDED: Cloudflare Access (Admin UI)
+# --------------------------------------------------------------
+# Protects /_admin/ and /api/* routes with Cloudflare Access.
+# Free tier available at: dash.cloudflare.com > Zero Trust > Access
+CF_ACCESS_TEAM_DOMAIN=yourteam.cloudflareaccess.com
+CF_ACCESS_AUD=your-application-audience-tag
+
+# --------------------------------------------------------------
+# OPTIONAL: Chat Integrations
+# --------------------------------------------------------------
+# TELEGRAM_BOT_TOKEN=from-botfather
+# DISCORD_BOT_TOKEN=from-discord-developer-portal
+# SLACK_BOT_TOKEN=xoxb-your-token
+# SLACK_APP_TOKEN=xapp-your-token
+
+# --------------------------------------------------------------
+# OPTIONAL: Browser Automation (CDP)
+# --------------------------------------------------------------
+# CDP_SECRET=generate-a-random-secret
+# WORKER_URL=https://moltbot-sandbox.your-subdomain.workers.dev
+
+# --------------------------------------------------------------
+# OPTIONAL: Debug & Lifecycle
+# --------------------------------------------------------------
+# DEBUG_ROUTES=true
+# SANDBOX_SLEEP_AFTER=never
