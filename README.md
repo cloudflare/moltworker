@@ -295,12 +295,12 @@ npm run deploy
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /cdp/json/version` | Browser version information |
-| `GET /cdp/json/list` | List available browser targets |
-| `GET /cdp/json/new` | Create a new browser target |
-| `WS /cdp/devtools/browser/{id}` | WebSocket connection for CDP commands |
+| `GET /cdp/json/version?secret=<secret>` | Browser version information |
+| `GET /cdp/json/list?secret=<secret>` | List available browser targets |
+| `GET /cdp/json/new?secret=<secret>` | Create a new browser target |
+| `WS /cdp?secret=<secret>` | WebSocket connection for CDP commands |
 
-All endpoints require the `CDP_SECRET` header for authentication.
+All endpoints require the `CDP_SECRET` as a query parameter (`?secret=<value>`) for authentication.
 
 ## Built-in Skills
 
