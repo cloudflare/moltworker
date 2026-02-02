@@ -70,18 +70,20 @@ async function main() {
 
   // ── Preflight ──────────────────────────────────────────────────────────────
 
-  const wranglerCheck = run("npx wrangler whoami --json");
-  if (!wranglerCheck) {
+  const wranglerCheck = run("npx wrangler whoami");
+  if (!wranglerCheck || wranglerCheck.includes("not logged in")) {
     console.error("ERROR: wrangler is not authenticated. Run: npx wrangler login");
     process.exit(1);
   }
 
-  let accounts;
-  try {
-    accounts = JSON.parse(wranglerCheck).accounts;
-  } catch {
-    console.error("ERROR: Could not parse wrangler account info.");
-    process.exit(1);
+  // Parse account table from wrangler whoami text output
+  // Lines look like: │ Account Name │ account_id │
+  const accounts = [];
+  for (const line of wranglerCheck.split("\n")) {
+    const match = line.match(/│\s*(.+?)\s*│\s*([a-f0-9]{32})\s*│/);
+    if (match) {
+      accounts.push({ name: match[1].trim(), id: match[2] });
+    }
   }
 
   // ── Account ID ─────────────────────────────────────────────────────────────
