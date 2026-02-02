@@ -27,7 +27,7 @@ import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
-import { publicRoutes, api, adminUi, debug, cdp } from './routes';
+import { publicRoutes, api, adminUi, debug, cdp, oauth } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -72,15 +72,21 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
     }
   }
 
-  // Check for AI Gateway or direct Anthropic configuration
-  if (env.AI_GATEWAY_API_KEY) {
+  // Check for AI Gateway, direct Anthropic, or OpenAI OAuth configuration
+  // At least one authentication method must be configured
+  const hasAIGateway = env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL;
+  const hasAnthropicKey = !!env.ANTHROPIC_API_KEY;
+  const hasOpenAIKey = !!env.OPENAI_API_KEY;
+  // Note: OAuth tokens are checked at runtime from KV, not from env vars
+
+  if (env.AI_GATEWAY_API_KEY && !env.AI_GATEWAY_BASE_URL) {
     // AI Gateway requires both API key and base URL
-    if (!env.AI_GATEWAY_BASE_URL) {
-      missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
-    }
-  } else if (!env.ANTHROPIC_API_KEY) {
-    // Direct Anthropic access requires API key
-    missing.push('ANTHROPIC_API_KEY or AI_GATEWAY_API_KEY');
+    missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
+  } else if (!hasAIGateway && !hasAnthropicKey && !hasOpenAIKey) {
+    // No API configuration - OAuth might be configured at runtime via /oauth/openai/start
+    // We'll allow the request through and check for OAuth tokens later
+    // Only fail if this is a request to the main bot (not OAuth routes)
+    // This is handled in the gateway startup now
   }
 
   return missing;
@@ -145,6 +151,9 @@ app.route('/', publicRoutes);
 
 // Mount CDP routes (uses shared secret auth via query param, not CF Access)
 app.route('/cdp', cdp);
+
+// Mount OAuth routes (public - needed for OAuth callbacks)
+app.route('/oauth', oauth);
 
 // =============================================================================
 // PROTECTED ROUTES: Cloudflare Access authentication required

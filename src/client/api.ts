@@ -140,3 +140,27 @@ export async function triggerSync(): Promise<SyncResponse> {
     method: 'POST',
   });
 }
+
+// OAuth endpoints (these are at /oauth, not /api/admin)
+export interface OAuthStatusResponse {
+  connected: boolean;
+  account_id?: string | null;
+  expires_at?: number;
+  is_expired?: boolean;
+  message: string;
+}
+
+export async function getOpenAIStatus(): Promise<OAuthStatusResponse> {
+  const response = await fetch('/oauth/openai/status', {
+    credentials: 'include',
+  });
+  return response.json();
+}
+
+export async function disconnectOpenAI(): Promise<{ success: boolean; message: string }> {
+  const response = await fetch('/oauth/openai/disconnect', {
+    method: 'POST',
+    credentials: 'include',
+  });
+  return response.json();
+}

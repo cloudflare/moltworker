@@ -56,5 +56,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
 
+  // OpenAI OAuth tokens (if set directly in env, typically read from KV in process.ts)
+  if (env.OPENAI_ACCESS_TOKEN) envVars.OPENAI_ACCESS_TOKEN = env.OPENAI_ACCESS_TOKEN;
+  if (env.OPENAI_REFRESH_TOKEN) envVars.OPENAI_REFRESH_TOKEN = env.OPENAI_REFRESH_TOKEN;
+
   return envVars;
 }

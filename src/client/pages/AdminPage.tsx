@@ -6,11 +6,14 @@ import {
   restartGateway,
   getStorageStatus,
   triggerSync,
+  getOpenAIStatus,
+  disconnectOpenAI,
   AuthError,
   type PendingDevice,
   type PairedDevice,
   type DeviceListResponse,
   type StorageStatusResponse,
+  type OAuthStatusResponse,
 } from '../api'
 import './AdminPage.css'
 
@@ -28,6 +31,8 @@ export default function AdminPage() {
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
   const [restartInProgress, setRestartInProgress] = useState(false)
   const [syncInProgress, setSyncInProgress] = useState(false)
+  const [oauthStatus, setOauthStatus] = useState<OAuthStatusResponse | null>(null)
+  const [disconnectInProgress, setDisconnectInProgress] = useState(false)
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -62,10 +67,20 @@ export default function AdminPage() {
     }
   }, [])
 
+  const fetchOAuthStatus = useCallback(async () => {
+    try {
+      const status = await getOpenAIStatus()
+      setOauthStatus(status)
+    } catch (err) {
+      console.error('Failed to fetch OAuth status:', err)
+    }
+  }, [])
+
   useEffect(() => {
     fetchDevices()
     fetchStorageStatus()
-  }, [fetchDevices, fetchStorageStatus])
+    fetchOAuthStatus()
+  }, [fetchDevices, fetchStorageStatus, fetchOAuthStatus])
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId)
@@ -139,6 +154,25 @@ export default function AdminPage() {
       setError(err instanceof Error ? err.message : 'Failed to sync')
     } finally {
       setSyncInProgress(false)
+    }
+  }
+
+  const handleDisconnectOpenAI = async () => {
+    if (!confirm('Are you sure you want to disconnect from OpenAI? You will need to sign in again to use your ChatGPT subscription.')) {
+      return
+    }
+
+    setDisconnectInProgress(true)
+    try {
+      const result = await disconnectOpenAI()
+      if (result.success) {
+        setOauthStatus({ connected: false, message: 'Not connected to OpenAI' })
+        setError(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disconnect')
+    } finally {
+      setDisconnectInProgress(false)
     }
   }
 
@@ -234,6 +268,45 @@ export default function AdminPage() {
           Restart the gateway to apply configuration changes or recover from errors.
           All connected clients will be temporarily disconnected.
         </p>
+      </section>
+
+      <section className="devices-section oauth-section">
+        <div className="section-header">
+          <h2>AI Provider Connection</h2>
+        </div>
+        {oauthStatus?.connected ? (
+          <div className="oauth-connected">
+            <div className="oauth-status">
+              <span className="status-badge connected">Connected to OpenAI</span>
+              {oauthStatus.account_id && (
+                <span className="account-id">Account: {oauthStatus.account_id}</span>
+              )}
+              {oauthStatus.expires_at && (
+                <span className="expires-at">
+                  Token expires: {new Date(oauthStatus.expires_at).toLocaleString()}
+                  {oauthStatus.is_expired && <span className="expired-badge"> (Expired)</span>}
+                </span>
+              )}
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={handleDisconnectOpenAI}
+              disabled={disconnectInProgress}
+            >
+              {disconnectInProgress && <ButtonSpinner />}
+              {disconnectInProgress ? 'Disconnecting...' : 'Disconnect'}
+            </button>
+          </div>
+        ) : (
+          <div className="oauth-disconnected">
+            <p className="hint">
+              Connect your ChatGPT account to use your existing subscription instead of an API key.
+            </p>
+            <a href="/oauth/openai/start" className="btn btn-primary btn-openai">
+              Sign in with OpenAI
+            </a>
+          </div>
+        )}
       </section>
 
       {loading ? (

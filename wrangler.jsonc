@@ -70,6 +70,13 @@
   "browser": {
     "binding": "BROWSER",
   },
+  // KV namespace for OAuth state storage (temporary, auto-expires)
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_STATE",
+      "id": "oauth-state-placeholder"
+    }
+  ],
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
   // - ANTHROPIC_API_KEY: Your Anthropic API key

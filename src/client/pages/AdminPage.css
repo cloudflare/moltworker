@@ -334,6 +334,69 @@
   filter: brightness(1.1);
 }
 
+/* OAuth section */
+.oauth-section {
+  border-left: 3px solid #10a37f; /* OpenAI green */
+}
+
+.oauth-connected {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.oauth-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.status-badge {
+  display: inline-block;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.status-badge.connected {
+  color: #10a37f;
+}
+
+.account-id,
+.expires-at {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.expired-badge {
+  color: var(--error-color);
+  font-weight: 500;
+}
+
+.oauth-disconnected {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.oauth-disconnected .hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.btn-openai {
+  background-color: #10a37f;
+  color: white;
+  text-decoration: none;
+}
+
+.btn-openai:hover {
+  background-color: #0d8c6d;
+}
+
 /* Responsive adjustments */
 @media (max-width: 640px) {
   .devices-section {

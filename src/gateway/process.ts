@@ -79,6 +79,36 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   // Start a new Moltbot gateway
   console.log('Starting new Moltbot gateway...');
   const envVars = buildEnvVars(env);
+
+  // Check for OpenAI OAuth tokens in KV
+  if (env.OAUTH_STATE) {
+    try {
+      const tokenJson = await env.OAUTH_STATE.get('openai_tokens');
+      if (tokenJson) {
+        const tokens = JSON.parse(tokenJson) as {
+          access_token: string;
+          refresh_token: string;
+          expires_at: number;
+          account_id: string | null;
+        };
+
+        // Only use if not expired
+        if (Date.now() < tokens.expires_at) {
+          console.log('[Gateway] Using OpenAI OAuth tokens from KV');
+          envVars.OPENAI_ACCESS_TOKEN = tokens.access_token;
+          envVars.OPENAI_REFRESH_TOKEN = tokens.refresh_token;
+          if (tokens.account_id) {
+            envVars.OPENAI_ACCOUNT_ID = tokens.account_id;
+          }
+        } else {
+          console.log('[Gateway] OpenAI OAuth tokens expired, not using');
+        }
+      }
+    } catch (e) {
+      console.log('[Gateway] Failed to read OAuth tokens from KV:', e);
+    }
+  }
+
   const command = '/usr/local/bin/start-moltbot.sh';
 
   console.log('Starting process with command:', command);
