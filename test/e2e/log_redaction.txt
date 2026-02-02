@@ -1,0 +1,58 @@
+===
+make request with secret query param (issue #85)
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+curl -s -o /dev/null -w "%{http_code}" "http://localhost:8686/cdp/json/version?secret=supersecretvalue123"
+---
+{{ status }}
+---
+where
+* status == "401" or status == "404"
+
+===
+verify secret value is NOT in logs (issue #85)
+%require
+===
+if grep -q "supersecretvalue123" "$CCTR_FIXTURE_DIR/wrangler.log"; then
+  echo "FAIL: secret value found in logs"
+  exit 1
+else
+  echo "PASS: secret value not found in logs"
+fi
+---
+PASS: secret value not found in logs
+
+===
+verify REDACTED placeholder IS in logs (issue #85)
+===
+if grep -q "\[REDACTED\]" "$CCTR_FIXTURE_DIR/wrangler.log"; then
+  echo "PASS: [REDACTED] found in logs"
+else
+  echo "FAIL: [REDACTED] not found in logs"
+  exit 1
+fi
+---
+PASS: [REDACTED] found in logs
+
+===
+make request with token query param
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+curl -s -o /dev/null -w "%{http_code}" "http://localhost:8686/api/status?token=$TOKEN"
+---
+200
+
+===
+verify gateway token value is NOT in logs
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+if grep -q "$TOKEN" "$CCTR_FIXTURE_DIR/wrangler.log"; then
+  echo "FAIL: gateway token found in logs"
+  exit 1
+else
+  echo "PASS: gateway token not found in logs"
+fi
+---
+PASS: gateway token not found in logs
