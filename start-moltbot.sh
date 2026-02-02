@@ -163,6 +163,18 @@ if (config.models?.providers?.anthropic?.models) {
     }
 }
 
+// Clean up invalid models.primary key (not a valid config key)
+if (config.models?.primary) {
+    console.log('Removing invalid models.primary key');
+    delete config.models.primary;
+}
+
+// Clean up invalid api type from old configs - just remove it entirely
+if (config.models?.providers?.moonshot?.api) {
+    console.log('Removing moonshot api field (was:', config.models.providers.moonshot.api + ')');
+    delete config.models.providers.moonshot.api;
+}
+
 
 
 // Gateway configuration
@@ -274,9 +286,33 @@ if (isOpenAI) {
     config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
     config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
-} else {
+} else if (!process.env.MOONSHOT_API_KEY) {
     // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
+    // Only if not using Moonshot
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+}
+
+// Moonshot configuration
+if (process.env.MOONSHOT_API_KEY) {
+    console.log('Configuring Moonshot provider with API key');
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    // Ensure moonshot provider exists - don't specify api field, let moltbot auto-detect
+    config.models.providers.moonshot = config.models.providers.moonshot || {
+        baseUrl: 'https://api.moonshot.ai/v1',
+        models: [
+            { id: 'kimi-k2.5', name: 'Kimi K2.5', contextWindow: 200000 }
+        ]
+    };
+    // Remove api field if it exists (it's invalid)
+    delete config.models.providers.moonshot.api;
+    config.models.providers.moonshot.apiKey = process.env.MOONSHOT_API_KEY;
+    // Set Moonshot as primary model
+    config.agents.defaults.model = config.agents.defaults.model || {};
+    config.agents.defaults.model.primary = 'moonshot/kimi-k2.5';
+    // Add to models allowlist
+    config.agents.defaults.models = config.agents.defaults.models || {};
+    config.agents.defaults.models['moonshot/kimi-k2.5'] = { alias: 'Kimi K2.5' };
 }
 
 // Write updated config

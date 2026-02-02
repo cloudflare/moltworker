@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import type { AppEnv } from '../types';
+import type { AppEnv, MoltbotEnv } from '../types';
 import { findExistingMoltbotProcess } from '../gateway';
+import { buildEnvVars } from '../gateway/env';
 
 /**
  * Debug routes for inspecting container state
@@ -384,6 +385,45 @@ debug.get('/container-config', async (c) => {
       config,
       raw: config ? undefined : stdout,
       stderr,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /debug/start-gateway - Manually start the gateway and show output
+debug.get('/start-gateway', async (c) => {
+  const sandbox = c.get('sandbox');
+  const env = c.env as MoltbotEnv;
+  try {
+    // Build env vars same as the main gateway startup
+    const envVars = buildEnvVars(env);
+    
+    // Start the gateway script with proper env vars
+    const proc = await sandbox.startProcess('/usr/local/bin/start-moltbot.sh', {
+      env: Object.keys(envVars).length > 0 ? envVars : undefined,
+    });
+    
+    // Wait for process to either fail or start
+    let attempts = 0;
+    while (attempts < 60) { // 30 seconds max
+      await new Promise(r => setTimeout(r, 500));
+      if (proc.status !== 'starting' && proc.status !== 'running') break;
+      // Check if it's still running after a few seconds (gateway started successfully)
+      if (attempts > 10 && proc.status === 'running') break;
+      attempts++;
+    }
+
+    const logs = await proc.getLogs();
+    return c.json({
+      command: '/usr/local/bin/start-moltbot.sh',
+      status: proc.status,
+      exitCode: proc.exitCode,
+      attempts,
+      envVarsProvided: Object.keys(envVars),
+      stdout: logs.stdout || '',
+      stderr: logs.stderr || '',
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
