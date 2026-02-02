@@ -115,10 +115,32 @@ const app = new Hono<AppEnv>();
 // MIDDLEWARE: Applied to ALL routes
 // =============================================================================
 
+/**
+ * Redact sensitive query parameters from URL for safe logging.
+ * Redacts any param containing: secret, token, key, password, auth, credential
+ */
+export function redactSensitiveParams(url: URL): string {
+  const sensitivePatterns = /secret|token|key|password|auth|credential/i;
+  const params = new URLSearchParams(url.search);
+  const redactedParams = new URLSearchParams();
+
+  for (const [key, value] of params) {
+    if (sensitivePatterns.test(key) || sensitivePatterns.test(value)) {
+      redactedParams.set(key, '[REDACTED]');
+    } else {
+      redactedParams.set(key, value);
+    }
+  }
+
+  const search = redactedParams.toString();
+  return search ? `?${search}` : '';
+}
+
 // Middleware: Log every request
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
-  console.log(`[REQ] ${c.req.method} ${url.pathname}${url.search}`);
+  const redactedSearch = redactSensitiveParams(url);
+  console.log(`[REQ] ${c.req.method} ${url.pathname}${redactedSearch}`);
   console.log(`[REQ] Has ANTHROPIC_API_KEY: ${!!c.env.ANTHROPIC_API_KEY}`);
   console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
   console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
