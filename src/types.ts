@@ -37,6 +37,7 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+  BRAVE_API_KEY?: string; // Brave Search API key for web search
 }
 
 /**
