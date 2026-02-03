@@ -3,7 +3,7 @@
 #
 # This script:
 # 1. Deletes the deployed worker
-# 2. Empties and deletes the R2 bucket
+# 2. Deletes the R2 bucket (may fail if not empty - requires manual cleanup)
 # 3. Deletes the service token
 # 4. Cleans up local state files
 set -e
@@ -27,7 +27,6 @@ fi
 
 # Export CLOUDFLARE_ACCOUNT_ID (wrangler prefers this over CF_ACCOUNT_ID)
 export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID:-}"
-unset CF_ACCOUNT_ID  # Avoid wrangler deprecation warning
 
 # Support running directly (not via cctr)
 if [ -z "$CCTR_FIXTURE_DIR" ]; then
@@ -77,36 +76,29 @@ if [ -n "$WORKER_NAME" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_
     fi
 fi
 
-# Step 2: Empty and delete R2 bucket
+# Step 2: Delete R2 bucket
+# Note: wrangler doesn't have a command to list/delete objects, so if the bucket
+# has objects it will fail. Use the dashboard or aws cli for manual cleanup.
 if [ -n "$R2_BUCKET" ]; then
-    echo "Emptying R2 bucket: $R2_BUCKET" >&2
-    # List and delete all objects
-    npx wrangler r2 object list "$R2_BUCKET" --json 2>/dev/null | \
-        jq -r '.objects[].key' 2>/dev/null | \
-        while read -r key; do
-            if [ -n "$key" ]; then
-                echo "  Deleting: $key" >&2
-                npx wrangler r2 object delete "$R2_BUCKET/$key" 2>/dev/null || true
-            fi
-        done
-    
     echo "Deleting R2 bucket: $R2_BUCKET" >&2
-    npx wrangler r2 bucket delete "$R2_BUCKET" 2>&1 || true
+    if ! npx wrangler r2 bucket delete "$R2_BUCKET" 2>&1; then
+        echo "Warning: Failed to delete R2 bucket (may not be empty). Manual cleanup required." >&2
+    fi
 fi
 
 # Step 3: Delete service token via API
-if [ -n "$TEST_RUN_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CF_ACCOUNT_ID" ]; then
+if [ -n "$TEST_RUN_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
     echo "Deleting service token: moltbot-e2e-$TEST_RUN_ID" >&2
     # Find and delete the service token
     TOKEN_ID=$(curl -s -X GET \
-        "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/access/service_tokens" \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens" \
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
         -H "Content-Type: application/json" | \
         jq -r ".result[] | select(.name == \"moltbot-e2e-$TEST_RUN_ID\") | .id" 2>/dev/null || echo "")
     
     if [ -n "$TOKEN_ID" ]; then
         curl -s -X DELETE \
-            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/access/service_tokens/$TOKEN_ID" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens/$TOKEN_ID" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H "Content-Type: application/json" >/dev/null 2>&1 || true
         echo "Service token deleted" >&2
@@ -129,4 +121,5 @@ rm -f "$CCTR_FIXTURE_DIR/access-aud.txt"
 rm -rf "$SCRIPT_DIR/.terraform" "$SCRIPT_DIR/terraform.tfstate"* "$SCRIPT_DIR/.terraform.lock.hcl"
 
 echo "Cloud e2e infrastructure stopped and cleaned up" >&2
+sleep 1  # Let stderr flush before stdout
 echo "stopped"
