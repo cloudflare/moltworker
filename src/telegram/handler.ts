@@ -128,7 +128,7 @@ export class TelegramBot {
   }
 
   /**
-   * Send a photo
+   * Send a photo from URL
    */
   async sendPhoto(chatId: number, photoUrl: string, caption?: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/sendPhoto`, {
@@ -139,6 +139,45 @@ export class TelegramBot {
         photo: photoUrl,
         caption,
       }),
+    });
+
+    const result = await response.json() as { ok: boolean; description?: string };
+    if (!result.ok) {
+      throw new Error(`Telegram API error: ${result.description}`);
+    }
+  }
+
+  /**
+   * Send a photo from base64 data
+   */
+  async sendPhotoBase64(chatId: number, base64Data: string, caption?: string): Promise<void> {
+    // Extract the actual base64 content (remove data:image/xxx;base64, prefix)
+    const base64Match = base64Data.match(/^data:image\/([^;]+);base64,(.+)$/);
+    if (!base64Match) {
+      throw new Error('Invalid base64 image data');
+    }
+
+    const mimeType = base64Match[1];
+    const base64Content = base64Match[2];
+
+    // Convert base64 to binary
+    const binaryString = atob(base64Content);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    // Create FormData for multipart upload
+    const formData = new FormData();
+    formData.append('chat_id', String(chatId));
+    formData.append('photo', new Blob([bytes], { type: `image/${mimeType}` }), `image.${mimeType}`);
+    if (caption) {
+      formData.append('caption', caption);
+    }
+
+    const response = await fetch(`${this.baseUrl}/sendPhoto`, {
+      method: 'POST',
+      body: formData,
     });
 
     const result = await response.json() as { ok: boolean; description?: string };
@@ -520,10 +559,16 @@ export class TelegramHandler {
 
       if (imageUrl) {
         const caption = modelAlias ? `[${modelAlias}] ${prompt}` : prompt;
-        await this.bot.sendPhoto(chatId, imageUrl, caption);
+        // Check if it's a base64 data URL or regular URL
+        if (imageUrl.startsWith('data:image/')) {
+          await this.bot.sendPhotoBase64(chatId, imageUrl, caption);
+        } else {
+          await this.bot.sendPhoto(chatId, imageUrl, caption);
+        }
       } else if (result.data[0]?.b64_json) {
-        // If we get base64, we'd need to upload it differently
-        await this.bot.sendMessage(chatId, 'Image generated but format not supported for direct send.');
+        // Handle raw b64_json format
+        const caption = modelAlias ? `[${modelAlias}] ${prompt}` : prompt;
+        await this.bot.sendPhotoBase64(chatId, `data:image/png;base64,${result.data[0].b64_json}`, caption);
       } else {
         await this.bot.sendMessage(chatId, 'No image was generated. Try a different prompt.');
       }

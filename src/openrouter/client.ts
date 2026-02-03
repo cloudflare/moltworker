@@ -187,8 +187,7 @@ export class OpenRouterClient {
     const alias = modelAlias || DEFAULT_IMAGE_MODEL;
     const modelId = getModelId(alias);
 
-    // OpenRouter handles FLUX through chat completions
-    // The model returns an image URL in the response
+    // OpenRouter handles FLUX through chat completions with modalities
     const messages: ChatMessage[] = [
       {
         role: 'user',
@@ -199,6 +198,7 @@ export class OpenRouterClient {
     const request = {
       model: modelId,
       messages,
+      modalities: ['image', 'text'], // Required for image generation
     };
 
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -215,8 +215,16 @@ export class OpenRouterClient {
     const result = await response.json() as ChatCompletionResponse;
     const content = result.choices[0]?.message?.content || '';
 
-    // FLUX models return markdown image syntax: ![...](url)
-    // Extract the URL from the response
+    // OpenRouter returns images as base64 data URLs: data:image/png;base64,...
+    const dataUrlMatch = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+    if (dataUrlMatch) {
+      return {
+        created: Date.now(),
+        data: [{ url: dataUrlMatch[0] }],
+      };
+    }
+
+    // FLUX models may return markdown image syntax: ![...](url)
     const urlMatch = content.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
     if (urlMatch) {
       return {

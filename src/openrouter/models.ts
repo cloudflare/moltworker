@@ -91,24 +91,22 @@ export const MODELS: Record<string, ModelInfo> = {
 
   // === IMAGE GENERATION ===
   fluxpro: {
-    id: 'black-forest-labs/flux-2-pro',
+    id: 'black-forest-labs/flux.2-pro',
     alias: 'fluxpro',
-    name: 'FLUX 2 Pro',
+    name: 'FLUX.2 Pro',
     specialty: 'Pro Image Generation',
     score: 'Top-tier images',
-    cost: 'FREE',
+    cost: '$0.03/MP',
     isImageGen: true,
-    isFree: true,
   },
   fluxmax: {
-    id: 'black-forest-labs/flux-2-max',
+    id: 'black-forest-labs/flux.2-max',
     alias: 'fluxmax',
-    name: 'FLUX 2 Max',
+    name: 'FLUX.2 Max',
     specialty: 'Advanced Image Gen',
-    score: 'Higher quality',
-    cost: 'FREE',
+    score: 'Highest quality',
+    cost: '$0.07/MP',
     isImageGen: true,
-    isFree: true,
   },
 
   // === PAID MODELS (by cost) ===
