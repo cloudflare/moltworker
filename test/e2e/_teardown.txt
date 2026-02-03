@@ -1,0 +1,50 @@
+===
+stop video recording
+===
+./pw --session=moltworker-e2e video-stop || true
+---
+{{ output }}
+---
+where
+* output contains "Video" or output contains "Error" or output contains "No"
+
+===
+save video recording
+===
+mkdir -p /tmp/moltworker-e2e-videos
+datetime=$(date +%Y%m%d-%H%M%S)
+for f in ./.playwright-cli/*.webm; do
+  if [ -f "$f" ]; then
+    cp "$f" "/tmp/moltworker-e2e-videos/${datetime}.webm"
+    echo "video saved to /tmp/moltworker-e2e-videos/${datetime}.webm"
+  fi
+done
+# Always succeed even if no video
+echo "video cleanup complete"
+---
+{{ output }}
+---
+where
+* output contains "video"
+
+===
+stop playwright browser
+===
+./stop-browser || true
+echo "browser stopped"
+---
+{{ output }}
+---
+where
+* output contains "stopped"
+
+===
+stop moltworker server and destroy cloud resources
+===
+# This deletes the worker AND destroys terraform resources (Access app, service token, R2 bucket)
+./stop-server
+---
+{{ s }}
+---
+where
+* strip(s) endswith "stopped"

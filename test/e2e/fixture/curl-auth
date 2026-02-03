@@ -1,0 +1,26 @@
+#!/bin/bash
+# Wrapper for curl that adds Cloudflare Access service token headers
+#
+# Usage: ./curl-auth [curl-args...]
+#
+# Automatically adds CF-Access-Client-Id and CF-Access-Client-Secret headers
+# using values from $CCTR_FIXTURE_DIR
+
+set -e
+
+if [ -z "$CCTR_FIXTURE_DIR" ]; then
+    CCTR_FIXTURE_DIR="/tmp/e2e-cloud-manual"
+fi
+
+CF_ACCESS_CLIENT_ID=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-id.txt" 2>/dev/null || echo "")
+CF_ACCESS_CLIENT_SECRET=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt" 2>/dev/null || echo "")
+
+if [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
+    echo "Error: Access credentials not found in $CCTR_FIXTURE_DIR" >&2
+    exit 1
+fi
+
+exec curl \
+    -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+    -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+    "$@"

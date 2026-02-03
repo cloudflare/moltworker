@@ -1,0 +1,51 @@
+#!/bin/bash
+# Destroy all terraform-managed e2e infrastructure
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Required environment variables
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${WORKERS_SUBDOMAIN:?WORKERS_SUBDOMAIN is required}"
+
+# Optional: unique test run ID (defaults to "local")
+TEST_RUN_ID="${E2E_TEST_RUN_ID:-local}"
+
+# Check if terraform state exists
+if [ ! -f "terraform.tfstate" ]; then
+    echo "No terraform state found, nothing to destroy" >&2
+    exit 0
+fi
+
+# Get the R2 bucket name from terraform state before destroying
+R2_BUCKET=$(terraform output -raw r2_bucket_name 2>/dev/null || echo "")
+
+# Empty the R2 bucket first (required before deletion)
+if [ -n "$R2_BUCKET" ]; then
+    echo "Emptying R2 bucket: $R2_BUCKET" >&2
+    # List and delete all objects in the bucket using wrangler
+    # Note: wrangler r2 object delete requires object keys, so we list first
+    npx wrangler r2 object list "$R2_BUCKET" --json 2>/dev/null | \
+        jq -r '.objects[].key' 2>/dev/null | \
+        while read -r key; do
+            if [ -n "$key" ]; then
+                npx wrangler r2 object delete "$R2_BUCKET/$key" 2>/dev/null || true
+            fi
+        done
+    echo "R2 bucket emptied" >&2
+fi
+
+echo "Destroying terraform-managed infrastructure..." >&2
+terraform destroy -auto-approve -input=false \
+    -var="cloudflare_api_token=$CLOUDFLARE_API_TOKEN" \
+    -var="cloudflare_account_id=$CF_ACCOUNT_ID" \
+    -var="workers_subdomain=$WORKERS_SUBDOMAIN" \
+    -var="test_run_id=$TEST_RUN_ID"
+
+# Clean up local state files
+rm -f terraform.tfstate terraform.tfstate.backup
+rm -rf .terraform .terraform.lock.hcl
+
+echo "Terraform infrastructure destroyed" >&2

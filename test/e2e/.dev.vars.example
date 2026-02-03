@@ -1,0 +1,120 @@
+# Cloud E2E Test Credentials
+# Copy this file to .dev.vars and fill in your values
+# DO NOT commit .dev.vars to git!
+
+# =============================================================================
+# CLOUDFLARE_API_TOKEN
+# =============================================================================
+# Required: Cloudflare API token with specific permissions for e2e tests.
+#
+# How to create:
+# 1. Go to https://dash.cloudflare.com/profile/api-tokens
+# 2. Click "Create Token"
+# 3. Click "Create Custom Token" (at the bottom)
+# 4. Configure the token:
+#
+#    Token name: moltworker-e2e-tests (or whatever you prefer)
+#
+#    Permissions (add all of these):
+#    ┌─────────────────────────────────────────────────────────────────────────┐
+#    │ Account │ Workers Scripts              │ Edit                          │
+#    │ Account │ Workers R2 Storage           │ Edit                          │
+#    │ Account │ Cloudflare Containers        │ Edit                          │
+#    │ Account │ Access: Apps and Policies    │ Edit                          │
+#    │ Account │ Access: Service Tokens       │ Edit                          │
+#    └─────────────────────────────────────────────────────────────────────────┘
+#
+#    Account Resources:
+#    - Include: Your account (or "All accounts" if you have multiple)
+#
+#    Client IP Address Filtering: (optional, leave blank for no restrictions)
+#
+#    TTL: (optional, set an expiry if desired)
+#
+# 5. Click "Continue to summary"
+# 6. Click "Create Token"
+# 7. Copy the token value (you won't see it again!)
+#
+CLOUDFLARE_API_TOKEN=
+
+# =============================================================================
+# CF_ACCOUNT_ID
+# =============================================================================
+# Required: Your Cloudflare account ID
+#
+# How to find:
+# 1. Go to https://dash.cloudflare.com/
+# 2. Click the "..." menu next to your account name in the sidebar
+# 3. Click "Copy Account ID"
+#
+# Or: Dashboard → any zone → Overview → scroll down to "API" section
+#
+CF_ACCOUNT_ID=
+
+# =============================================================================
+# WORKERS_SUBDOMAIN
+# =============================================================================
+# Required: Your workers.dev subdomain
+#
+# This is the subdomain part of your workers.dev URL.
+# For example, if your workers deploy to "my-worker.myaccount.workers.dev",
+# then your WORKERS_SUBDOMAIN is "myaccount".
+#
+# How to find:
+# 1. Go to https://dash.cloudflare.com/ → Workers & Pages
+# 2. Look at any deployed worker's URL, or
+# 3. Go to Workers & Pages → Overview → your subdomain is shown at the top
+#
+WORKERS_SUBDOMAIN=
+
+# =============================================================================
+# CF_ACCESS_TEAM_DOMAIN
+# =============================================================================
+# Required: Your Cloudflare Access team domain
+#
+# This is your Zero Trust organization's domain, typically in the format:
+# "yourteam.cloudflareaccess.com"
+#
+# How to find:
+# 1. Go to https://one.dash.cloudflare.com/ (Zero Trust dashboard)
+# 2. Go to Settings → Custom Pages
+# 3. Your team domain is shown at the top (e.g., "yourteam.cloudflareaccess.com")
+#
+# Or: Look at any Access login page URL - it will be https://yourteam.cloudflareaccess.com/...
+#
+CF_ACCESS_TEAM_DOMAIN=
+
+# =============================================================================
+# R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY
+# =============================================================================
+# Required: R2 API credentials for bucket mounting inside the container
+#
+# How to create:
+# 1. Go to https://dash.cloudflare.com/ → R2 → Overview
+# 2. Click "Manage R2 API Tokens" (top right)
+# 3. Click "Create API Token"
+# 4. Configure:
+#    - Token name: moltworker-e2e (or whatever you prefer)
+#    - Permissions: Object Read & Write
+#    - Specify bucket(s): You can leave as "Apply to all buckets" or
+#      limit to buckets starting with "moltbot-" for safety
+#    - TTL: (optional)
+# 5. Click "Create API Token"
+# 6. Copy both the "Access Key ID" and "Secret Access Key"
+#    (Secret is only shown once!)
+#
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# =============================================================================
+# OPTIONAL SETTINGS
+# =============================================================================
+
+# Unique test run ID for isolation (default: "local")
+# In CI, set this to the PR number or a unique identifier to allow parallel runs
+# E2E_TEST_RUN_ID=local
+
+# AI provider credentials (at least one recommended for chat/conversation tests)
+# AI_GATEWAY_API_KEY=
+# AI_GATEWAY_BASE_URL=
+# ANTHROPIC_API_KEY=

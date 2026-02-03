@@ -1,0 +1,43 @@
+#!/bin/bash
+# Wait for the deployed worker to be ready (container cold start can take 1-2 min)
+set -e
+
+WORKER_URL="$1"
+GATEWAY_TOKEN="$2"
+CF_ACCESS_CLIENT_ID="$3"
+CF_ACCESS_CLIENT_SECRET="$4"
+
+if [ -z "$WORKER_URL" ] || [ -z "$GATEWAY_TOKEN" ] || [ -z "$CF_ACCESS_CLIENT_ID" ] || [ -z "$CF_ACCESS_CLIENT_SECRET" ]; then
+    echo "Usage: $0 <worker-url> <gateway-token> <client-id> <client-secret>" >&2
+    exit 1
+fi
+
+TIMEOUT_SECONDS=300  # 5 minutes for cloud cold start
+START_TIME=$(date +%s)
+
+echo "Waiting for worker to be ready at $WORKER_URL..." >&2
+
+while true; do
+    ELAPSED=$(($(date +%s) - START_TIME))
+    if [ "$ELAPSED" -ge "$TIMEOUT_SECONDS" ]; then
+        echo "Timeout waiting for worker after ${ELAPSED}s" >&2
+        exit 1
+    fi
+
+    # Make request with Access service token headers
+    status=$(curl -s -o /dev/null -w "%{http_code}" \
+        -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+        -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+        "$WORKER_URL/?token=$GATEWAY_TOKEN" 2>/dev/null || echo "000")
+    
+    if [ "$status" = "200" ]; then
+        echo "Worker is ready! (HTTP $status after ${ELAPSED}s)" >&2
+        echo "ready"
+        exit 0
+    fi
+
+    if [ $((ELAPSED % 15)) -eq 0 ]; then
+        echo "Still waiting... (${ELAPSED}s elapsed, last status: $status)" >&2
+    fi
+    sleep 2
+done

@@ -13,10 +13,17 @@ export interface AccessMiddlewareOptions {
 }
 
 /**
- * Check if running in development mode (skips CF Access auth)
+ * Check if running in development mode (skips CF Access auth + device pairing)
  */
 export function isDevMode(env: MoltbotEnv): boolean {
   return env.DEV_MODE === 'true';
+}
+
+/**
+ * Check if running in E2E test mode (skips CF Access auth but keeps device pairing)
+ */
+export function isE2ETestMode(env: MoltbotEnv): boolean {
+  return env.E2E_TEST_MODE === 'true';
 }
 
 /**
@@ -42,8 +49,8 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
   const { type, redirectOnMissing = false } = options;
 
   return async (c: Context<AppEnv>, next: Next) => {
-    // Skip auth in dev mode
-    if (isDevMode(c.env)) {
+    // Skip auth in dev mode or E2E test mode
+    if (isDevMode(c.env) || isE2ETestMode(c.env)) {
       c.set('accessUser', { email: 'dev@localhost', name: 'Dev User' });
       return next();
     }
