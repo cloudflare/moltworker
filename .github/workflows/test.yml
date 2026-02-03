@@ -30,6 +30,8 @@ jobs:
         run: npm test
 
   e2e:
+    # Skip E2E when required API secrets are not available (e.g., forks).
+    if: ${{ secrets.AI_GATEWAY_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
