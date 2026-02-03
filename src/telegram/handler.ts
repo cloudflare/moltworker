@@ -206,19 +206,34 @@ export class TelegramHandler {
   private skills: SkillStorage;
   private defaultSkill: string;
   private cachedSkillPrompt: string | null = null;
+  private allowedUsers: Set<string> | null = null; // null = allow all, Set = allowlist
 
   constructor(
     telegramToken: string,
     openrouterKey: string,
     r2Bucket: R2Bucket,
     workerUrl?: string,
-    defaultSkill: string = 'storia-orchestrator'
+    defaultSkill: string = 'storia-orchestrator',
+    allowedUserIds?: string[] // Pass user IDs to restrict access
   ) {
     this.bot = new TelegramBot(telegramToken);
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
     this.storage = createUserStorage(r2Bucket);
     this.skills = createSkillStorage(r2Bucket);
     this.defaultSkill = defaultSkill;
+    if (allowedUserIds && allowedUserIds.length > 0) {
+      this.allowedUsers = new Set(allowedUserIds);
+    }
+  }
+
+  /**
+   * Check if a user is allowed to use the bot
+   */
+  private isUserAllowed(userId: string): boolean {
+    if (this.allowedUsers === null) {
+      return true; // No allowlist = allow everyone
+    }
+    return this.allowedUsers.has(userId);
   }
 
   /**
@@ -273,6 +288,13 @@ export class TelegramHandler {
     const text = message.text || message.caption || '';
 
     console.log(`[Telegram] Message from ${userId} (${username}): ${text.slice(0, 100)}`);
+
+    // Check if user is allowed
+    if (!this.isUserAllowed(userId)) {
+      console.log(`[Telegram] Unauthorized user ${userId} (${username}) blocked`);
+      await this.bot.sendMessage(chatId, '⛔ Access denied. This bot is private.');
+      return;
+    }
 
     // Check for commands
     if (text.startsWith('/')) {
@@ -628,7 +650,16 @@ export function createTelegramHandler(
   telegramToken: string,
   openrouterKey: string,
   r2Bucket: R2Bucket,
-  workerUrl?: string
+  workerUrl?: string,
+  defaultSkill?: string,
+  allowedUserIds?: string[]
 ): TelegramHandler {
-  return new TelegramHandler(telegramToken, openrouterKey, r2Bucket, workerUrl);
+  return new TelegramHandler(
+    telegramToken,
+    openrouterKey,
+    r2Bucket,
+    workerUrl,
+    defaultSkill,
+    allowedUserIds
+  );
 }

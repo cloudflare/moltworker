@@ -46,11 +46,19 @@ telegram.post('/webhook/:token', async (c) => {
 
     // Create handler and process update
     const workerUrl = new URL(c.req.url).origin;
+
+    // Parse allowed users from env (comma-separated list of Telegram user IDs)
+    const allowedUsers = env.TELEGRAM_ALLOWED_USERS
+      ? env.TELEGRAM_ALLOWED_USERS.split(',').map((id: string) => id.trim())
+      : undefined;
+
     const handler = createTelegramHandler(
       env.TELEGRAM_BOT_TOKEN,
       env.OPENROUTER_API_KEY,
       env.MOLTBOT_BUCKET,
-      workerUrl
+      workerUrl,
+      'storia-orchestrator',
+      allowedUsers
     );
 
     // Process update asynchronously

@@ -23,6 +23,7 @@ export interface MoltbotEnv {
   DEBUG_ROUTES?: string; // Set to 'true' to enable /debug/* routes
   SANDBOX_SLEEP_AFTER?: string; // How long before sandbox sleeps: 'never' (default), or duration like '10m', '1h'
   TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_ALLOWED_USERS?: string; // Comma-separated list of allowed Telegram user IDs
   TELEGRAM_DM_POLICY?: string;
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
