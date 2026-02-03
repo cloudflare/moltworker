@@ -163,6 +163,11 @@ app.use('*', async (c, next) => {
     return next();
   }
 
+  // Skip validation for telegram routes (uses its own auth)
+  if (url.pathname.startsWith('/telegram')) {
+    return next();
+  }
+
   // Skip validation in dev mode
   if (c.env.DEV_MODE === 'true') {
     return next();
@@ -193,6 +198,13 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+
+  // Skip auth for telegram routes (uses token-based auth)
+  if (url.pathname.startsWith('/telegram')) {
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
