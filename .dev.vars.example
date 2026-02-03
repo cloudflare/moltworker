@@ -2,6 +2,7 @@
 # .dev.vars is gitignored and used by wrangler dev
 
 ANTHROPIC_API_KEY=sk-ant-...
+# MINIMAX_API_KEY=sk-minimax-...
 
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true
