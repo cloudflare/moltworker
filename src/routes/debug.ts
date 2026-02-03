@@ -374,6 +374,28 @@ debug.get('/container-config', async (c) => {
     let config = null;
     try {
       config = JSON.parse(stdout);
+      // Redact sensitive fields before returning
+      if (config?.models?.providers?.anthropic?.apiKey) {
+        config.models.providers.anthropic.apiKey = '[REDACTED]';
+      }
+      if (config?.models?.providers?.openai?.apiKey) {
+        config.models.providers.openai.apiKey = '[REDACTED]';
+      }
+      if (config?.gateway?.auth?.token) {
+        config.gateway.auth.token = '[REDACTED]';
+      }
+      if (config?.channels?.telegram?.botToken) {
+        config.channels.telegram.botToken = '[REDACTED]';
+      }
+      if (config?.channels?.discord?.token) {
+        config.channels.discord.token = '[REDACTED]';
+      }
+      if (config?.channels?.slack?.botToken) {
+        config.channels.slack.botToken = '[REDACTED]';
+      }
+      if (config?.channels?.slack?.appToken) {
+        config.channels.slack.appToken = '[REDACTED]';
+      }
     } catch {
       // Not valid JSON
     }

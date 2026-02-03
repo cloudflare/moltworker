@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { verifyAccessJWT } from './jwt';
+import { verifyAccessJWT, normalizeTeamDomain } from './jwt';
 
 // Mock the jose module
 vi.mock('jose', () => ({
@@ -151,5 +151,23 @@ describe('verifyAccessJWT', () => {
     expect(result).toEqual(mockPayload);
     expect(result.email).toBe('user@company.com');
     expect(result.name).toBe('Test User');
+  });
+});
+
+describe('normalizeTeamDomain', () => {
+  it('adds cloudflareaccess.com suffix for short team names', () => {
+    expect(normalizeTeamDomain('team')).toBe('team.cloudflareaccess.com');
+  });
+
+  it('keeps full domains unchanged', () => {
+    expect(normalizeTeamDomain('team.cloudflareaccess.com')).toBe('team.cloudflareaccess.com');
+  });
+
+  it('strips https:// prefix', () => {
+    expect(normalizeTeamDomain('https://team.cloudflareaccess.com')).toBe('team.cloudflareaccess.com');
+  });
+
+  it('strips trailing slash and adds suffix', () => {
+    expect(normalizeTeamDomain('team/')).toBe('team.cloudflareaccess.com');
   });
 });

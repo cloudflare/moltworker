@@ -39,30 +39,30 @@ mkdir -p "$CONFIG_DIR"
 should_restore_from_r2() {
     local R2_SYNC_FILE="$BACKUP_DIR/.last-sync"
     local LOCAL_SYNC_FILE="$CONFIG_DIR/.last-sync"
-    
+
     # If no R2 sync timestamp, don't restore
     if [ ! -f "$R2_SYNC_FILE" ]; then
         echo "No R2 sync timestamp found, skipping restore"
         return 1
     fi
-    
+
     # If no local sync timestamp, restore from R2
     if [ ! -f "$LOCAL_SYNC_FILE" ]; then
         echo "No local sync timestamp, will restore from R2"
         return 0
     fi
-    
+
     # Compare timestamps
     R2_TIME=$(cat "$R2_SYNC_FILE" 2>/dev/null)
     LOCAL_TIME=$(cat "$LOCAL_SYNC_FILE" 2>/dev/null)
-    
+
     echo "R2 last sync: $R2_TIME"
     echo "Local last sync: $LOCAL_TIME"
-    
+
     # Convert to epoch seconds for comparison
     R2_EPOCH=$(date -d "$R2_TIME" +%s 2>/dev/null || echo "0")
     LOCAL_EPOCH=$(date -d "$LOCAL_TIME" +%s 2>/dev/null || echo "0")
-    
+
     if [ "$R2_EPOCH" -gt "$LOCAL_EPOCH" ]; then
         echo "R2 backup is newer, will restore"
         return 0
@@ -227,7 +227,9 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
 const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
-const isOpenAI = baseUrl.endsWith('/openai');
+const provider = process.env.AI_GATEWAY_PROVIDER || '';
+const customModel = process.env.AI_GATEWAY_MODEL || '';
+const isOpenAI = provider === 'openai' || (!provider && baseUrl.endsWith('/openai'));
 
 if (isOpenAI) {
     // Create custom openai provider config with baseUrl override
@@ -235,21 +237,36 @@ if (isOpenAI) {
     console.log('Configuring OpenAI provider with base URL:', baseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
+
+    // Use custom model if specified, otherwise use defaults
+    const defaultModels = [
+        { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
+        { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
+        { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
+    ];
+    const models = customModel
+        ? [{ id: customModel, name: customModel, contextWindow: 200000 }, ...defaultModels]
+        : defaultModels;
+    const primaryModel = customModel || 'gpt-5.2';
+
     config.models.providers.openai = {
         baseUrl: baseUrl,
-        api: 'openai-responses',
-        models: [
-            { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
-            { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
-            { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
-        ]
+        api: process.env.AI_GATEWAY_API_FORMAT || 'openai-completions',
+        models: models
     };
+    // Include API key in provider config if set (required when using custom baseUrl)
+    if (process.env.OPENAI_API_KEY) {
+        config.models.providers.openai.apiKey = process.env.OPENAI_API_KEY;
+    }
     // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
+    if (customModel) {
+        config.agents.defaults.models['openai/' + customModel] = { alias: customModel };
+    }
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
     config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
     config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    config.agents.defaults.model.primary = 'openai/' + primaryModel;
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
     config.models = config.models || {};
@@ -282,7 +299,23 @@ if (isOpenAI) {
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
+
+// Redact sensitive fields before logging
+const safeConfig = JSON.parse(JSON.stringify(config));
+if (safeConfig.models?.providers?.anthropic?.apiKey) {
+  safeConfig.models.providers.anthropic.apiKey = '[REDACTED]';
+}
+if (safeConfig.models?.providers?.openai?.apiKey) {
+  safeConfig.models.providers.openai.apiKey = '[REDACTED]';
+}
+if (safeConfig.gateway?.auth?.token) {
+  safeConfig.gateway.auth.token = '[REDACTED]';
+}
+// Remove channels entirely to avoid logging chat bot tokens
+if (safeConfig.channels) {
+  delete safeConfig.channels;
+}
+console.log('Config (redacted):', JSON.stringify(safeConfig, null, 2));
 EOFNODE
 
 # ============================================================
