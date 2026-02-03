@@ -57,7 +57,8 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   const missing: string[] = [];
   const isTestMode = env.DEV_MODE === 'true' || env.E2E_TEST_MODE === 'true';
 
-  if (!env.MOLTBOT_GATEWAY_TOKEN) {
+  // Environment aware validation check
+  if (!env.DEV_MODE && !env.MOLTBOT_GATEWAY_TOKEN) {
     missing.push('MOLTBOT_GATEWAY_TOKEN');
   }
 
