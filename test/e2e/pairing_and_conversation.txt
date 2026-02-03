@@ -1,26 +1,10 @@
 ===
-navigate to main page to trigger pairing request
-%require
-===
-TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
-./pw --session=moltworker-e2e open "http://localhost:8686/?token=$TOKEN"
----
-
-===
-wait for websocket connection to establish
-%require
-===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForLoadState('networkidle');
-}"
----
-
-===
 navigate to admin page to approve device
 %require
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
-./pw --session=moltworker-e2e open "http://localhost:8686/_admin/?token=$TOKEN"
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+./pw --session=moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN"
 ---
 
 ===
@@ -28,7 +12,7 @@ wait for pending devices section to load
 %require
 ===
 ./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=Pending Pairing Requests', { timeout: 60000 });
+  await page.waitForSelector('text=Pending Pairing Requests', { timeout: 120000 });
 }"
 ---
 
@@ -37,7 +21,7 @@ wait for Approve All button and click it
 %require
 ===
 ./pw --session=moltworker-e2e run-code "async page => {
-  const btn = await page.waitForSelector('button:has-text(\"Approve All\")', { timeout: 60000 });
+  const btn = await page.waitForSelector('button:has-text(\"Approve All\")', { timeout: 120000 });
   await btn.click();
 }"
 ---
@@ -47,7 +31,7 @@ wait for approval to complete
 %require
 ===
 ./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=No pending pairing requests', { timeout: 60000 });
+  await page.waitForSelector('text=No pending pairing requests', { timeout: 120000 });
 }"
 ---
 
@@ -56,7 +40,8 @@ navigate back to main chat page
 %require
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
-./pw --session=moltworker-e2e open "http://localhost:8686/?token=$TOKEN"
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+./pw --session=moltworker-e2e open "$WORKER_URL/?token=$TOKEN"
 ---
 
 ===
@@ -64,7 +49,7 @@ wait for chat interface to load
 %require
 ===
 ./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('textarea', { timeout: 60000 });
+  await page.waitForSelector('textarea', { timeout: 120000 });
 }"
 ---
 

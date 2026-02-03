@@ -1,0 +1,19 @@
+#!/bin/bash
+# Delete the deployed e2e worker
+set -e
+
+WORKER_NAME="$1"
+if [ -z "$WORKER_NAME" ]; then
+    echo "Usage: $0 <worker-name>" >&2
+    exit 1
+fi
+
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+
+echo "Deleting worker: $WORKER_NAME" >&2
+
+# Delete the worker using wrangler
+# Use --force to skip confirmation prompt
+npx wrangler delete --name "$WORKER_NAME" --force 2>&1 || true
+
+echo "Worker deleted: $WORKER_NAME" >&2

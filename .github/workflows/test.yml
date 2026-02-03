@@ -31,7 +31,7 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: write
       pull-requests: write
@@ -65,6 +65,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
       - name: Install Playwright
         run: npx playwright install --with-deps chromium
 
@@ -80,8 +85,19 @@ jobs:
         id: e2e
         continue-on-error: true
         env:
+          # Cloud infrastructure credentials (from repo secrets with E2E_ prefix)
+          CLOUDFLARE_API_TOKEN: ${{ secrets.E2E_CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.E2E_CF_ACCOUNT_ID }}
+          WORKERS_SUBDOMAIN: ${{ secrets.E2E_WORKERS_SUBDOMAIN }}
+          CF_ACCESS_TEAM_DOMAIN: ${{ secrets.E2E_CF_ACCESS_TEAM_DOMAIN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.E2E_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.E2E_R2_SECRET_ACCESS_KEY }}
+          # AI provider (optional, for chat tests)
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_GATEWAY_BASE_URL: ${{ secrets.AI_GATEWAY_BASE_URL }}
+          # Unique test run ID for parallel isolation
+          E2E_TEST_RUN_ID: ${{ github.run_id }}-${{ matrix.config.name }}
+          # Matrix-specific config
           TELEGRAM_BOT_TOKEN: ${{ matrix.config.env.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
           DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}

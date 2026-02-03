@@ -1,0 +1,107 @@
+#!/bin/bash
+# Create Access application to protect the deployed worker
+# Must be called AFTER the worker is deployed
+set -e
+
+WORKER_NAME="$1"
+SERVICE_TOKEN_ID="$2"
+
+if [ -z "$WORKER_NAME" ] || [ -z "$SERVICE_TOKEN_ID" ]; then
+    echo "Usage: $0 <worker-name> <service-token-id>" >&2
+    exit 1
+fi
+
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
+: "${WORKERS_SUBDOMAIN:?WORKERS_SUBDOMAIN is required}"
+
+WORKER_DOMAIN="${WORKER_NAME}.${WORKERS_SUBDOMAIN}.workers.dev"
+APP_NAME="e2e-${WORKER_NAME}"
+
+echo "Creating Access application for $WORKER_DOMAIN..." >&2
+
+# Create the Access application
+APP_RESPONSE=$(curl -s -X POST \
+    "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps" \
+    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data '{
+        "name": "'"$APP_NAME"'",
+        "domain": "'"$WORKER_DOMAIN"'",
+        "type": "self_hosted",
+        "session_duration": "24h",
+        "auto_redirect_to_identity": false,
+        "app_launcher_visible": false
+    }')
+
+APP_ID=$(echo "$APP_RESPONSE" | jq -r '.result.id // empty')
+APP_AUD=$(echo "$APP_RESPONSE" | jq -r '.result.aud // empty')
+
+if [ -z "$APP_ID" ]; then
+    echo "Failed to create Access application:" >&2
+    echo "$APP_RESPONSE" | jq >&2
+    exit 1
+fi
+
+echo "Created Access application: $APP_ID" >&2
+
+# Create Service Auth policy to allow our service token
+echo "Creating Service Auth policy..." >&2
+POLICY_RESPONSE=$(curl -s -X POST \
+    "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID/policies" \
+    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data '{
+        "name": "E2E Service Token",
+        "decision": "non_identity",
+        "precedence": 1,
+        "include": [
+            {
+                "service_token": {
+                    "token_id": "'"$SERVICE_TOKEN_ID"'"
+                }
+            }
+        ]
+    }')
+
+POLICY_SUCCESS=$(echo "$POLICY_RESPONSE" | jq -r '.success')
+if [ "$POLICY_SUCCESS" != "true" ]; then
+    echo "Failed to create service token policy:" >&2
+    echo "$POLICY_RESPONSE" | jq >&2
+    # Clean up the app we just created
+    curl -s -X DELETE \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null
+    exit 1
+fi
+echo "Created Service Auth policy" >&2
+
+# Create Allow policy for Cloudflare employees
+echo "Creating Cloudflare employees policy..." >&2
+POLICY_RESPONSE=$(curl -s -X POST \
+    "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$APP_ID/policies" \
+    -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+    -H "Content-Type: application/json" \
+    --data '{
+        "name": "Cloudflare Employees",
+        "decision": "allow",
+        "precedence": 2,
+        "include": [
+            {
+                "email_domain": {
+                    "domain": "cloudflare.com"
+                }
+            }
+        ]
+    }')
+
+POLICY_SUCCESS=$(echo "$POLICY_RESPONSE" | jq -r '.success')
+if [ "$POLICY_SUCCESS" != "true" ]; then
+    echo "Warning: Failed to create Cloudflare employees policy (non-fatal):" >&2
+    echo "$POLICY_RESPONSE" | jq >&2
+fi
+echo "Created Cloudflare employees policy" >&2
+
+# Output the app ID and AUD for use by other scripts
+echo "$APP_ID"
+echo "$APP_AUD"
