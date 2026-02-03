@@ -177,6 +177,7 @@ export class OpenRouterClient {
 
   /**
    * Generate an image using FLUX or other image models
+   * OpenRouter uses chat completions for image generation
    */
   async generateImage(
     prompt: string,
@@ -186,29 +187,55 @@ export class OpenRouterClient {
     const alias = modelAlias || DEFAULT_IMAGE_MODEL;
     const modelId = getModelId(alias);
 
-    // OpenRouter uses chat completions for image generation with some models
-    // For FLUX models, we use the images/generations endpoint
-    const request: ImageGenerationRequest = {
+    // OpenRouter handles FLUX through chat completions
+    // The model returns an image URL in the response
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: prompt,
+      },
+    ];
+
+    const request = {
       model: modelId,
-      prompt,
-      n: 1,
-      size: '1024x1024',
+      messages,
     };
 
-    const response = await fetch(`${OPENROUTER_BASE_URL}/images/generations`, {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
     });
 
     if (!response.ok) {
-      // Fallback: try using chat completion for image description
-      // Some models don't support direct image generation
       const error = await response.json() as OpenRouterError;
       throw new Error(`Image generation error: ${error.error?.message || response.statusText}`);
     }
 
-    return response.json() as Promise<ImageGenerationResponse>;
+    const result = await response.json() as ChatCompletionResponse;
+    const content = result.choices[0]?.message?.content || '';
+
+    // FLUX models return markdown image syntax: ![...](url)
+    // Extract the URL from the response
+    const urlMatch = content.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
+    if (urlMatch) {
+      return {
+        created: Date.now(),
+        data: [{ url: urlMatch[1] }],
+      };
+    }
+
+    // Some models return just a URL
+    const plainUrlMatch = content.match(/(https?:\/\/[^\s]+\.(png|jpg|jpeg|webp|gif))/i);
+    if (plainUrlMatch) {
+      return {
+        created: Date.now(),
+        data: [{ url: plainUrlMatch[1] }],
+      };
+    }
+
+    // If no URL found, throw error with the actual response for debugging
+    throw new Error(`No image URL in response. Model returned: ${content.slice(0, 200)}`);
   }
 
   /**
