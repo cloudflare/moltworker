@@ -1,3 +1,8 @@
+---
+name: installer
+description: Install OpenClaw plugins and skills from npm or ClawHub. Provides install_plugin, install_skill, and list_installed tools for managing extensions in the Cloudflare Worker environment.
+---
+
 # Installer Skill
 
 A skill for installing OpenClaw plugins and skills in the Cloudflare Worker environment.

@@ -128,6 +128,51 @@ else
   echo "No installation manifest found in R2, starting fresh"
 fi
 
+# Initialize installation manifest with bundled skills (installer skill is bundled with the image)
+if [ ! -f "$MANIFEST_FILE" ]; then
+  echo "Creating initial installation manifest with bundled skills..."
+  mkdir -p "$BACKUP_DIR"
+  cat >"$MANIFEST_FILE" <<'EOFMANIFEST'
+{
+  "skills": [
+    {
+      "slug": "installer",
+      "installedAt": "2025-01-01T00:00:00.000Z",
+      "bundled": true
+    }
+  ],
+  "plugins": [],
+  "lastUpdated": "2025-01-01T00:00:00.000Z"
+}
+EOFMANIFEST
+  echo "Created installation manifest at $MANIFEST_FILE"
+else
+  # Check if installer skill is in the manifest, add it if missing
+  if ! grep -q '"slug": "installer"' "$MANIFEST_FILE" 2>/dev/null; then
+    echo "Adding bundled installer skill to existing manifest..."
+    node <<EOFNODE
+    const fs = require('fs');
+    const manifestPath = '$MANIFEST_FILE';
+    let manifest = { skills: [], plugins: [] };
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch (e) {}
+    manifest.skills = manifest.skills || [];
+    // Add installer if not already present
+    if (!manifest.skills.some(s => s.slug === 'installer')) {
+      manifest.skills.push({
+        slug: 'installer',
+        installedAt: '2025-01-01T00:00:00.000Z',
+        bundled: true
+      });
+    }
+    manifest.lastUpdated = new Date().toISOString();
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+EOFNODE
+    echo "Added installer skill to manifest"
+  fi
+fi
+
 # Post-restore: clean up corrupted config that may have come from R2 (see issue #82)
 if [ -f "$CONFIG_FILE" ] && grep -q '"dm":' "$CONFIG_FILE" 2>/dev/null; then
   echo "Detected corrupted config (from R2 restore) with invalid 'dm' key, removing..."
