@@ -28,3 +28,6 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth
 # WORKER_URL=https://your-worker.example.com
+
+# 1Password Service Account auth (optional)
+# OP_SERVICE_ACCOUNT_TOKEN=ops_...

@@ -39,6 +39,10 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+
+  // 1Password Service Account authentication
+  // If set, the `op` CLI inside the container can authenticate non-interactively.
+  OP_SERVICE_ACCOUNT_TOKEN?: string;
 }
 
 /**

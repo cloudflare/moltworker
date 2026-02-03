@@ -282,7 +282,19 @@ if (isOpenAI) {
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
+
+// Avoid logging secrets (tokens, bot tokens, api keys, etc.)
+const redacted = JSON.parse(JSON.stringify(config));
+try {
+    if (redacted.gateway?.auth?.token) redacted.gateway.auth.token = '<redacted>';
+    if (redacted.channels?.telegram?.botToken) redacted.channels.telegram.botToken = '<redacted>';
+    if (redacted.channels?.discord?.token) redacted.channels.discord.token = '<redacted>';
+    if (redacted.channels?.slack?.botToken) redacted.channels.slack.botToken = '<redacted>';
+    if (redacted.channels?.slack?.appToken) redacted.channels.slack.appToken = '<redacted>';
+    if (redacted.models?.providers?.anthropic?.apiKey) redacted.models.providers.anthropic.apiKey = '<redacted>';
+    if (redacted.models?.providers?.openai?.apiKey) redacted.models.providers.openai.apiKey = '<redacted>';
+} catch {}
+console.log('Config (redacted):', JSON.stringify(redacted, null, 2));
 EOFNODE
 
 # ============================================================
