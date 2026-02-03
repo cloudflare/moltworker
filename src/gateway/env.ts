@@ -45,7 +45,7 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   }
   // Map MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN (container expects this name)
   // Skip in DEV_MODE so local dev uses device pairing / insecure auth flow.
-  if (env.MOLTBOT_GATEWAY_TOKEN && env.DEV_MODE !== 'true') {
+  if (env.MOLTBOT_GATEWAY_TOKEN && env.DEV_MODE !== 'true' && env.E2E_TEST_MODE !== 'true') {
     envVars.CLAWDBOT_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;
   }
   if (env.DEV_MODE) envVars.CLAWDBOT_DEV_MODE = env.DEV_MODE; // Pass DEV_MODE as CLAWDBOT_DEV_MODE to container
