@@ -30,6 +30,8 @@ jobs:
         run: npm test
 
   e2e:
+    # Skip E2E when required API secrets are not available (e.g., forks).
+    if: ${{ secrets.AI_GATEWAY_API_KEY != '' || secrets.ANTHROPIC_API_KEY != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -119,7 +121,8 @@ jobs:
               
               # Extract middle frame as thumbnail
               duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")
-              midpoint=$(echo "$duration / 2" | bc -l)
+              midpoint_raw=$(echo "$duration / 2" | bc -l)
+              midpoint=$(node ./scripts/ffmpeg-timecode.mjs "$midpoint_raw")
               ffmpeg -y -ss "$midpoint" -i "$mp4" -vframes 1 -update 1 -q:v 2 "$thumb"
               
               # Add play button overlay using ImageMagick
