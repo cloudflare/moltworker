@@ -103,7 +103,8 @@ jobs:
               
               # Extract middle frame as thumbnail
               duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")
-              midpoint=$(echo "$duration / 2" | bc -l)
+              midpoint_raw=$(echo "$duration / 2" | bc -l)
+              midpoint=$(node ./scripts/ffmpeg-timecode.mjs "$midpoint_raw")
               ffmpeg -y -ss "$midpoint" -i "$mp4" -vframes 1 -update 1 -q:v 2 "$thumb"
               
               # Add play button overlay using ImageMagick
