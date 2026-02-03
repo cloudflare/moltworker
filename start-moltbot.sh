@@ -72,20 +72,25 @@ should_restore_from_r2() {
     fi
 }
 
-if [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ]; then
+# Track if we should restore from R2 (check once, use for all restores)
+DO_R2_RESTORE=false
+if [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ] || [ -f "$BACKUP_DIR/clawdbot.json" ]; then
     if should_restore_from_r2; then
+        DO_R2_RESTORE=true
+    fi
+fi
+
+if [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ]; then
+    if [ "$DO_R2_RESTORE" = true ]; then
         echo "Restoring from R2 backup at $BACKUP_DIR/clawdbot..."
         cp -a "$BACKUP_DIR/clawdbot/." "$CONFIG_DIR/"
-        # Copy the sync timestamp to local so we know what version we have
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
         echo "Restored config from R2 backup"
     fi
 elif [ -f "$BACKUP_DIR/clawdbot.json" ]; then
     # Legacy backup format (flat structure)
-    if should_restore_from_r2; then
+    if [ "$DO_R2_RESTORE" = true ]; then
         echo "Restoring from legacy R2 backup at $BACKUP_DIR..."
         cp -a "$BACKUP_DIR/." "$CONFIG_DIR/"
-        cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
         echo "Restored config from legacy R2 backup"
     fi
 elif [ -d "$BACKUP_DIR" ]; then
@@ -97,7 +102,7 @@ fi
 # Restore skills from R2 backup if available (only if R2 is newer)
 SKILLS_DIR="/root/clawd/skills"
 if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ]; then
-    if should_restore_from_r2; then
+    if [ "$DO_R2_RESTORE" = true ]; then
         echo "Restoring skills from $BACKUP_DIR/skills..."
         mkdir -p "$SKILLS_DIR"
         cp -a "$BACKUP_DIR/skills/." "$SKILLS_DIR/"
@@ -109,13 +114,38 @@ fi
 # This includes MEMORY.md, IDENTITY.md, USER.md, and other agent state files
 WORKSPACE_DIR="/root/clawd"
 if [ -d "$BACKUP_DIR/workspace" ] && [ "$(ls -A $BACKUP_DIR/workspace 2>/dev/null)" ]; then
-    if should_restore_from_r2; then
+    if [ "$DO_R2_RESTORE" = true ]; then
         echo "Restoring workspace from $BACKUP_DIR/workspace..."
         mkdir -p "$WORKSPACE_DIR"
         # Use rsync to preserve existing files not in backup (like skills/)
         rsync -a --ignore-existing "$BACKUP_DIR/workspace/" "$WORKSPACE_DIR/"
         echo "Restored workspace from R2 backup"
     fi
+fi
+
+# Restore user home dotfiles (git config, gh CLI, etc.)
+if [ -d "$BACKUP_DIR/home-dotfiles" ] && [ "$(ls -A $BACKUP_DIR/home-dotfiles 2>/dev/null)" ]; then
+    if [ "$DO_R2_RESTORE" = true ]; then
+        echo "Restoring home dotfiles from $BACKUP_DIR/home-dotfiles..."
+        # Restore .gitconfig
+        if [ -f "$BACKUP_DIR/home-dotfiles/.gitconfig" ]; then
+            cp -f "$BACKUP_DIR/home-dotfiles/.gitconfig" /root/.gitconfig
+            echo "Restored .gitconfig"
+        fi
+        # Restore GitHub CLI config
+        if [ -d "$BACKUP_DIR/home-dotfiles/.config/gh" ]; then
+            mkdir -p /root/.config/gh
+            cp -a "$BACKUP_DIR/home-dotfiles/.config/gh/." /root/.config/gh/
+            echo "Restored GitHub CLI config"
+        fi
+    fi
+fi
+
+# Copy the sync timestamp to local AFTER all restores are complete
+# This prevents the timestamp check from failing for subsequent restore sections
+if [ "$DO_R2_RESTORE" = true ]; then
+    cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
+    echo "All R2 restores complete, timestamp synced"
 fi
 
 # If config file still doesn't exist, create from template

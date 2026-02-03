@@ -58,6 +58,8 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   // aX Platform configuration
   if (env.AX_AGENTS) envVars.AX_AGENTS = env.AX_AGENTS;
   if (env.AX_BACKEND_URL) envVars.AX_BACKEND_URL = env.AX_BACKEND_URL;
+  // Workspace persistence options
+  if (env.BACKUP_GIT_HISTORY) envVars.BACKUP_GIT_HISTORY = env.BACKUP_GIT_HISTORY;
 
   return envVars;
 }

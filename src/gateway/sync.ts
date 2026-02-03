@@ -60,10 +60,36 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   // Run rsync to backup config to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
   // Backup structure:
-  //   ${R2_MOUNT_PATH}/clawdbot/  - gateway config (/root/.clawdbot/)
-  //   ${R2_MOUNT_PATH}/workspace/ - agent workspace (/root/clawd/) - MEMORY.md, IDENTITY.md, etc.
-  //   ${R2_MOUNT_PATH}/skills/    - custom skills (/root/clawd/skills/)
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete --exclude='skills' --exclude='node_modules' --exclude='.git' --exclude='*.tmp' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  //   ${R2_MOUNT_PATH}/clawdbot/      - gateway config (/root/.clawdbot/)
+  //   ${R2_MOUNT_PATH}/workspace/     - agent workspace (/root/clawd/) - MEMORY.md, IDENTITY.md, etc.
+  //   ${R2_MOUNT_PATH}/skills/        - custom skills (/root/clawd/skills/)
+  //   ${R2_MOUNT_PATH}/home-dotfiles/ - user dotfiles (.gitconfig, .config/gh/)
+  //   ${R2_MOUNT_PATH}/git-history/   - .git directory (only if BACKUP_GIT_HISTORY=true)
+
+  // Build workspace rsync excludes - optionally include .git if BACKUP_GIT_HISTORY is set
+  // WARNING: Backing up .git over s3fs can cause issues with large repos or symlinks
+  const gitExclude = env.BACKUP_GIT_HISTORY === 'true' ? '' : "--exclude='.git'";
+
+  // Build the sync command with all backup targets
+  const syncCmd = [
+    // 1. Gateway config
+    `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/`,
+    // 2. Workspace (memory, identity, docs, etc.)
+    `rsync -r --no-times --delete --exclude='skills' --exclude='node_modules' ${gitExclude} --exclude='*.tmp' /root/clawd/ ${R2_MOUNT_PATH}/workspace/`,
+    // 3. Skills directory
+    `rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/`,
+    // 4. Home dotfiles (gitconfig, gh CLI)
+    `mkdir -p ${R2_MOUNT_PATH}/home-dotfiles/.config`,
+    `(test -f /root/.gitconfig && cp /root/.gitconfig ${R2_MOUNT_PATH}/home-dotfiles/.gitconfig || true)`,
+    `(test -d /root/.config/gh && rsync -r --no-times --delete /root/.config/gh/ ${R2_MOUNT_PATH}/home-dotfiles/.config/gh/ || true)`,
+    // 5. Write timestamp
+    `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`,
+  ].join(' && ');
+
+  // Log if git history backup is enabled
+  if (env.BACKUP_GIT_HISTORY === 'true') {
+    console.log('[Sync] Git history backup enabled (BACKUP_GIT_HISTORY=true)');
+  }
   
   try {
     const proc = await sandbox.startProcess(syncCmd);

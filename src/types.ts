@@ -42,6 +42,8 @@ export interface MoltbotEnv {
   // aX Platform configuration
   AX_AGENTS?: string; // JSON array of agent configs: [{"id":"...","secret":"...","handle":"@...","env":"prod"}]
   AX_BACKEND_URL?: string; // aX API URL (default: https://api.paxai.app)
+  // Workspace persistence options
+  BACKUP_GIT_HISTORY?: string; // Set to 'true' to include .git directory in backups (may cause issues with s3fs)
 }
 
 /**
