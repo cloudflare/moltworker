@@ -27,7 +27,7 @@ import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
-import { publicRoutes, api, adminUi, debug, cdp } from './routes';
+import { publicRoutes, api, adminUi, debug, cdp, telegram } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -142,6 +142,10 @@ app.use('*', async (c, next) => {
 // Mount public routes first (before auth middleware)
 // Includes: /sandbox-health, /logo.png, /logo-small.png, /api/status, /_admin/assets/*
 app.route('/', publicRoutes);
+
+// Mount Telegram webhook routes (uses token auth, not CF Access)
+// Direct OpenRouter integration for Telegram bot
+app.route('/telegram', telegram);
 
 // Mount CDP routes (uses shared secret auth via query param, not CF Access)
 app.route('/cdp', cdp);
