@@ -105,6 +105,28 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     fi
 fi
 
+# Restore workspace files from R2 backup if available (SOUL.md, USER.md, MEMORY.md, etc.)
+WORKSPACE_DIR="/root/clawd"
+if [ -d "$BACKUP_DIR/workspace" ] && [ "$(ls -A $BACKUP_DIR/workspace 2>/dev/null)" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring workspace files from $BACKUP_DIR/workspace..."
+        mkdir -p "$WORKSPACE_DIR"
+        cp -a "$BACKUP_DIR/workspace/." "$WORKSPACE_DIR/"
+        echo "Restored workspace files: $(ls $WORKSPACE_DIR/*.md 2>/dev/null | wc -l) .md files"
+    fi
+fi
+
+# Restore memory directory from R2 backup if available (daily logs: memory/YYYY-MM-DD.md)
+MEMORY_DIR="/root/clawd/memory"
+if [ -d "$BACKUP_DIR/memory" ] && [ "$(ls -A $BACKUP_DIR/memory 2>/dev/null)" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring memory logs from $BACKUP_DIR/memory..."
+        mkdir -p "$MEMORY_DIR"
+        cp -a "$BACKUP_DIR/memory/." "$MEMORY_DIR/"
+        echo "Restored memory logs: $(ls $MEMORY_DIR/*.md 2>/dev/null | wc -l) files"
+    fi
+fi
+
 # If config file still doesn't exist, create from template
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, initializing from template..."

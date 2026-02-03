@@ -57,9 +57,22 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
-  // Run rsync to backup config to R2
+  // Run rsync to backup config, skills, and workspace to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Sync order:
+  //   1. /root/.clawdbot/ → R2/clawdbot/ (config)
+  //   2. /root/clawd/skills/ → R2/skills/ (skills)
+  //   3. /root/clawd/*.md → R2/workspace/ (bootstrap files: SOUL.md, USER.md, MEMORY.md, etc.)
+  //   4. /root/clawd/memory/ → R2/memory/ (daily memory logs)
+  const syncCmd = `
+    rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && \
+    rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && \
+    mkdir -p ${R2_MOUNT_PATH}/workspace && \
+    rsync --no-times /root/clawd/*.md ${R2_MOUNT_PATH}/workspace/ 2>/dev/null || true && \
+    mkdir -p ${R2_MOUNT_PATH}/memory && \
+    rsync -r --no-times --delete /root/clawd/memory/ ${R2_MOUNT_PATH}/memory/ 2>/dev/null || true && \
+    date -Iseconds > ${R2_MOUNT_PATH}/.last-sync
+  `.trim().replace(/\s+/g, ' ');
   
   try {
     const proc = await sandbox.startProcess(syncCmd);
