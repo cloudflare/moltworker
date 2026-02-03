@@ -16,8 +16,12 @@ export async function waitForProcess(
 ): Promise<void> {
   const maxAttempts = Math.ceil(timeoutMs / pollIntervalMs);
   let attempts = 0;
-  while (proc.status === 'running' && attempts < maxAttempts) {
+  while ((proc.status === 'running' || proc.status === 'starting') && attempts < maxAttempts) {
     await new Promise(r => setTimeout(r, pollIntervalMs));
     attempts++;
+  }
+
+  if (proc.status === 'running' || proc.status === 'starting') {
+    throw new Error(`Process timed out after ${timeoutMs}ms`);
   }
 }
