@@ -38,7 +38,7 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
   try {
     console.log('Verifying R2 mount status...');
     
-    // 1. Check if already mounted to avoid unnecessary work
+    // 1. Check if already mounted to avoid unnecessary work 
     const { stdout } = await sandbox.exec(`mount | grep "${R2_MOUNT_PATH}" || true`);
     if (stdout.includes('s3fs')) {
       console.log('R2 already mounted.');
