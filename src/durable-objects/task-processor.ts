@@ -355,38 +355,55 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           );
         }
 
-        // Make API call to OpenRouter with timeout
-        const fetchPromise = fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${request.openrouterKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': 'https://moltworker.dev',
-            'X-Title': 'Moltworker Telegram Bot',
-          },
-          body: JSON.stringify({
-            model: modelId,
-            messages: conversationMessages,
-            max_tokens: 4096,
-            temperature: 0.7,
-            tools: TOOLS_WITHOUT_BROWSER, // Use tools without browser (not available in DO)
-            tool_choice: 'auto',
-          }),
-        });
-
-        // 3 minute timeout per API call
-        const timeoutPromise = new Promise<Response>((_, reject) => {
-          setTimeout(() => reject(new Error('OpenRouter API timeout (3 minutes)')), 180000);
-        });
-
-        const response = await Promise.race([fetchPromise, timeoutPromise]);
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`OpenRouter API error: ${errorText}`);
+        // Save checkpoint before API call (in case it crashes)
+        if (this.r2 && task.iterations > 1) {
+          await this.saveCheckpoint(
+            this.r2,
+            request.userId,
+            request.taskId,
+            conversationMessages,
+            task.toolsUsed,
+            task.iterations
+          );
         }
 
-        const result = await response.json() as {
+        // Make API call to OpenRouter with timeout
+        let response: Response;
+        try {
+          const fetchPromise = fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${request.openrouterKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://moltworker.dev',
+              'X-Title': 'Moltworker Telegram Bot',
+            },
+            body: JSON.stringify({
+              model: modelId,
+              messages: conversationMessages,
+              max_tokens: 4096,
+              temperature: 0.7,
+              tools: TOOLS_WITHOUT_BROWSER,
+              tool_choice: 'auto',
+            }),
+          });
+
+          // 2 minute timeout per API call
+          const timeoutPromise = new Promise<Response>((_, reject) => {
+            setTimeout(() => reject(new Error('OpenRouter API timeout (2 min)')), 120000);
+          });
+
+          response = await Promise.race([fetchPromise, timeoutPromise]);
+        } catch (fetchError) {
+          throw new Error(`API fetch failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+        }
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => 'unknown error');
+          throw new Error(`OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`);
+        }
+
+        let result: {
           choices: Array<{
             message: {
               role: string;
@@ -396,6 +413,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             finish_reason: string;
           }>;
         };
+
+        try {
+          result = await response.json();
+        } catch (parseError) {
+          throw new Error(`Failed to parse API response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+        }
+
+        if (!result.choices || !result.choices[0]) {
+          throw new Error('Invalid API response: no choices returned');
+        }
 
         const choice = result.choices[0];
 
@@ -456,9 +483,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             console.log(`[TaskProcessor] Force compressed due to ${estimatedTokens} estimated tokens`);
           }
 
-          // Save checkpoint every 30 seconds to R2
-          if (this.r2 && Date.now() - lastCheckpoint > 30000) {
-            lastCheckpoint = Date.now();
+          // Save checkpoint after every tool execution (not just every 30s)
+          // This ensures we don't lose progress if DO crashes
+          if (this.r2) {
             await this.saveCheckpoint(
               this.r2,
               request.userId,
