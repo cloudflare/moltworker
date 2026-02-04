@@ -310,12 +310,12 @@ export class OpenRouterClient {
 
   /**
    * Generate an image using FLUX or other image models
-   * Uses OpenRouter's images/generations endpoint
+   * Uses OpenRouter's chat/completions with modalities: ["image", "text"]
    */
   async generateImage(
     prompt: string,
     modelAlias?: string,
-    options?: {
+    _options?: {
       aspectRatio?: string; // e.g., "1:1", "16:9", "9:16"
       imageSize?: string; // e.g., "1024x1024"
     }
@@ -324,19 +324,19 @@ export class OpenRouterClient {
     const alias = modelAlias || DEFAULT_IMAGE_MODEL;
     const modelId = getModelId(alias);
 
-    // OpenRouter uses /images/generations endpoint for FLUX models
-    const request: Record<string, unknown> = {
+    // OpenRouter uses chat/completions with modalities for image generation
+    const request = {
       model: modelId,
-      prompt: prompt,
-      n: 1,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      modalities: ['image', 'text'],
     };
 
-    // Add size/aspect ratio if specified
-    if (options?.imageSize) {
-      request.size = options.imageSize;
-    }
-
-    const response = await fetch(`${OPENROUTER_BASE_URL}/images/generations`, {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
@@ -354,9 +354,24 @@ export class OpenRouterClient {
       throw new Error(`Image generation error: ${errorMessage}`);
     }
 
-    // Response format: { data: [{ url: "...", b64_json: "..." }] }
-    const result = await response.json() as ImageGenerationResponse;
-    return result;
+    // Response format: choices[0].message.images[].image_url.url
+    const result = await response.json() as {
+      choices: Array<{
+        message: {
+          content?: string;
+          images?: Array<{
+            image_url: { url: string };
+          }>;
+        };
+      }>;
+    };
+
+    const images = result.choices[0]?.message?.images || [];
+
+    return {
+      created: Date.now(),
+      data: images.map(img => ({ url: img.image_url.url })),
+    };
   }
 
   /**
