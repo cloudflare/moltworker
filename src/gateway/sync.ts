@@ -71,18 +71,20 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   const gitExclude = env.BACKUP_GIT_HISTORY === 'true' ? '' : "--exclude='.git'";
 
   // Build the sync command with all backup targets
+  // IMPORTANT: Each rsync uses || true so failures don't cascade.
+  // This ensures .last-sync is always written even if some directories are empty/missing.
   const syncCmd = [
-    // 1. Gateway config
+    // 1. Gateway config (required - this one should succeed)
     `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/`,
-    // 2. Workspace (memory, identity, docs, etc.)
-    `rsync -r --no-times --delete --exclude='skills' --exclude='node_modules' ${gitExclude} --exclude='*.tmp' /root/clawd/ ${R2_MOUNT_PATH}/workspace/`,
-    // 3. Skills directory
-    `rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/`,
+    // 2. Workspace (memory, identity, docs, etc.) - may be empty on fresh installs
+    `(rsync -r --no-times --delete --exclude='skills' --exclude='node_modules' ${gitExclude} --exclude='*.tmp' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ || echo '[Sync] workspace rsync failed, continuing...')`,
+    // 3. Skills directory - may not exist
+    `(rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ || echo '[Sync] skills rsync failed, continuing...')`,
     // 4. Home dotfiles (gitconfig, gh CLI)
     `mkdir -p ${R2_MOUNT_PATH}/home-dotfiles/.config`,
     `(test -f /root/.gitconfig && cp /root/.gitconfig ${R2_MOUNT_PATH}/home-dotfiles/.gitconfig || true)`,
     `(test -d /root/.config/gh && rsync -r --no-times --delete /root/.config/gh/ ${R2_MOUNT_PATH}/home-dotfiles/.config/gh/ || true)`,
-    // 5. Write timestamp
+    // 5. Write timestamp - MUST always run so restore can detect backup exists
     `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`,
   ].join(' && ');
 
