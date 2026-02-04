@@ -25,6 +25,7 @@ export interface MoltbotEnv {
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USERS?: string; // Comma-separated list of allowed Telegram user IDs
   TELEGRAM_DM_POLICY?: string;
+  GITHUB_TOKEN?: string; // GitHub PAT for tool calls (repo access)
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
   SLACK_BOT_TOKEN?: string;
