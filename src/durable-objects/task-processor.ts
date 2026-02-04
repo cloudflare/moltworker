@@ -222,8 +222,28 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     if (url.pathname === '/process' && request.method === 'POST') {
       const taskRequest = await request.json() as TaskRequest;
 
-      // Start processing in the background (don't await)
-      this.processTask(taskRequest);
+      // Start processing in the background with global error catching
+      // This ensures ANY error sends a notification to user
+      this.processTask(taskRequest).catch(async (error) => {
+        console.error('[TaskProcessor] Uncaught error in processTask:', error);
+        try {
+          // Try to save checkpoint and notify user
+          const task = await this.doState.storage.get<TaskState>('task');
+          if (task) {
+            task.status = 'failed';
+            task.error = `Unexpected error: ${error instanceof Error ? error.message : String(error)}`;
+            await this.doState.storage.put('task', task);
+          }
+          await this.sendTelegramMessageWithButtons(
+            taskRequest.telegramToken,
+            taskRequest.chatId,
+            `❌ Task crashed: ${error instanceof Error ? error.message : 'Unknown error'}\n\n💡 Progress may be saved.`,
+            [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
+          );
+        } catch (notifyError) {
+          console.error('[TaskProcessor] Failed to notify user:', notifyError);
+        }
+      });
 
       return new Response(JSON.stringify({
         status: 'started',
