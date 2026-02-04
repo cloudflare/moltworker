@@ -54,7 +54,7 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     console.log('Initiating R2 mount...');
-    await sandbox.mountBucket(R2_BUCKET_NAME, R2_MOUNT_PATH, {
+    await sandbox.mountBucket(bucketName, R2_MOUNT_PATH, {
       endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       credentials: {
         accessKeyId: env.R2_ACCESS_KEY_ID,
