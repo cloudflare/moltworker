@@ -198,7 +198,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.50/$1.50',
   },
   kimi: {
-    id: 'moonshot/kimi-k2.5',
+    id: 'moonshotai/kimi-k2.5',
     alias: 'kimi',
     name: 'Kimi K2.5',
     specialty: 'Paid Vision/Agents',
