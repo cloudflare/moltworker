@@ -541,12 +541,21 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
       }
 
-      const canResume = task.iterations > 0 ? '\n\n💡 Progress saved. Send your message again to resume.' : '';
-      await this.sendTelegramMessage(
-        request.telegramToken,
-        request.chatId,
-        `❌ Task failed: ${task.error}${canResume}`
-      );
+      if (task.iterations > 0) {
+        // Send error with resume button
+        await this.sendTelegramMessageWithButtons(
+          request.telegramToken,
+          request.chatId,
+          `❌ Task failed: ${task.error}\n\n💡 Progress saved (${task.iterations} iterations).`,
+          [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
+        );
+      } else {
+        await this.sendTelegramMessage(
+          request.telegramToken,
+          request.chatId,
+          `❌ Task failed: ${task.error}`
+        );
+      }
     }
   }
 
@@ -565,6 +574,35 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         body: JSON.stringify({
           chat_id: chatId,
           text: text.slice(0, 4000), // Telegram limit
+        }),
+      });
+
+      const result = await response.json() as { ok: boolean; result?: { message_id: number } };
+      return result.ok ? result.result?.message_id || null : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Send a message with inline buttons to Telegram
+   */
+  private async sendTelegramMessageWithButtons(
+    token: string,
+    chatId: number,
+    text: string,
+    buttons: Array<Array<{ text: string; callback_data: string }>>
+  ): Promise<number | null> {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text.slice(0, 4000),
+          reply_markup: {
+            inline_keyboard: buttons,
+          },
         }),
       });
 

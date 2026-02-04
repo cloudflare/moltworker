@@ -1107,6 +1107,51 @@ export class TelegramHandler {
         }
         break;
 
+      case 'resume':
+        // Resume a failed task from checkpoint
+        if (this.taskProcessor) {
+          // Remove button
+          if (query.message) {
+            await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+          }
+
+          // Get the last user message from storage to resume with
+          const history = await this.storage.getConversation(userId, 1);
+          const lastUserMessage = history.find(m => m.role === 'user');
+
+          if (lastUserMessage) {
+            // Restart the task - checkpoint will be loaded by DO
+            const systemPrompt = await this.getSystemPrompt();
+            const messages: ChatMessage[] = [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: lastUserMessage.content },
+            ];
+
+            const modelAlias = await this.storage.getUserModel(userId);
+            const taskId = `${userId}-${Date.now()}`;
+            const taskRequest: TaskRequest = {
+              taskId,
+              chatId,
+              userId,
+              modelAlias,
+              messages,
+              telegramToken: this.telegramToken,
+              openrouterKey: this.openrouterKey,
+              githubToken: this.githubToken,
+            };
+
+            const doId = this.taskProcessor.idFromName(userId);
+            const doStub = this.taskProcessor.get(doId);
+            await doStub.fetch(new Request('https://do/process', {
+              method: 'POST',
+              body: JSON.stringify(taskRequest),
+            }));
+          } else {
+            await this.bot.sendMessage(chatId, 'No previous message found to resume.');
+          }
+        }
+        break;
+
       default:
         console.log('[Telegram] Unknown callback action:', action);
     }
