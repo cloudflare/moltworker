@@ -46,12 +46,19 @@ export interface TaskRequest {
   githubToken?: string;
 }
 
-export class TaskProcessor extends DurableObject<Record<string, unknown>> {
-  private doState: DurableObjectState;
+// DO environment with R2 binding
+interface TaskProcessorEnv {
+  MOLTBOT_BUCKET?: R2Bucket;
+}
 
-  constructor(state: DurableObjectState, env: Record<string, unknown>) {
+export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
+  private doState: DurableObjectState;
+  private r2?: R2Bucket;
+
+  constructor(state: DurableObjectState, env: TaskProcessorEnv) {
     super(state, env);
     this.doState = state;
+    this.r2 = env.MOLTBOT_BUCKET;
   }
 
   /**
@@ -84,6 +91,65 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       }
     }
     return Math.ceil(totalChars / 4);
+  }
+
+  /**
+   * Save checkpoint to R2
+   */
+  private async saveCheckpoint(
+    r2: R2Bucket,
+    userId: string,
+    taskId: string,
+    messages: ChatMessage[],
+    toolsUsed: string[],
+    iterations: number
+  ): Promise<void> {
+    const checkpoint = {
+      taskId,
+      messages,
+      toolsUsed,
+      iterations,
+      savedAt: Date.now(),
+    };
+    const key = `checkpoints/${userId}/latest.json`;
+    await r2.put(key, JSON.stringify(checkpoint));
+    console.log(`[TaskProcessor] Saved checkpoint: ${iterations} iterations, ${messages.length} messages`);
+  }
+
+  /**
+   * Load checkpoint from R2
+   */
+  private async loadCheckpoint(
+    r2: R2Bucket,
+    userId: string
+  ): Promise<{ messages: ChatMessage[]; toolsUsed: string[]; iterations: number } | null> {
+    const key = `checkpoints/${userId}/latest.json`;
+    const obj = await r2.get(key);
+    if (!obj) return null;
+
+    try {
+      const checkpoint = JSON.parse(await obj.text());
+      // Only use checkpoint if it's less than 1 hour old
+      if (Date.now() - checkpoint.savedAt < 3600000) {
+        console.log(`[TaskProcessor] Loaded checkpoint: ${checkpoint.iterations} iterations`);
+        return {
+          messages: checkpoint.messages,
+          toolsUsed: checkpoint.toolsUsed,
+          iterations: checkpoint.iterations,
+        };
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    return null;
+  }
+
+  /**
+   * Clear checkpoint from R2
+   */
+  private async clearCheckpoint(r2: R2Bucket, userId: string): Promise<void> {
+    const key = `checkpoints/${userId}/latest.json`;
+    await r2.delete(key);
   }
 
   /**
@@ -235,9 +301,33 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
     const modelId = getModelId(request.modelAlias);
     const toolContext: ToolContext = { githubToken: request.githubToken };
 
-    const conversationMessages: ChatMessage[] = [...request.messages];
+    let conversationMessages: ChatMessage[] = [...request.messages];
     const maxIterations = 100; // Very high limit for complex tasks
     let lastProgressUpdate = Date.now();
+    let lastCheckpoint = Date.now();
+
+    // Try to resume from checkpoint if available
+    if (this.r2) {
+      const checkpoint = await this.loadCheckpoint(this.r2, request.userId);
+      if (checkpoint && checkpoint.iterations > 0) {
+        // Resume from checkpoint
+        conversationMessages = checkpoint.messages;
+        task.toolsUsed = checkpoint.toolsUsed;
+        task.iterations = checkpoint.iterations;
+        await this.doState.storage.put('task', task);
+
+        // Update status to show we're resuming
+        if (statusMessageId) {
+          await this.editTelegramMessage(
+            request.telegramToken,
+            request.chatId,
+            statusMessageId,
+            `⏳ Resuming from checkpoint (${checkpoint.iterations} iterations)...`
+          );
+        }
+        console.log(`[TaskProcessor] Resumed from checkpoint: ${checkpoint.iterations} iterations`);
+      }
+    }
 
     try {
       while (task.iterations < maxIterations) {
@@ -366,6 +456,19 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
             console.log(`[TaskProcessor] Force compressed due to ${estimatedTokens} estimated tokens`);
           }
 
+          // Save checkpoint every 30 seconds to R2
+          if (this.r2 && Date.now() - lastCheckpoint > 30000) {
+            lastCheckpoint = Date.now();
+            await this.saveCheckpoint(
+              this.r2,
+              request.userId,
+              request.taskId,
+              conversationMessages,
+              task.toolsUsed,
+              task.iterations
+            );
+          }
+
           // Continue loop for next iteration
           continue;
         }
@@ -374,6 +477,11 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
         task.status = 'completed';
         task.result = choice.message.content || 'No response generated.';
         await this.doState.storage.put('task', task);
+
+        // Clear checkpoint on success
+        if (this.r2) {
+          await this.clearCheckpoint(this.r2, request.userId);
+        }
 
         // Delete status message
         if (statusMessageId) {
@@ -416,15 +524,28 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       task.error = error instanceof Error ? error.message : String(error);
       await this.doState.storage.put('task', task);
 
+      // Save checkpoint so we can resume later
+      if (this.r2 && task.iterations > 0) {
+        await this.saveCheckpoint(
+          this.r2,
+          request.userId,
+          request.taskId,
+          conversationMessages,
+          task.toolsUsed,
+          task.iterations
+        );
+      }
+
       // Delete status message and send error
       if (statusMessageId) {
         await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
       }
 
+      const canResume = task.iterations > 0 ? '\n\n💡 Progress saved. Send your message again to resume.' : '';
       await this.sendTelegramMessage(
         request.telegramToken,
         request.chatId,
-        `❌ Task failed: ${task.error}`
+        `❌ Task failed: ${task.error}${canResume}`
       );
     }
   }
