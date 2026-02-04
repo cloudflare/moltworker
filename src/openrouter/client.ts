@@ -4,12 +4,15 @@
  */
 
 import { getModelId, isImageGenModel, DEFAULT_IMAGE_MODEL } from './models';
+import { AVAILABLE_TOOLS, executeTool, type ToolDefinition, type ToolCall, type ToolResult } from './tools';
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string | ContentPart[];
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | ContentPart[] | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
 }
 
 export interface ContentPart {
@@ -26,6 +29,8 @@ export interface ChatCompletionRequest {
   max_tokens?: number;
   temperature?: number;
   stream?: boolean;
+  tools?: ToolDefinition[];
+  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
 }
 
 export interface ChatCompletionResponse {
@@ -34,7 +39,8 @@ export interface ChatCompletionResponse {
     index: number;
     message: {
       role: string;
-      content: string;
+      content: string | null;
+      tool_calls?: ToolCall[];
     };
     finish_reason: string;
   }>;
@@ -130,6 +136,104 @@ export class OpenRouterClient {
   }
 
   /**
+   * Send a chat completion with tool calling support
+   * Handles the tool call loop automatically
+   */
+  async chatCompletionWithTools(
+    modelAlias: string,
+    messages: ChatMessage[],
+    options?: {
+      maxTokens?: number;
+      temperature?: number;
+      maxToolCalls?: number; // Limit iterations to prevent infinite loops
+      onToolCall?: (toolName: string, args: string) => void; // Callback for progress updates
+    }
+  ): Promise<{ response: ChatCompletionResponse; finalText: string; toolsUsed: string[] }> {
+    const modelId = getModelId(modelAlias);
+    const maxIterations = options?.maxToolCalls || 10;
+    const toolsUsed: string[] = [];
+
+    // Clone messages to avoid mutating the original
+    const conversationMessages: ChatMessage[] = [...messages];
+
+    let iterations = 0;
+    let lastResponse: ChatCompletionResponse;
+
+    while (iterations < maxIterations) {
+      iterations++;
+
+      const request: ChatCompletionRequest = {
+        model: modelId,
+        messages: conversationMessages,
+        max_tokens: options?.maxTokens || 4096,
+        temperature: options?.temperature ?? 0.7,
+        tools: AVAILABLE_TOOLS,
+        tool_choice: 'auto',
+      };
+
+      const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const error = await response.json() as OpenRouterError;
+        throw new Error(`OpenRouter API error: ${error.error?.message || response.statusText}`);
+      }
+
+      lastResponse = await response.json() as ChatCompletionResponse;
+      const choice = lastResponse.choices[0];
+
+      // Check if the model wants to call tools
+      if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+        // Add assistant message with tool calls to conversation
+        conversationMessages.push({
+          role: 'assistant',
+          content: choice.message.content,
+          tool_calls: choice.message.tool_calls,
+        });
+
+        // Execute each tool call
+        for (const toolCall of choice.message.tool_calls) {
+          const toolName = toolCall.function.name;
+          toolsUsed.push(toolName);
+
+          // Notify caller about tool call
+          if (options?.onToolCall) {
+            options.onToolCall(toolName, toolCall.function.arguments);
+          }
+
+          // Execute tool and get result
+          const result = await executeTool(toolCall);
+
+          // Add tool result to conversation
+          conversationMessages.push({
+            role: 'tool',
+            content: result.content,
+            tool_call_id: result.tool_call_id,
+          });
+        }
+
+        // Continue the loop to get the model's response to tool results
+        continue;
+      }
+
+      // No more tool calls, model has finished
+      break;
+    }
+
+    // Extract final text response
+    const finalText = lastResponse!.choices[0]?.message?.content || 'No response generated.';
+
+    return {
+      response: lastResponse!,
+      finalText,
+      toolsUsed,
+    };
+  }
+
+  /**
    * Send a chat completion with vision (image input)
    */
   async chatCompletionWithVision(
@@ -177,7 +281,7 @@ export class OpenRouterClient {
 
   /**
    * Generate an image using FLUX or other image models
-   * OpenRouter uses chat completions for image generation
+   * Uses OpenRouter's images/generations endpoint
    */
   async generateImage(
     prompt: string,
@@ -187,63 +291,34 @@ export class OpenRouterClient {
     const alias = modelAlias || DEFAULT_IMAGE_MODEL;
     const modelId = getModelId(alias);
 
-    // OpenRouter handles FLUX through chat completions with modalities
-    const messages: ChatMessage[] = [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ];
-
+    // OpenRouter's image generation endpoint
     const request = {
       model: modelId,
-      messages,
-      modalities: ['image', 'text'], // Required for image generation
+      prompt: prompt,
+      n: 1,
+      size: '1024x1024',
     };
 
-    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/images/generations`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
     });
 
     if (!response.ok) {
-      const error = await response.json() as OpenRouterError;
-      throw new Error(`Image generation error: ${error.error?.message || response.statusText}`);
+      const errorText = await response.text();
+      let errorMessage: string;
+      try {
+        const error = JSON.parse(errorText) as OpenRouterError;
+        errorMessage = error.error?.message || response.statusText;
+      } catch {
+        errorMessage = errorText || response.statusText;
+      }
+      throw new Error(`Image generation error: ${errorMessage}`);
     }
 
-    const result = await response.json() as ChatCompletionResponse;
-    const content = result.choices[0]?.message?.content || '';
-
-    // OpenRouter returns images as base64 data URLs: data:image/png;base64,...
-    const dataUrlMatch = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
-    if (dataUrlMatch) {
-      return {
-        created: Date.now(),
-        data: [{ url: dataUrlMatch[0] }],
-      };
-    }
-
-    // FLUX models may return markdown image syntax: ![...](url)
-    const urlMatch = content.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
-    if (urlMatch) {
-      return {
-        created: Date.now(),
-        data: [{ url: urlMatch[1] }],
-      };
-    }
-
-    // Some models return just a URL
-    const plainUrlMatch = content.match(/(https?:\/\/[^\s]+\.(png|jpg|jpeg|webp|gif))/i);
-    if (plainUrlMatch) {
-      return {
-        created: Date.now(),
-        data: [{ url: plainUrlMatch[1] }],
-      };
-    }
-
-    // If no URL found, throw error with the actual response for debugging
-    throw new Error(`No image URL in response. Model returned: ${content.slice(0, 200)}`);
+    const result = await response.json() as ImageGenerationResponse;
+    return result;
   }
 
   /**
