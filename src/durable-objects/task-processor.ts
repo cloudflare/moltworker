@@ -363,19 +363,26 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         task.lastUpdate = Date.now();
         await this.doState.storage.put('task', task);
 
-        // Send progress update every 15 seconds
+        // Send progress update every 15 seconds (wrapped in try-catch)
         if (Date.now() - lastProgressUpdate > 15000 && statusMessageId) {
-          lastProgressUpdate = Date.now();
-          const elapsed = Math.round((Date.now() - task.startTime) / 1000);
-          const tokens = this.estimateTokens(conversationMessages);
-          const tokensK = Math.round(tokens / 1000);
-          await this.editTelegramMessage(
-            request.telegramToken,
-            request.chatId,
-            statusMessageId,
-            `⏳ Processing... (${task.iterations} iter, ${task.toolsUsed.length} tools, ~${tokensK}K tokens, ${elapsed}s)`
-          );
+          try {
+            lastProgressUpdate = Date.now();
+            const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+            const tokens = this.estimateTokens(conversationMessages);
+            const tokensK = Math.round(tokens / 1000);
+            await this.editTelegramMessage(
+              request.telegramToken,
+              request.chatId,
+              statusMessageId,
+              `⏳ Processing... (${task.iterations} iter, ${task.toolsUsed.length} tools, ~${tokensK}K tokens, ${elapsed}s)`
+            );
+          } catch (updateError) {
+            console.log('[TaskProcessor] Progress update failed (non-fatal):', updateError);
+            // Don't let progress update failure crash the task
+          }
         }
+
+        console.log(`[TaskProcessor] Iteration ${task.iterations}, tools: ${task.toolsUsed.length}, messages: ${conversationMessages.length}`);
 
         // Save checkpoint before API call (in case it crashes)
         if (this.r2 && task.iterations > 1) {
