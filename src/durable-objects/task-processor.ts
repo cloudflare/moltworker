@@ -32,6 +32,8 @@ interface TaskState {
   error?: string;
   statusMessageId?: number;
   telegramToken?: string; // Store for cancel
+  openrouterKey?: string; // Store for alarm recovery
+  githubToken?: string; // Store for alarm recovery
 }
 
 // Task request from the worker
@@ -51,6 +53,11 @@ interface TaskProcessorEnv {
   MOLTBOT_BUCKET?: R2Bucket;
 }
 
+// Watchdog alarm interval (90 seconds)
+const WATCHDOG_INTERVAL_MS = 90000;
+// Max time without update before considering task stuck
+const STUCK_THRESHOLD_MS = 60000;
+
 export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private doState: DurableObjectState;
   private r2?: R2Bucket;
@@ -59,6 +66,60 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     super(state, env);
     this.doState = state;
     this.r2 = env.MOLTBOT_BUCKET;
+  }
+
+  /**
+   * Alarm handler - acts as a watchdog to detect stuck/crashed tasks
+   * This fires even if the DO was terminated and restarted by Cloudflare
+   */
+  async alarm(): Promise<void> {
+    console.log('[TaskProcessor] Watchdog alarm fired');
+    const task = await this.doState.storage.get<TaskState>('task');
+
+    if (!task) {
+      console.log('[TaskProcessor] No task found in alarm handler');
+      return;
+    }
+
+    // If task is completed, failed, or cancelled, no need for watchdog
+    if (task.status !== 'processing') {
+      console.log(`[TaskProcessor] Task status is ${task.status}, stopping watchdog`);
+      return;
+    }
+
+    const timeSinceUpdate = Date.now() - task.lastUpdate;
+    console.log(`[TaskProcessor] Time since last update: ${timeSinceUpdate}ms`);
+
+    // If task updated recently, it's still running - reschedule watchdog
+    if (timeSinceUpdate < STUCK_THRESHOLD_MS) {
+      console.log('[TaskProcessor] Task still active, rescheduling watchdog');
+      await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
+      return;
+    }
+
+    // Task appears stuck - likely DO was terminated by Cloudflare
+    console.log('[TaskProcessor] Task appears stuck, notifying user');
+
+    // Mark as failed
+    task.status = 'failed';
+    task.error = 'Task stopped unexpectedly (Cloudflare terminated the worker)';
+    await this.doState.storage.put('task', task);
+
+    // Delete stale status message if it exists
+    if (task.telegramToken && task.statusMessageId) {
+      await this.deleteTelegramMessage(task.telegramToken, task.chatId, task.statusMessageId);
+    }
+
+    // Notify user with resume option
+    if (task.telegramToken) {
+      const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+      await this.sendTelegramMessageWithButtons(
+        task.telegramToken,
+        task.chatId,
+        `⚠️ Task stopped unexpectedly after ${elapsed}s (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\nThis usually happens when the task uses too much CPU. Try simplifying your request.\n\n💡 Progress saved.`,
+        [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
+      );
+    }
   }
 
   /**
@@ -227,6 +288,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       this.processTask(taskRequest).catch(async (error) => {
         console.error('[TaskProcessor] Uncaught error in processTask:', error);
         try {
+          // Cancel watchdog alarm
+          await this.doState.storage.deleteAlarm();
+
           // Try to save checkpoint and notify user
           const task = await this.doState.storage.get<TaskState>('task');
           if (task) {
@@ -267,6 +331,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         task.error = 'Cancelled by user';
         await this.doState.storage.put('task', task);
 
+        // Cancel watchdog alarm
+        await this.doState.storage.deleteAlarm();
+
         // Try to send cancellation message
         if (task.telegramToken && task.chatId) {
           if (task.statusMessageId) {
@@ -304,9 +371,15 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       lastUpdate: Date.now(),
     };
 
-    // Store telegram token for cancel functionality
+    // Store credentials for cancel and alarm recovery
     task.telegramToken = request.telegramToken;
+    task.openrouterKey = request.openrouterKey;
+    task.githubToken = request.githubToken;
     await this.doState.storage.put('task', task);
+
+    // Set watchdog alarm to detect if DO is terminated
+    await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
+    console.log('[TaskProcessor] Watchdog alarm set');
 
     // Send initial status to Telegram
     const statusMessageId = await this.sendTelegramMessage(
@@ -525,6 +598,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             );
           }
 
+          // Update lastUpdate and refresh watchdog alarm
+          task.lastUpdate = Date.now();
+          await this.doState.storage.put('task', task);
+          await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
+
           // Continue loop for next iteration
           continue;
         }
@@ -533,6 +611,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         task.status = 'completed';
         task.result = choice.message.content || 'No response generated.';
         await this.doState.storage.put('task', task);
+
+        // Cancel watchdog alarm - task completed successfully
+        await this.doState.storage.deleteAlarm();
 
         // Clear checkpoint on success
         if (this.r2) {
@@ -565,6 +646,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       task.result = 'Task hit iteration limit (100). Last response may be incomplete.';
       await this.doState.storage.put('task', task);
 
+      // Cancel watchdog alarm
+      await this.doState.storage.deleteAlarm();
+
       if (statusMessageId) {
         await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
       }
@@ -579,6 +663,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       task.status = 'failed';
       task.error = error instanceof Error ? error.message : String(error);
       await this.doState.storage.put('task', task);
+
+      // Cancel watchdog alarm - we're handling the error here
+      await this.doState.storage.deleteAlarm();
 
       // Save checkpoint so we can resume later
       if (this.r2 && task.iterations > 0) {
