@@ -228,17 +228,23 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 //   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
 const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
 const isOpenAI = baseUrl.endsWith('/openai');
+const isCompat = baseUrl.endsWith('/compat');
 
-if (isOpenAI) {
+if (isOpenAI || isCompat) {
     // Create custom openai provider config with baseUrl override
     // Omit apiKey so moltbot falls back to OPENAI_API_KEY env var
     console.log('Configuring OpenAI provider with base URL:', baseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
+    const compatModels = [
+        { id: 'openai/gpt-5-mini', name: 'GPT-5 Mini', contextWindow: 200000 },
+        { id: 'google-ai-studio/gemini-2.5-flash', name: 'Gemini 2.5 Flash', contextWindow: 128000 },
+        { id: 'anthropic/claude-sonnet-4-5', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
+    ];
     config.models.providers.openai = {
         baseUrl: baseUrl,
         api: 'openai-responses',
-        models: [
+        models: isCompat ? compatModels : [
             { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
             { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
             { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
@@ -246,10 +252,17 @@ if (isOpenAI) {
     };
     // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
-    config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
-    config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
-    config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    if (isCompat) {
+        config.agents.defaults.models['openai/gpt-5-mini'] = { alias: 'GPT-5 Mini' };
+        config.agents.defaults.models['google-ai-studio/gemini-2.5-flash'] = { alias: 'Gemini 2.5 Flash' };
+        config.agents.defaults.models['anthropic/claude-sonnet-4-5'] = { alias: 'Claude Sonnet 4.5' };
+        config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5';
+    } else {
+        config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
+        config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
+        config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
+        config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    }
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
     config.models = config.models || {};

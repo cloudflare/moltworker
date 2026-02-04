@@ -37,6 +37,17 @@ describe('buildEnvVars', () => {
     expect(result.ANTHROPIC_API_KEY).toBeUndefined();
   });
 
+  it('maps AI_GATEWAY_API_KEY to OPENAI_API_KEY for compat gateway', () => {
+    const env = createMockEnv({
+      AI_GATEWAY_API_KEY: 'sk-gateway-key',
+      AI_GATEWAY_BASE_URL: 'https://gateway.ai.cloudflare.com/v1/123/my-gw/compat',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_API_KEY).toBe('sk-gateway-key');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/compat');
+    expect(result.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
   it('passes AI_GATEWAY_BASE_URL directly', () => {
     const env = createMockEnv({
       AI_GATEWAY_BASE_URL: 'https://gateway.ai.cloudflare.com/v1/123/my-gw/anthropic',
