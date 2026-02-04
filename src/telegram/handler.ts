@@ -5,6 +5,7 @@
 
 import { OpenRouterClient, createOpenRouterClient, extractTextResponse, type ChatMessage } from '../openrouter/client';
 import { UserStorage, createUserStorage, SkillStorage, createSkillStorage } from '../openrouter/storage';
+import { modelSupportsTools } from '../openrouter/tools';
 import {
   MODELS,
   getModel,
@@ -651,18 +652,86 @@ export class TelegramHandler {
     ];
 
     try {
-      const response = await this.openrouter.chatCompletion(modelAlias, messages);
-      const responseText = extractTextResponse(response);
+      let responseText: string;
+
+      // Check if model supports tools
+      if (modelSupportsTools(modelAlias)) {
+        // Use tool-calling chat completion
+        const toolCallStatus: string[] = [];
+        const { finalText, toolsUsed } = await this.openrouter.chatCompletionWithTools(
+          modelAlias,
+          messages,
+          {
+            maxToolCalls: 15,
+            onToolCall: (toolName, _args) => {
+              // Send typing indicator when tools are being used
+              this.bot.sendChatAction(chatId, 'typing');
+              toolCallStatus.push(toolName);
+            },
+          }
+        );
+
+        responseText = finalText;
+
+        // If tools were used, prepend a summary
+        if (toolsUsed.length > 0) {
+          const toolsSummary = `[Used ${toolsUsed.length} tool(s): ${[...new Set(toolsUsed)].join(', ')}]\n\n`;
+          responseText = toolsSummary + responseText;
+        }
+      } else {
+        // Regular chat completion without tools
+        const response = await this.openrouter.chatCompletion(modelAlias, messages);
+        responseText = extractTextResponse(response);
+      }
 
       // Save to history
       await this.storage.addMessage(userId, 'user', text);
       await this.storage.addMessage(userId, 'assistant', responseText);
 
-      // Send response
-      await this.bot.sendMessage(chatId, responseText);
+      // Send response (handle long messages)
+      if (responseText.length > 4000) {
+        // Split into chunks for long responses
+        const chunks = this.splitMessage(responseText, 4000);
+        for (const chunk of chunks) {
+          await this.bot.sendMessage(chatId, chunk);
+        }
+      } else {
+        await this.bot.sendMessage(chatId, responseText);
+      }
     } catch (error) {
       await this.bot.sendMessage(chatId, `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Split a long message into chunks
+   */
+  private splitMessage(text: string, maxLength: number): string[] {
+    const chunks: string[] = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+      if (remaining.length <= maxLength) {
+        chunks.push(remaining);
+        break;
+      }
+
+      // Try to split at a newline
+      let splitIndex = remaining.lastIndexOf('\n', maxLength);
+      if (splitIndex === -1 || splitIndex < maxLength / 2) {
+        // No good newline, split at space
+        splitIndex = remaining.lastIndexOf(' ', maxLength);
+      }
+      if (splitIndex === -1 || splitIndex < maxLength / 2) {
+        // No good space, hard split
+        splitIndex = maxLength;
+      }
+
+      chunks.push(remaining.slice(0, splitIndex));
+      remaining = remaining.slice(splitIndex).trim();
+    }
+
+    return chunks;
   }
 
   /**

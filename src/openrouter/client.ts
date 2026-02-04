@@ -4,12 +4,15 @@
  */
 
 import { getModelId, isImageGenModel, DEFAULT_IMAGE_MODEL } from './models';
+import { AVAILABLE_TOOLS, executeTool, type ToolDefinition, type ToolCall, type ToolResult } from './tools';
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string | ContentPart[];
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string | ContentPart[] | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
 }
 
 export interface ContentPart {
@@ -26,6 +29,8 @@ export interface ChatCompletionRequest {
   max_tokens?: number;
   temperature?: number;
   stream?: boolean;
+  tools?: ToolDefinition[];
+  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
 }
 
 export interface ChatCompletionResponse {
@@ -34,7 +39,8 @@ export interface ChatCompletionResponse {
     index: number;
     message: {
       role: string;
-      content: string;
+      content: string | null;
+      tool_calls?: ToolCall[];
     };
     finish_reason: string;
   }>;
@@ -127,6 +133,104 @@ export class OpenRouterClient {
     }
 
     return response.json() as Promise<ChatCompletionResponse>;
+  }
+
+  /**
+   * Send a chat completion with tool calling support
+   * Handles the tool call loop automatically
+   */
+  async chatCompletionWithTools(
+    modelAlias: string,
+    messages: ChatMessage[],
+    options?: {
+      maxTokens?: number;
+      temperature?: number;
+      maxToolCalls?: number; // Limit iterations to prevent infinite loops
+      onToolCall?: (toolName: string, args: string) => void; // Callback for progress updates
+    }
+  ): Promise<{ response: ChatCompletionResponse; finalText: string; toolsUsed: string[] }> {
+    const modelId = getModelId(modelAlias);
+    const maxIterations = options?.maxToolCalls || 10;
+    const toolsUsed: string[] = [];
+
+    // Clone messages to avoid mutating the original
+    const conversationMessages: ChatMessage[] = [...messages];
+
+    let iterations = 0;
+    let lastResponse: ChatCompletionResponse;
+
+    while (iterations < maxIterations) {
+      iterations++;
+
+      const request: ChatCompletionRequest = {
+        model: modelId,
+        messages: conversationMessages,
+        max_tokens: options?.maxTokens || 4096,
+        temperature: options?.temperature ?? 0.7,
+        tools: AVAILABLE_TOOLS,
+        tool_choice: 'auto',
+      };
+
+      const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(request),
+      });
+
+      if (!response.ok) {
+        const error = await response.json() as OpenRouterError;
+        throw new Error(`OpenRouter API error: ${error.error?.message || response.statusText}`);
+      }
+
+      lastResponse = await response.json() as ChatCompletionResponse;
+      const choice = lastResponse.choices[0];
+
+      // Check if the model wants to call tools
+      if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+        // Add assistant message with tool calls to conversation
+        conversationMessages.push({
+          role: 'assistant',
+          content: choice.message.content,
+          tool_calls: choice.message.tool_calls,
+        });
+
+        // Execute each tool call
+        for (const toolCall of choice.message.tool_calls) {
+          const toolName = toolCall.function.name;
+          toolsUsed.push(toolName);
+
+          // Notify caller about tool call
+          if (options?.onToolCall) {
+            options.onToolCall(toolName, toolCall.function.arguments);
+          }
+
+          // Execute tool and get result
+          const result = await executeTool(toolCall);
+
+          // Add tool result to conversation
+          conversationMessages.push({
+            role: 'tool',
+            content: result.content,
+            tool_call_id: result.tool_call_id,
+          });
+        }
+
+        // Continue the loop to get the model's response to tool results
+        continue;
+      }
+
+      // No more tool calls, model has finished
+      break;
+    }
+
+    // Extract final text response
+    const finalText = lastResponse!.choices[0]?.message?.content || 'No response generated.';
+
+    return {
+      response: lastResponse!,
+      finalText,
+      toolsUsed,
+    };
   }
 
   /**
