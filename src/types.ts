@@ -28,6 +28,10 @@ export interface MoltbotEnv {
   TELEGRAM_ALLOWED_USERS?: string; // Comma-separated list of allowed Telegram user IDs
   TELEGRAM_DM_POLICY?: string;
   GITHUB_TOKEN?: string; // GitHub PAT for tool calls (repo access)
+  // Direct API keys for non-OpenRouter providers
+  DASHSCOPE_API_KEY?: string; // Alibaba DashScope (Qwen models)
+  MOONSHOT_API_KEY?: string; // Moonshot (Kimi models)
+  DEEPSEEK_API_KEY?: string; // DeepSeek (DeepSeek Coder)
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
   DISCORD_ANNOUNCEMENT_CHANNELS?: string; // Comma-separated channel IDs to monitor

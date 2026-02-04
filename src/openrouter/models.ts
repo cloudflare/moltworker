@@ -3,6 +3,33 @@
  * Direct model IDs for OpenRouter API
  */
 
+// Direct API providers
+export type Provider = 'openrouter' | 'dashscope' | 'moonshot' | 'deepseek';
+
+export interface ProviderConfig {
+  baseUrl: string;
+  envKey: string; // Environment variable name for API key
+}
+
+export const PROVIDERS: Record<Provider, ProviderConfig> = {
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1/chat/completions',
+    envKey: 'OPENROUTER_API_KEY',
+  },
+  dashscope: {
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+    envKey: 'DASHSCOPE_API_KEY',
+  },
+  moonshot: {
+    baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
+    envKey: 'MOONSHOT_API_KEY',
+  },
+  deepseek: {
+    baseUrl: 'https://api.deepseek.com/chat/completions',
+    envKey: 'DEEPSEEK_API_KEY',
+  },
+};
+
 export interface ModelInfo {
   id: string;
   alias: string;
@@ -14,6 +41,7 @@ export interface ModelInfo {
   supportsTools?: boolean;
   isImageGen?: boolean;
   isFree?: boolean;
+  provider?: Provider; // Direct API provider (default: openrouter)
 }
 
 /**
@@ -293,6 +321,38 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsVision: true,
     supportsTools: true,
   },
+
+  // === DIRECT API MODELS (bypass OpenRouter) ===
+  q25: {
+    id: 'qwen-plus',
+    alias: 'q25',
+    name: 'Qwen 2.5 Plus (Direct)',
+    specialty: 'Direct Qwen API - Fast Coding',
+    score: 'Great for coding, cheap',
+    cost: '~$0.002/1K tokens',
+    supportsTools: true,
+    provider: 'dashscope',
+  },
+  k21: {
+    id: 'moonshot-v1-128k',
+    alias: 'k21',
+    name: 'Kimi 128K (Direct)',
+    specialty: 'Direct Moonshot API - Long Context',
+    score: '128K context, good reasoning',
+    cost: '~$0.012/1K tokens',
+    supportsTools: true,
+    provider: 'moonshot',
+  },
+  dcode: {
+    id: 'deepseek-coder',
+    alias: 'dcode',
+    name: 'DeepSeek Coder (Direct)',
+    specialty: 'Direct DeepSeek API - Coding',
+    score: 'Excellent coding, very cheap',
+    cost: '~$0.001/1K tokens',
+    supportsTools: true,
+    provider: 'deepseek',
+  },
 };
 
 /**
@@ -303,11 +363,35 @@ export function getModel(alias: string): ModelInfo | undefined {
 }
 
 /**
- * Get model ID for OpenRouter API
+ * Get model ID for API
  */
 export function getModelId(alias: string): string {
   const model = getModel(alias);
   return model?.id || 'openrouter/auto';
+}
+
+/**
+ * Get provider for a model (default: openrouter)
+ */
+export function getProvider(alias: string): Provider {
+  const model = getModel(alias);
+  return model?.provider || 'openrouter';
+}
+
+/**
+ * Get provider config for a model
+ */
+export function getProviderConfig(alias: string): ProviderConfig {
+  const provider = getProvider(alias);
+  return PROVIDERS[provider];
+}
+
+/**
+ * Check if model uses direct API (not OpenRouter)
+ */
+export function isDirectApi(alias: string): boolean {
+  const model = getModel(alias);
+  return !!model?.provider && model.provider !== 'openrouter';
 }
 
 /**
@@ -333,14 +417,21 @@ export function formatModelsList(): string {
   const lines: string[] = ['Available Models:\n'];
 
   // Group by category
-  const free = Object.values(MODELS).filter(m => m.isFree && !m.isImageGen);
+  const free = Object.values(MODELS).filter(m => m.isFree && !m.isImageGen && !m.provider);
   const imageGen = Object.values(MODELS).filter(m => m.isImageGen);
-  const paid = Object.values(MODELS).filter(m => !m.isFree && !m.isImageGen);
+  const paid = Object.values(MODELS).filter(m => !m.isFree && !m.isImageGen && !m.provider);
+  const direct = Object.values(MODELS).filter(m => m.provider && m.provider !== 'openrouter');
 
-  lines.push('FREE:');
+  lines.push('FREE (OpenRouter):');
   for (const m of free) {
     lines.push(`  /${m.alias} - ${m.name}`);
     lines.push(`    ${m.specialty} | ${m.score}`);
+  }
+
+  lines.push('\nDIRECT API (no OpenRouter):');
+  for (const m of direct) {
+    lines.push(`  /${m.alias} - ${m.name}`);
+    lines.push(`    ${m.specialty} | ${m.cost}`);
   }
 
   lines.push('\nIMAGE GEN:');
@@ -349,7 +440,7 @@ export function formatModelsList(): string {
     lines.push(`    ${m.specialty}`);
   }
 
-  lines.push('\nPAID:');
+  lines.push('\nPAID (OpenRouter):');
   for (const m of paid) {
     lines.push(`  /${m.alias} - ${m.name}`);
     lines.push(`    ${m.specialty} | ${m.score} | ${m.cost}`);

@@ -370,6 +370,10 @@ export class TelegramHandler {
   private openrouterKey: string; // Store for DO
   private taskProcessor?: DurableObjectNamespace<TaskProcessor>; // For long-running tasks
   private browser?: Fetcher; // Browser binding for browse_url tool
+  // Direct API keys
+  private dashscopeKey?: string;
+  private moonshotKey?: string;
+  private deepseekKey?: string;
 
   constructor(
     telegramToken: string,
@@ -380,7 +384,10 @@ export class TelegramHandler {
     allowedUserIds?: string[], // Pass user IDs to restrict access
     githubToken?: string, // GitHub token for tool authentication
     taskProcessor?: DurableObjectNamespace<TaskProcessor>, // DO for long tasks
-    browser?: Fetcher // Browser binding for browse_url tool
+    browser?: Fetcher, // Browser binding for browse_url tool
+    dashscopeKey?: string, // DashScope API key (Qwen)
+    moonshotKey?: string, // Moonshot API key (Kimi)
+    deepseekKey?: string // DeepSeek API key
   ) {
     this.bot = new TelegramBot(telegramToken);
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
@@ -392,6 +399,9 @@ export class TelegramHandler {
     this.openrouterKey = openrouterKey;
     this.taskProcessor = taskProcessor;
     this.browser = browser;
+    this.dashscopeKey = dashscopeKey;
+    this.moonshotKey = moonshotKey;
+    this.deepseekKey = deepseekKey;
     if (allowedUserIds && allowedUserIds.length > 0) {
       this.allowedUsers = new Set(allowedUserIds);
     }
@@ -863,6 +873,9 @@ export class TelegramHandler {
             telegramToken: this.telegramToken,
             openrouterKey: this.openrouterKey,
             githubToken: this.githubToken,
+            dashscopeKey: this.dashscopeKey,
+            moonshotKey: this.moonshotKey,
+            deepseekKey: this.deepseekKey,
           };
 
           // Get or create DO instance for this user
@@ -1138,6 +1151,9 @@ export class TelegramHandler {
               telegramToken: this.telegramToken,
               openrouterKey: this.openrouterKey,
               githubToken: this.githubToken,
+              dashscopeKey: this.dashscopeKey,
+              moonshotKey: this.moonshotKey,
+              deepseekKey: this.deepseekKey,
             };
 
             const doId = this.taskProcessor.idFromName(userId);
@@ -1268,7 +1284,10 @@ export function createTelegramHandler(
   allowedUserIds?: string[],
   githubToken?: string,
   taskProcessor?: DurableObjectNamespace<TaskProcessor>,
-  browser?: Fetcher
+  browser?: Fetcher,
+  dashscopeKey?: string,
+  moonshotKey?: string,
+  deepseekKey?: string
 ): TelegramHandler {
   return new TelegramHandler(
     telegramToken,
@@ -1279,6 +1298,9 @@ export function createTelegramHandler(
     allowedUserIds,
     githubToken,
     taskProcessor,
-    browser
+    browser,
+    dashscopeKey,
+    moonshotKey,
+    deepseekKey
   );
 }

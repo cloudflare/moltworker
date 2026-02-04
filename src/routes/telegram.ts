@@ -61,7 +61,10 @@ telegram.post('/webhook/:token', async (c) => {
       allowedUsers,
       env.GITHUB_TOKEN, // Pass GitHub token for tool authentication
       env.TASK_PROCESSOR, // Pass TaskProcessor DO for long-running tasks
-      env.BROWSER // Pass browser binding for browse_url tool
+      env.BROWSER, // Pass browser binding for browse_url tool
+      env.DASHSCOPE_API_KEY, // DashScope for Qwen
+      env.MOONSHOT_API_KEY, // Moonshot for Kimi
+      env.DEEPSEEK_API_KEY // DeepSeek for DeepSeek Coder
     );
 
     // Process update asynchronously
@@ -117,6 +120,10 @@ telegram.get('/info', async (c) => {
     github_configured: !!env.GITHUB_TOKEN,
     task_processor_configured: !!env.TASK_PROCESSOR,
     browser_configured: !!env.BROWSER,
+    // Direct API providers
+    dashscope_configured: !!env.DASHSCOPE_API_KEY,
+    moonshot_configured: !!env.MOONSHOT_API_KEY,
+    deepseek_configured: !!env.DEEPSEEK_API_KEY,
     webhook_path: '/telegram/webhook/:token',
     setup_path: '/telegram/setup',
   });

@@ -7,7 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, type ChatMessage } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
-import { getModelId } from '../openrouter/models';
+import { getModelId, getProvider, getProviderConfig, type Provider } from '../openrouter/models';
 
 // Max characters for a single tool result before truncation
 const MAX_TOOL_RESULT_LENGTH = 15000; // ~4K tokens
@@ -46,6 +46,10 @@ export interface TaskRequest {
   telegramToken: string;
   openrouterKey: string;
   githubToken?: string;
+  // Direct API keys (optional)
+  dashscopeKey?: string;   // For Qwen (DashScope/Alibaba)
+  moonshotKey?: string;    // For Kimi (Moonshot)
+  deepseekKey?: string;    // For DeepSeek
 }
 
 // DO environment with R2 binding
@@ -461,17 +465,50 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Note: Checkpoint is saved after tool execution, not before API call
         // This reduces CPU usage from redundant JSON.stringify operations
 
-        // Make API call to OpenRouter with timeout
+        // Determine which provider/API to use
+        const provider = getProvider(request.modelAlias);
+        const providerConfig = getProviderConfig(request.modelAlias);
+
+        // Get the appropriate API key for the provider
+        let apiKey: string;
+        switch (provider) {
+          case 'dashscope':
+            apiKey = request.dashscopeKey || '';
+            break;
+          case 'moonshot':
+            apiKey = request.moonshotKey || '';
+            break;
+          case 'deepseek':
+            apiKey = request.deepseekKey || '';
+            break;
+          default:
+            apiKey = request.openrouterKey;
+        }
+
+        if (!apiKey) {
+          throw new Error(`No API key configured for provider: ${provider}. Set ${providerConfig.envKey} in Cloudflare.`);
+        }
+
+        // Build headers based on provider
+        const headers: Record<string, string> = {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        };
+
+        // OpenRouter-specific headers
+        if (provider === 'openrouter') {
+          headers['HTTP-Referer'] = 'https://moltworker.dev';
+          headers['X-Title'] = 'Moltworker Telegram Bot';
+        }
+
+        console.log(`[TaskProcessor] Using provider: ${provider}, URL: ${providerConfig.baseUrl}`);
+
+        // Make API call with timeout
         let response: Response;
         try {
-          const fetchPromise = fetch('https://openrouter.ai/api/v1/chat/completions', {
+          const fetchPromise = fetch(providerConfig.baseUrl, {
             method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${request.openrouterKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': 'https://moltworker.dev',
-              'X-Title': 'Moltworker Telegram Bot',
-            },
+            headers,
             body: JSON.stringify({
               model: modelId,
               messages: conversationMessages,
@@ -484,17 +521,17 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
           // 5 minute timeout per API call (complex tasks need time)
           const timeoutPromise = new Promise<Response>((_, reject) => {
-            setTimeout(() => reject(new Error('OpenRouter API timeout (5 min)')), 300000);
+            setTimeout(() => reject(new Error(`${provider} API timeout (5 min)`)), 300000);
           });
 
           response = await Promise.race([fetchPromise, timeoutPromise]);
         } catch (fetchError) {
-          throw new Error(`API fetch failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+          throw new Error(`${provider} API fetch failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
         }
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => 'unknown error');
-          throw new Error(`OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`);
+          throw new Error(`${provider} API error (${response.status}): ${errorText.slice(0, 200)}`);
         }
 
         let result: {
