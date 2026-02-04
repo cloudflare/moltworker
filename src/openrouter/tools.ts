@@ -2,6 +2,8 @@
  * Tool definitions and execution for OpenRouter tool calling
  */
 
+import { getModel } from './models';
+
 // Tool definitions in OpenAI function calling format
 export interface ToolDefinition {
   type: 'function';
@@ -564,6 +566,12 @@ export const TOOLS_WITHOUT_BROWSER: ToolDefinition[] = AVAILABLE_TOOLS.filter(
  * Check if a model supports tools
  */
 export function modelSupportsTools(modelAlias: string): boolean {
+  // Check if model has supportsTools flag in models.ts
+  const model = getModel(modelAlias);
+  if (model?.supportsTools) {
+    return true;
+  }
+  // Fallback: hardcoded list for backwards compatibility
   const toolModels = ['grok', 'grokcode', 'qwencoder', 'qwennext', 'qwenthink', 'mini', 'kimi', 'gpt', 'sonnet', 'opus', 'haiku', 'geminipro', 'devstral'];
   return toolModels.includes(modelAlias.toLowerCase());
 }

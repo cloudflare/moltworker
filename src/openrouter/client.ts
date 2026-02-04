@@ -315,7 +315,7 @@ export class OpenRouterClient {
   async generateImage(
     prompt: string,
     modelAlias?: string,
-    options?: {
+    _options?: {
       aspectRatio?: string; // e.g., "1:1", "16:9", "9:16"
       imageSize?: string; // e.g., "1024x1024"
     }
@@ -325,7 +325,7 @@ export class OpenRouterClient {
     const modelId = getModelId(alias);
 
     // OpenRouter uses chat/completions with modalities for image generation
-    const request: Record<string, unknown> = {
+    const request = {
       model: modelId,
       messages: [
         {
@@ -334,16 +334,7 @@ export class OpenRouterClient {
         },
       ],
       modalities: ['image', 'text'],
-      max_tokens: 4096,
     };
-
-    // Add image config if specified
-    if (options?.aspectRatio || options?.imageSize) {
-      request.image_config = {
-        ...(options.aspectRatio && { aspect_ratio: options.aspectRatio }),
-        ...(options.imageSize && { image_size: options.imageSize }),
-      };
-    }
 
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -363,29 +354,23 @@ export class OpenRouterClient {
       throw new Error(`Image generation error: ${errorMessage}`);
     }
 
-    const chatResponse = await response.json() as ChatCompletionResponse;
+    // Response format: choices[0].message.images[].image_url.url
+    const result = await response.json() as {
+      choices: Array<{
+        message: {
+          content?: string;
+          images?: Array<{
+            image_url: { url: string };
+          }>;
+        };
+      }>;
+    };
 
-    // Extract image URL from the response content
-    // OpenRouter returns images as base64 data URLs in the message content
-    const content = chatResponse.choices[0]?.message?.content || '';
+    const images = result.choices[0]?.message?.images || [];
 
-    // Parse the content - it may contain markdown image syntax or direct URL
-    // Format: ![image](data:image/png;base64,...) or just the data URL
-    const imageMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/) ||
-                       content.match(/(data:image\/[^\s"']+)/) ||
-                       content.match(/(https:\/\/[^\s"']+\.(png|jpg|jpeg|webp))/i);
-
-    if (imageMatch) {
-      return {
-        created: Date.now(),
-        data: [{ url: imageMatch[1] }],
-      };
-    }
-
-    // If no image URL found, return the text content as an error indicator
     return {
       created: Date.now(),
-      data: [],
+      data: images.map(img => ({ url: img.image_url.url })),
     };
   }
 
