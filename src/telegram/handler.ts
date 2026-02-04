@@ -587,6 +587,27 @@ export class TelegramHandler {
         await this.sendModelPicker(chatId);
         break;
 
+      case '/cancel':
+        // Cancel any running task
+        if (this.taskProcessor) {
+          try {
+            const doId = this.taskProcessor.idFromName(userId);
+            const doStub = this.taskProcessor.get(doId);
+            const response = await doStub.fetch(new Request('https://do/cancel', { method: 'POST' }));
+            const result = await response.json() as { status: string };
+            if (result.status === 'cancelled') {
+              // Message already sent by DO
+            } else {
+              await this.bot.sendMessage(chatId, 'No task is currently running.');
+            }
+          } catch (error) {
+            await this.bot.sendMessage(chatId, 'Failed to cancel task.');
+          }
+        } else {
+          await this.bot.sendMessage(chatId, 'Task processor not available.');
+        }
+        break;
+
       default:
         // Check if it's a model alias command (e.g., /deep, /gpt)
         const modelAlias = cmd.slice(1); // Remove leading /
@@ -1151,6 +1172,7 @@ export class TelegramHandler {
 /status - Show bot status
 /new - Start fresh conversation
 /clear - Clear history
+/cancel - Cancel running task
 /credits - Check OpenRouter credits
 /ping - Test bot response
 

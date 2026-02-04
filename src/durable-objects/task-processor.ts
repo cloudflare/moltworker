@@ -16,13 +16,15 @@ interface TaskState {
   userId: string;
   modelAlias: string;
   messages: ChatMessage[];
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   toolsUsed: string[];
   iterations: number;
   startTime: number;
   lastUpdate: number;
   result?: string;
   error?: string;
+  statusMessageId?: number;
+  telegramToken?: string; // Store for cancel
 }
 
 // Task request from the worker
@@ -72,6 +74,30 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       });
     }
 
+    if (url.pathname === '/cancel' && request.method === 'POST') {
+      const task = await this.doState.storage.get<TaskState>('task');
+      if (task && task.status === 'processing') {
+        task.status = 'cancelled';
+        task.error = 'Cancelled by user';
+        await this.doState.storage.put('task', task);
+
+        // Try to send cancellation message
+        if (task.telegramToken && task.chatId) {
+          if (task.statusMessageId) {
+            await this.deleteTelegramMessage(task.telegramToken, task.chatId, task.statusMessageId);
+          }
+          await this.sendTelegramMessage(task.telegramToken, task.chatId, '🛑 Task cancelled.');
+        }
+
+        return new Response(JSON.stringify({ status: 'cancelled' }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ status: 'not_processing', current: task?.status }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     return new Response('Not found', { status: 404 });
   }
 
@@ -92,6 +118,8 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       lastUpdate: Date.now(),
     };
 
+    // Store telegram token for cancel functionality
+    task.telegramToken = request.telegramToken;
     await this.doState.storage.put('task', task);
 
     // Send initial status to Telegram
@@ -100,6 +128,10 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       request.chatId,
       '⏳ Processing complex task...'
     );
+
+    // Store status message ID for cancel cleanup
+    task.statusMessageId = statusMessageId || undefined;
+    await this.doState.storage.put('task', task);
 
     const client = createOpenRouterClient(request.openrouterKey);
     const modelId = getModelId(request.modelAlias);
@@ -111,6 +143,12 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
 
     try {
       while (task.iterations < maxIterations) {
+        // Check if cancelled
+        const currentTask = await this.doState.storage.get<TaskState>('task');
+        if (currentTask?.status === 'cancelled') {
+          return; // Exit silently - cancel handler already notified user
+        }
+
         task.iterations++;
         task.lastUpdate = Date.now();
         await this.doState.storage.put('task', task);
@@ -127,8 +165,8 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
           );
         }
 
-        // Make API call to OpenRouter
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // Make API call to OpenRouter with timeout
+        const fetchPromise = fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${request.openrouterKey}`,
@@ -145,6 +183,13 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
             tool_choice: 'auto',
           }),
         });
+
+        // 3 minute timeout per API call
+        const timeoutPromise = new Promise<Response>((_, reject) => {
+          setTimeout(() => reject(new Error('OpenRouter API timeout (3 minutes)')), 180000);
+        });
+
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
 
         if (!response.ok) {
           const errorText = await response.text();
