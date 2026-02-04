@@ -28,6 +28,7 @@ RUN npm install -g clawdbot@2026.1.24-3 \
 # Create moltbot directories (paths still use clawdbot until upstream renames)
 # Templates are stored in /root/.clawdbot-templates for initialization
 RUN mkdir -p /root/.clawdbot \
+    && mkdir -p /root/.clawdbot/extensions \
     && mkdir -p /root/.clawdbot-templates \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
@@ -36,6 +37,15 @@ RUN mkdir -p /root/.clawdbot \
 # Build cache bust: 2026-01-28-v26-browser-skill
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
+
+# Install ax-platform plugin for aX Platform integration
+# Fetched from source repo to avoid code duplication
+RUN apt-get install -y git \
+    && git clone --depth 1 https://github.com/ax-platform/ax-clawdbot-plugin.git /tmp/ax-plugin \
+    && cp -r /tmp/ax-plugin/extension /root/.clawdbot/extensions/ax-platform \
+    && cd /root/.clawdbot/extensions/ax-platform && npm install --omit=dev \
+    && rm -rf /tmp/ax-plugin \
+    && echo "ax-platform plugin installed from ax-clawdbot-plugin repo"
 
 # Copy default configuration template
 COPY moltbot.json.template /root/.clawdbot-templates/moltbot.json.template
