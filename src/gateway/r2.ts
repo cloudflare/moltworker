@@ -33,42 +33,44 @@ async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
  * @returns true if mounted successfully, false otherwise
  */
 export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
-  // Skip if R2 credentials are not configured
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
-    console.log('R2 storage not configured (missing R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, or CF_ACCOUNT_ID)');
-    return false;
-  }
+  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) return false;
 
-  // Check if already mounted first - this avoids errors and is faster
-  if (await isR2Mounted(sandbox)) {
-    console.log('R2 bucket already mounted at', R2_MOUNT_PATH);
-    return true;
-  }
-
-  const bucketName = getR2BucketName(env);
   try {
-    console.log('Mounting R2 bucket', bucketName, 'at', R2_MOUNT_PATH);
-    await sandbox.mountBucket(bucketName, R2_MOUNT_PATH, {
+    console.log('Verifying R2 mount status...');
+    
+    // 1. Check if already mounted to avoid unnecessary work
+    const { stdout } = await sandbox.exec(`mount | grep "${R2_MOUNT_PATH}" || true`);
+    if (stdout.includes('s3fs')) {
+      console.log('R2 already mounted.');
+      return true;
+    }
+
+    // 2. Clean path - single command is more stable
+    // We use '|| true' so the script doesn't crash if the folder doesn't exist yet
+    await sandbox.exec(`rm -rf ${R2_MOUNT_PATH} && mkdir -p ${R2_MOUNT_PATH} || true`);
+    
+    // 3. IMPORTANT: Wait for the filesystem to settle (1 second)
+    // This prevents the "Container service disconnected" error
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    console.log('Initiating R2 mount...');
+    await sandbox.mountBucket(R2_BUCKET_NAME, R2_MOUNT_PATH, {
       endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      // Pass credentials explicitly since we use R2_* naming instead of AWS_*
       credentials: {
         accessKeyId: env.R2_ACCESS_KEY_ID,
         secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      },
+      }
     });
-    console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
+
     return true;
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.log('R2 mount error:', errorMessage);
+    const errorMsg = err instanceof Error ? err.message : String(err);
     
-    // Check again if it's mounted - the error might be misleading
-    if (await isR2Mounted(sandbox)) {
-      console.log('R2 bucket is mounted despite error');
-      return true;
+    // If we see 'disconnected', the container might need a full restart
+    if (errorMsg.includes('disconnected')) {
+      console.error('Sandbox container is stuck. You may need to redeploy or wait for it to idle out.');
     }
     
-    // Don't fail if mounting fails - moltbot can still run without persistent storage
     console.error('Failed to mount R2 bucket:', err);
     return false;
   }
