@@ -10,11 +10,11 @@ import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WI
 import { getModelId, getProvider, getProviderConfig, type Provider } from '../openrouter/models';
 
 // Max characters for a single tool result before truncation
-const MAX_TOOL_RESULT_LENGTH = 15000; // ~4K tokens
+const MAX_TOOL_RESULT_LENGTH = 8000; // ~2K tokens (reduced for CPU)
 // Compress context after this many tool calls
-const COMPRESS_AFTER_TOOLS = 10;
+const COMPRESS_AFTER_TOOLS = 6; // Compress more frequently
 // Max estimated tokens before forcing compression
-const MAX_CONTEXT_TOKENS = 80000;
+const MAX_CONTEXT_TOKENS = 60000; // Lower threshold
 
 // Task state stored in DO
 interface TaskState {
@@ -62,7 +62,7 @@ const WATCHDOG_INTERVAL_MS = 90000;
 // Max time without update before considering task stuck
 const STUCK_THRESHOLD_MS = 60000;
 // Save checkpoint every N tools (reduces CPU from JSON.stringify)
-const CHECKPOINT_EVERY_N_TOOLS = 3;
+const CHECKPOINT_EVERY_N_TOOLS = 5;
 
 export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private doState: DurableObjectState;
