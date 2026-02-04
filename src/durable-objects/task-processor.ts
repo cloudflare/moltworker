@@ -504,9 +504,23 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         console.log(`[TaskProcessor] Using provider: ${provider}, URL: ${providerConfig.baseUrl}`);
 
-        // Make API call with timeout
+        // Make API call with timeout and heartbeat
+        // Heartbeat keeps the DO active during long waits
         let response: Response;
+        let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
         try {
+          console.log(`[TaskProcessor] Starting API call...`);
+
+          // Heartbeat every 10 seconds to keep DO active and track progress
+          let heartbeatCount = 0;
+          heartbeatInterval = setInterval(() => {
+            heartbeatCount++;
+            console.log(`[TaskProcessor] Heartbeat #${heartbeatCount} - API call still in progress (${heartbeatCount * 10}s)`);
+            // Update lastUpdate to prevent watchdog from triggering
+            task.lastUpdate = Date.now();
+            this.doState.storage.put('task', task).catch(() => {});
+          }, 10000);
+
           const fetchPromise = fetch(providerConfig.baseUrl, {
             method: 'POST',
             headers,
@@ -526,8 +540,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           });
 
           response = await Promise.race([fetchPromise, timeoutPromise]);
+          console.log(`[TaskProcessor] API call completed with status: ${response.status}`);
         } catch (fetchError) {
           throw new Error(`${provider} API fetch failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+        } finally {
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+          }
         }
 
         if (!response.ok) {
