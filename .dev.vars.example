@@ -3,6 +3,11 @@
 
 ANTHROPIC_API_KEY=sk-ant-...
 
+# Optional: OpenAI via AI Gateway (authenticated gateway / BYOK)
+# OPENAI_API_KEY=sk-openai-...
+# AI_GATEWAY_API_KEY=your-ai-gateway-key
+# AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
+
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true
 

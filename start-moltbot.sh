@@ -235,7 +235,7 @@ if (isOpenAI) {
     console.log('Configuring OpenAI provider with base URL:', baseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
-    config.models.providers.openai = {
+    const openaiConfig = {
         baseUrl: baseUrl,
         api: 'openai-responses',
         models: [
@@ -244,6 +244,14 @@ if (isOpenAI) {
             { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
         ]
     };
+    // OpenAI authenticated gateway (BYOK): direct OPENAI_API_KEY for provider auth,
+    // AI_GATEWAY_API_KEY for gateway auth header.
+    if (process.env.AI_GATEWAY_API_KEY) {
+        openaiConfig.headers = {
+            'cf-aig-authorization': 'Bearer ' + process.env.AI_GATEWAY_API_KEY
+        };
+    }
+    config.models.providers.openai = openaiConfig;
     // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };

@@ -336,7 +336,7 @@ You can route API requests through [Cloudflare AI Gateway](https://developers.cl
 2. Add a provider (e.g., Anthropic) to your gateway
 3. Set the gateway secrets:
 
-You'll find the base URL on the Overview tab of your newly created gateway. At the bottom of the page, expand the **Native API/SDK Examples** section and select "Anthropic".
+You'll find the base URL on the Overview tab of your newly created gateway. At the bottom of the page, expand the **Native API/SDK Examples** section and select your target provider.
 
 ```bash
 # Your provider's API key (e.g., Anthropic API key)
@@ -347,19 +347,35 @@ npx wrangler secret put AI_GATEWAY_BASE_URL
 # Enter: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 ```
 
+For OpenAI authenticated gateway (BYOK), set both the OpenAI key and Gateway key:
+
+```bash
+# Direct OpenAI provider key
+npx wrangler secret put OPENAI_API_KEY
+
+# AI Gateway authentication key (sent as cf-aig-authorization)
+npx wrangler secret put AI_GATEWAY_API_KEY
+
+# OpenAI gateway endpoint
+npx wrangler secret put AI_GATEWAY_BASE_URL
+# Enter: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
+```
+
 4. Redeploy:
 
 ```bash
 npm run deploy
 ```
 
-The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
+OpenAI behavior with `AI_GATEWAY_BASE_URL=.../openai`:
+- If `OPENAI_API_KEY` and `AI_GATEWAY_API_KEY` are both set, `OPENAI_API_KEY` is used for provider auth and `AI_GATEWAY_API_KEY` is sent via `cf-aig-authorization`.
+- If `OPENAI_API_KEY` is not set, `AI_GATEWAY_API_KEY` is used as the OpenAI provider key (backward compatible behavior).
 
 ## All Secrets Reference
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `AI_GATEWAY_API_KEY` | Yes* | API key for your AI Gateway provider (requires `AI_GATEWAY_BASE_URL`) |
+| `AI_GATEWAY_API_KEY` | Yes* | AI Gateway key. For OpenAI authenticated gateway, used for `cf-aig-authorization`; if `OPENAI_API_KEY` is unset, used as provider key |
 | `AI_GATEWAY_BASE_URL` | Yes* | AI Gateway endpoint URL (required when using `AI_GATEWAY_API_KEY`) |
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (fallback if AI Gateway not configured) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL (fallback) |

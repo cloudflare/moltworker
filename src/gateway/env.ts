@@ -13,11 +13,20 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   const normalizedBaseUrl = env.AI_GATEWAY_BASE_URL?.replace(/\/+$/, '');
   const isOpenAIGateway = normalizedBaseUrl?.endsWith('/openai');
 
-  // AI Gateway vars take precedence
-  // Map to the appropriate provider env var based on the gateway endpoint
+  // AI Gateway handling depends on provider and direct key presence.
+  // Map to the appropriate provider env var based on the gateway endpoint.
   if (env.AI_GATEWAY_API_KEY) {
     if (isOpenAIGateway) {
-      envVars.OPENAI_API_KEY = env.AI_GATEWAY_API_KEY;
+      // For OpenAI authenticated gateway (BYOK), keep direct provider key and
+      // pass gateway key separately for cf-aig-authorization header.
+      if (env.OPENAI_API_KEY) {
+        envVars.OPENAI_API_KEY = env.OPENAI_API_KEY;
+        envVars.AI_GATEWAY_API_KEY = env.AI_GATEWAY_API_KEY;
+      } else {
+        // Backward compatibility: if no direct OpenAI key is set, use the
+        // gateway key as the provider key as before.
+        envVars.OPENAI_API_KEY = env.AI_GATEWAY_API_KEY;
+      }
     } else {
       envVars.ANTHROPIC_API_KEY = env.AI_GATEWAY_API_KEY;
     }

@@ -57,14 +57,15 @@ describe('buildEnvVars', () => {
     expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.example.com/anthropic');
   });
 
-  it('AI_GATEWAY_* takes precedence over direct provider keys for OpenAI', () => {
+  it('keeps direct OPENAI_API_KEY and passes AI_GATEWAY_API_KEY separately for authenticated gateway', () => {
     const env = createMockEnv({
       AI_GATEWAY_API_KEY: 'gateway-key',
       AI_GATEWAY_BASE_URL: 'https://gateway.example.com/openai',
       OPENAI_API_KEY: 'direct-key',
     });
     const result = buildEnvVars(env);
-    expect(result.OPENAI_API_KEY).toBe('gateway-key');
+    expect(result.OPENAI_API_KEY).toBe('direct-key');
+    expect(result.AI_GATEWAY_API_KEY).toBe('gateway-key');
     expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.example.com/openai');
     expect(result.OPENAI_BASE_URL).toBe('https://gateway.example.com/openai');
   });
@@ -146,6 +147,19 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
     expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
     expect(result.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it('keeps direct OPENAI_API_KEY for OpenAI gateway with trailing slash', () => {
+    const env = createMockEnv({
+      OPENAI_API_KEY: 'direct-key',
+      AI_GATEWAY_API_KEY: 'gateway-key',
+      AI_GATEWAY_BASE_URL: 'https://gateway.ai.cloudflare.com/v1/123/my-gw/openai/',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_API_KEY).toBe('direct-key');
+    expect(result.AI_GATEWAY_API_KEY).toBe('gateway-key');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
+    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
   });
 
   it('handles trailing slash in AI_GATEWAY_BASE_URL for Anthropic', () => {
