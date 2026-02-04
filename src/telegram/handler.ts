@@ -222,6 +222,40 @@ export class TelegramBot {
   }
 
   /**
+   * Edit a message
+   */
+  async editMessage(chatId: number, messageId: number, text: string): Promise<void> {
+    // Truncate if too long (Telegram limit is 4096)
+    if (text.length > 4000) {
+      text = text.slice(0, 3997) + '...';
+    }
+
+    await fetch(`${this.baseUrl}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+      }),
+    });
+  }
+
+  /**
+   * Delete a message
+   */
+  async deleteMessage(chatId: number, messageId: number): Promise<void> {
+    await fetch(`${this.baseUrl}/deleteMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+      }),
+    });
+  }
+
+  /**
    * Set webhook URL
    */
   async setWebhook(url: string): Promise<boolean> {
@@ -656,20 +690,67 @@ export class TelegramHandler {
 
       // Check if model supports tools
       if (modelSupportsTools(modelAlias)) {
+        // Send initial status message
+        let statusMessage: TelegramMessage | null = null;
+        let toolCallCount = 0;
+        const uniqueTools = new Set<string>();
+
+        try {
+          statusMessage = await this.bot.sendMessage(chatId, '⏳ Thinking...');
+        } catch {
+          // Ignore if status message fails
+        }
+
+        const updateStatus = async (toolName: string) => {
+          toolCallCount++;
+          uniqueTools.add(toolName);
+
+          // Map tool names to user-friendly descriptions
+          const toolDescriptions: Record<string, string> = {
+            'fetch_url': '🌐 Fetching URL',
+            'github_read_file': '📄 Reading file from GitHub',
+            'github_list_files': '📁 Listing GitHub files',
+            'github_api': '🔧 Calling GitHub API',
+          };
+
+          const status = toolDescriptions[toolName] || `🔧 Using ${toolName}`;
+
+          if (statusMessage) {
+            try {
+              await this.bot.editMessage(
+                chatId,
+                statusMessage.message_id,
+                `⏳ ${status}... (${toolCallCount} tool call${toolCallCount > 1 ? 's' : ''})`
+              );
+            } catch {
+              // Ignore edit failures, send typing instead
+              this.bot.sendChatAction(chatId, 'typing');
+            }
+          } else {
+            this.bot.sendChatAction(chatId, 'typing');
+          }
+        };
+
         // Use tool-calling chat completion
-        const toolCallStatus: string[] = [];
         const { finalText, toolsUsed } = await this.openrouter.chatCompletionWithTools(
           modelAlias,
           messages,
           {
             maxToolCalls: 15,
             onToolCall: (toolName, _args) => {
-              // Send typing indicator when tools are being used
-              this.bot.sendChatAction(chatId, 'typing');
-              toolCallStatus.push(toolName);
+              updateStatus(toolName);
             },
           }
         );
+
+        // Delete status message before sending response
+        if (statusMessage) {
+          try {
+            await this.bot.deleteMessage(chatId, statusMessage.message_id);
+          } catch {
+            // Ignore delete failures
+          }
+        }
 
         responseText = finalText;
 
