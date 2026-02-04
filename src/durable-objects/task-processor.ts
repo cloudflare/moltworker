@@ -57,6 +57,8 @@ interface TaskProcessorEnv {
 const WATCHDOG_INTERVAL_MS = 90000;
 // Max time without update before considering task stuck
 const STUCK_THRESHOLD_MS = 60000;
+// Save checkpoint every N tools (reduces CPU from JSON.stringify)
+const CHECKPOINT_EVERY_N_TOOLS = 3;
 
 export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private doState: DurableObjectState;
@@ -437,17 +439,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         await this.doState.storage.put('task', task);
 
         // Send progress update every 15 seconds (wrapped in try-catch)
+        // Note: Removed token estimation to save CPU cycles
         if (Date.now() - lastProgressUpdate > 15000 && statusMessageId) {
           try {
             lastProgressUpdate = Date.now();
             const elapsed = Math.round((Date.now() - task.startTime) / 1000);
-            const tokens = this.estimateTokens(conversationMessages);
-            const tokensK = Math.round(tokens / 1000);
             await this.editTelegramMessage(
               request.telegramToken,
               request.chatId,
               statusMessageId,
-              `⏳ Processing... (${task.iterations} iter, ${task.toolsUsed.length} tools, ~${tokensK}K tokens, ${elapsed}s)`
+              `⏳ Processing... (${task.iterations} iter, ${task.toolsUsed.length} tools, ${elapsed}s)`
             );
           } catch (updateError) {
             console.log('[TaskProcessor] Progress update failed (non-fatal):', updateError);
@@ -457,17 +458,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         console.log(`[TaskProcessor] Iteration ${task.iterations}, tools: ${task.toolsUsed.length}, messages: ${conversationMessages.length}`);
 
-        // Save checkpoint before API call (in case it crashes)
-        if (this.r2 && task.iterations > 1) {
-          await this.saveCheckpoint(
-            this.r2,
-            request.userId,
-            request.taskId,
-            conversationMessages,
-            task.toolsUsed,
-            task.iterations
-          );
-        }
+        // Note: Checkpoint is saved after tool execution, not before API call
+        // This reduces CPU usage from redundant JSON.stringify operations
 
         // Make API call to OpenRouter with timeout
         let response: Response;
@@ -585,9 +577,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             console.log(`[TaskProcessor] Force compressed due to ${estimatedTokens} estimated tokens`);
           }
 
-          // Save checkpoint after every tool execution (not just every 30s)
-          // This ensures we don't lose progress if DO crashes
-          if (this.r2) {
+          // Save checkpoint periodically (not every tool - saves CPU)
+          // Trade-off: may lose up to N tool results on crash
+          if (this.r2 && task.toolsUsed.length % CHECKPOINT_EVERY_N_TOOLS === 0) {
             await this.saveCheckpoint(
               this.r2,
               request.userId,
