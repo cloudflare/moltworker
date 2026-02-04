@@ -4,7 +4,7 @@
  */
 
 import { getModelId, isImageGenModel, DEFAULT_IMAGE_MODEL } from './models';
-import { AVAILABLE_TOOLS, executeTool, type ToolDefinition, type ToolCall, type ToolResult } from './tools';
+import { AVAILABLE_TOOLS, executeTool, type ToolDefinition, type ToolCall, type ToolResult, type ToolContext } from './tools';
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
@@ -147,6 +147,7 @@ export class OpenRouterClient {
       temperature?: number;
       maxToolCalls?: number; // Limit iterations to prevent infinite loops
       onToolCall?: (toolName: string, args: string) => void; // Callback for progress updates
+      toolContext?: ToolContext; // Context with secrets for tool execution
     }
   ): Promise<{ response: ChatCompletionResponse; finalText: string; toolsUsed: string[] }> {
     const modelId = getModelId(modelAlias);
@@ -204,8 +205,8 @@ export class OpenRouterClient {
             options.onToolCall(toolName, toolCall.function.arguments);
           }
 
-          // Execute tool and get result
-          const result = await executeTool(toolCall);
+          // Execute tool and get result (pass context with secrets)
+          const result = await executeTool(toolCall, options?.toolContext);
 
           // Add tool result to conversation
           conversationMessages.push({
@@ -281,25 +282,42 @@ export class OpenRouterClient {
 
   /**
    * Generate an image using FLUX or other image models
-   * Uses OpenRouter's images/generations endpoint
+   * Uses OpenRouter's chat/completions with modalities: ["image", "text"]
    */
   async generateImage(
     prompt: string,
-    modelAlias?: string
+    modelAlias?: string,
+    options?: {
+      aspectRatio?: string; // e.g., "1:1", "16:9", "9:16"
+      imageSize?: string; // e.g., "1024x1024"
+    }
   ): Promise<ImageGenerationResponse> {
     // Use specified model or default to fluxpro
     const alias = modelAlias || DEFAULT_IMAGE_MODEL;
     const modelId = getModelId(alias);
 
-    // OpenRouter's image generation endpoint
-    const request = {
+    // OpenRouter uses chat/completions with modalities for image generation
+    const request: Record<string, unknown> = {
       model: modelId,
-      prompt: prompt,
-      n: 1,
-      size: '1024x1024',
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      modalities: ['image', 'text'],
+      max_tokens: 4096,
     };
 
-    const response = await fetch(`${OPENROUTER_BASE_URL}/images/generations`, {
+    // Add image config if specified
+    if (options?.aspectRatio || options?.imageSize) {
+      request.image_config = {
+        ...(options.aspectRatio && { aspect_ratio: options.aspectRatio }),
+        ...(options.imageSize && { image_size: options.imageSize }),
+      };
+    }
+
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(request),
@@ -317,8 +335,30 @@ export class OpenRouterClient {
       throw new Error(`Image generation error: ${errorMessage}`);
     }
 
-    const result = await response.json() as ImageGenerationResponse;
-    return result;
+    const chatResponse = await response.json() as ChatCompletionResponse;
+
+    // Extract image URL from the response content
+    // OpenRouter returns images as base64 data URLs in the message content
+    const content = chatResponse.choices[0]?.message?.content || '';
+
+    // Parse the content - it may contain markdown image syntax or direct URL
+    // Format: ![image](data:image/png;base64,...) or just the data URL
+    const imageMatch = content.match(/!\[.*?\]\((data:image\/[^)]+)\)/) ||
+                       content.match(/(data:image\/[^\s"']+)/) ||
+                       content.match(/(https:\/\/[^\s"']+\.(png|jpg|jpeg|webp))/i);
+
+    if (imageMatch) {
+      return {
+        created: Date.now(),
+        data: [{ url: imageMatch[1] }],
+      };
+    }
+
+    // If no image URL found, return the text content as an error indicator
+    return {
+      created: Date.now(),
+      data: [],
+    };
   }
 
   /**

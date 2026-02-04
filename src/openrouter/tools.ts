@@ -36,7 +36,15 @@ export interface ToolResult {
 }
 
 /**
+ * Context for tool execution (holds secrets like GitHub token)
+ */
+export interface ToolContext {
+  githubToken?: string;
+}
+
+/**
  * Available tools for the bot
+ * Note: GitHub token is provided automatically via ToolContext, not by the model
  */
 export const AVAILABLE_TOOLS: ToolDefinition[] = [
   {
@@ -60,7 +68,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_read_file',
-      description: 'Read a file from a GitHub repository. Use this to read code, documentation, or any file from GitHub.',
+      description: 'Read a file from a GitHub repository. Authentication is handled automatically. Works with both public and private repos.',
       parameters: {
         type: 'object',
         properties: {
@@ -78,11 +86,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
           },
           ref: {
             type: 'string',
-            description: 'Branch, tag, or commit SHA (optional, defaults to main)',
-          },
-          token: {
-            type: 'string',
-            description: 'GitHub personal access token for private repos (optional)',
+            description: 'Branch, tag, or commit SHA (optional, defaults to main/master)',
           },
         },
         required: ['owner', 'repo', 'path'],
@@ -93,7 +97,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_list_files',
-      description: 'List files in a directory of a GitHub repository.',
+      description: 'List files in a directory of a GitHub repository. Authentication is handled automatically.',
       parameters: {
         type: 'object',
         properties: {
@@ -107,15 +111,11 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
           },
           path: {
             type: 'string',
-            description: 'Path to the directory (empty string for root)',
+            description: 'Path to the directory (empty string or omit for root)',
           },
           ref: {
             type: 'string',
             description: 'Branch, tag, or commit SHA (optional)',
-          },
-          token: {
-            type: 'string',
-            description: 'GitHub personal access token for private repos (optional)',
           },
         },
         required: ['owner', 'repo'],
@@ -126,13 +126,13 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_api',
-      description: 'Make a GitHub API request. Use for creating issues, PRs, commits, etc.',
+      description: 'Make a GitHub API request. Use for creating issues, PRs, getting repo info, etc. Authentication is handled automatically.',
       parameters: {
         type: 'object',
         properties: {
           endpoint: {
             type: 'string',
-            description: 'GitHub API endpoint path (e.g., /repos/owner/repo/issues)',
+            description: 'GitHub API endpoint path (e.g., /repos/owner/repo/issues, /user)',
           },
           method: {
             type: 'string',
@@ -141,14 +141,10 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
           },
           body: {
             type: 'string',
-            description: 'JSON body for POST/PUT/PATCH requests',
-          },
-          token: {
-            type: 'string',
-            description: 'GitHub personal access token',
+            description: 'JSON body for POST/PUT/PATCH requests (optional)',
           },
         },
-        required: ['endpoint', 'method', 'token'],
+        required: ['endpoint', 'method'],
       },
     },
   },
@@ -156,8 +152,10 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
 
 /**
  * Execute a tool call and return the result
+ * @param toolCall The tool call from the model
+ * @param context Optional context containing secrets like GitHub token
  */
-export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
+export async function executeTool(toolCall: ToolCall, context?: ToolContext): Promise<ToolResult> {
   const { name, arguments: argsString } = toolCall.function;
 
   let args: Record<string, string>;
@@ -171,6 +169,9 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
     };
   }
 
+  // Use GitHub token from context (automatic auth)
+  const githubToken = context?.githubToken;
+
   try {
     let result: string;
 
@@ -179,13 +180,13 @@ export async function executeTool(toolCall: ToolCall): Promise<ToolResult> {
         result = await fetchUrl(args.url);
         break;
       case 'github_read_file':
-        result = await githubReadFile(args.owner, args.repo, args.path, args.ref, args.token);
+        result = await githubReadFile(args.owner, args.repo, args.path, args.ref, githubToken);
         break;
       case 'github_list_files':
-        result = await githubListFiles(args.owner, args.repo, args.path || '', args.ref, args.token);
+        result = await githubListFiles(args.owner, args.repo, args.path || '', args.ref, githubToken);
         break;
       case 'github_api':
-        result = await githubApi(args.endpoint, args.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', args.body, args.token);
+        result = await githubApi(args.endpoint, args.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', args.body, githubToken);
         break;
       default:
         result = `Error: Unknown tool: ${name}`;

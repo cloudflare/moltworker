@@ -281,6 +281,7 @@ export class TelegramHandler {
   private defaultSkill: string;
   private cachedSkillPrompt: string | null = null;
   private allowedUsers: Set<string> | null = null; // null = allow all, Set = allowlist
+  private githubToken?: string; // GitHub token for tool calls
 
   constructor(
     telegramToken: string,
@@ -288,13 +289,15 @@ export class TelegramHandler {
     r2Bucket: R2Bucket,
     workerUrl?: string,
     defaultSkill: string = 'storia-orchestrator',
-    allowedUserIds?: string[] // Pass user IDs to restrict access
+    allowedUserIds?: string[], // Pass user IDs to restrict access
+    githubToken?: string // GitHub token for tool authentication
   ) {
     this.bot = new TelegramBot(telegramToken);
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
     this.storage = createUserStorage(r2Bucket);
     this.skills = createSkillStorage(r2Bucket);
     this.defaultSkill = defaultSkill;
+    this.githubToken = githubToken;
     if (allowedUserIds && allowedUserIds.length > 0) {
       this.allowedUsers = new Set(allowedUserIds);
     }
@@ -452,6 +455,37 @@ export class TelegramHandler {
         await this.handleSkillCommand(chatId, args);
         break;
 
+      case '/ping':
+        const startTime = Date.now();
+        const pingMsg = await this.bot.sendMessage(chatId, '🏓 Pong!');
+        const latency = Date.now() - startTime;
+        await this.bot.editMessage(chatId, pingMsg.message_id, `🏓 Pong! (${latency}ms)`);
+        break;
+
+      case '/status':
+      case '/info':
+        const statusModel = await this.storage.getUserModel(userId);
+        const statusModelInfo = getModel(statusModel);
+        const statusHistory = await this.storage.getConversation(userId, 100);
+        const hasGithub = !!this.githubToken;
+        await this.bot.sendMessage(
+          chatId,
+          `📊 Bot Status\n\n` +
+          `Model: ${statusModelInfo?.name || statusModel}\n` +
+          `Conversation: ${statusHistory.length} messages\n` +
+          `GitHub Tools: ${hasGithub ? '✓ Configured' : '✗ Not configured'}\n` +
+          `Skill: ${this.defaultSkill}\n\n` +
+          `Use /clear to reset conversation\n` +
+          `Use /models to see available models`
+        );
+        break;
+
+      case '/new':
+        // Alias for /clear - fresh conversation
+        await this.storage.clearConversation(userId);
+        await this.bot.sendMessage(chatId, '🆕 New conversation started. How can I help you?');
+        break;
+
       default:
         // Check if it's a model alias command (e.g., /deep, /gpt)
         const modelAlias = cmd.slice(1); // Remove leading /
@@ -562,14 +596,18 @@ export class TelegramHandler {
     if (!promptInput) {
       await this.bot.sendMessage(
         chatId,
+        '🎨 Image Generation\n\n' +
         'Usage: /img <prompt>\n' +
         'Or: /img <model> <prompt>\n\n' +
         'Available models:\n' +
-        '  fluxpro - FLUX 2 Pro (default)\n' +
-        '  fluxmax - FLUX 2 Max (higher quality)\n\n' +
+        '  fluxklein - FLUX.2 Klein (fastest, cheapest)\n' +
+        '  fluxpro - FLUX.2 Pro (default, balanced)\n' +
+        '  fluxflex - FLUX.2 Flex (best for text)\n' +
+        '  fluxmax - FLUX.2 Max (highest quality)\n\n' +
         'Examples:\n' +
-        '  /img a cat in space\n' +
-        '  /img fluxmax a detailed portrait'
+        '  /img a cat in a basket\n' +
+        '  /img fluxmax detailed portrait of a wizard\n' +
+        '  /img fluxflex logo with text "HELLO"'
       );
       return;
     }
@@ -740,6 +778,9 @@ export class TelegramHandler {
             onToolCall: (toolName, _args) => {
               updateStatus(toolName);
             },
+            toolContext: {
+              githubToken: this.githubToken,
+            },
           }
         );
 
@@ -827,33 +868,41 @@ export class TelegramHandler {
    * Get help message
    */
   private getHelpMessage(): string {
-    return `Welcome to Moltworker AI Bot!
+    return `🤖 Moltworker AI Bot
 
-Commands:
-/models - List all available AI models
-/use <alias> - Set your default model
-/model - Show your current model
-/clear - Clear conversation history
-/img <prompt> - Generate an image
+📋 Commands:
+/models - List all AI models
+/use <alias> - Set your model
+/model - Show current model
+/status - Show bot status
+/new - Start fresh conversation
+/clear - Clear history
 /credits - Check OpenRouter credits
-/skill - Show/reload AI skill from R2
+/ping - Test bot response
 
-Quick model switch (just type the alias):
-/auto - Auto-route (default, best value)
-/deep - DeepSeek V3.2
-/gpt - GPT-4o
+🎨 Image Generation:
+/img <prompt> - Generate image
+/img fluxmax <prompt> - Use specific model
+Models: fluxklein, fluxpro, fluxflex, fluxmax
+
+🔧 Quick Model Switch:
+/auto - Auto-route (default)
+/deep - DeepSeek V3
+/grok - Grok 4.1 (tools)
+/qwennext - Qwen3 Coder (tools)
+/gpt - GPT-4o (vision+tools)
 /sonnet - Claude Sonnet 4.5
 /haiku - Claude Haiku 4.5
-/flash - Gemini 3 Flash
 
-Free models:
-/trinity - Free premium reasoning
-/deepchimera - Free deep reasoning
+🆓 Free Models:
+/trinity - Premium reasoning
+/deepchimera - Deep reasoning
+/mimo - Coding
 /llama405free - Llama 3.1 405B
-/fluxpro - Free image generation
 
-Just send a message to chat with your selected AI!
-Send a photo with a caption to use vision.`;
+💬 Just send a message to chat!
+📷 Send a photo with caption for vision.
+🔗 Models with tools can access GitHub repos.`;
   }
 
   /**
@@ -873,7 +922,8 @@ export function createTelegramHandler(
   r2Bucket: R2Bucket,
   workerUrl?: string,
   defaultSkill?: string,
-  allowedUserIds?: string[]
+  allowedUserIds?: string[],
+  githubToken?: string
 ): TelegramHandler {
   return new TelegramHandler(
     telegramToken,
@@ -881,6 +931,7 @@ export function createTelegramHandler(
     r2Bucket,
     workerUrl,
     defaultSkill,
-    allowedUserIds
+    allowedUserIds,
+    githubToken
   );
 }
