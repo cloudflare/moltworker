@@ -9,6 +9,13 @@ import { createOpenRouterClient, type ChatMessage } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId } from '../openrouter/models';
 
+// Max characters for a single tool result before truncation
+const MAX_TOOL_RESULT_LENGTH = 15000; // ~4K tokens
+// Compress context after this many tool calls
+const COMPRESS_AFTER_TOOLS = 10;
+// Max estimated tokens before forcing compression
+const MAX_CONTEXT_TOKENS = 80000;
+
 // Task state stored in DO
 interface TaskState {
   taskId: string;
@@ -45,6 +52,97 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
   constructor(state: DurableObjectState, env: Record<string, unknown>) {
     super(state, env);
     this.doState = state;
+  }
+
+  /**
+   * Truncate a tool result if it's too long
+   */
+  private truncateToolResult(content: string, toolName: string): string {
+    if (content.length <= MAX_TOOL_RESULT_LENGTH) {
+      return content;
+    }
+
+    // For file contents, keep beginning and end
+    const halfLength = Math.floor(MAX_TOOL_RESULT_LENGTH / 2) - 100;
+    const beginning = content.slice(0, halfLength);
+    const ending = content.slice(-halfLength);
+
+    return `${beginning}\n\n... [TRUNCATED ${content.length - MAX_TOOL_RESULT_LENGTH} chars from ${toolName}] ...\n\n${ending}`;
+  }
+
+  /**
+   * Estimate token count (rough: 1 token ≈ 4 chars)
+   */
+  private estimateTokens(messages: ChatMessage[]): number {
+    let totalChars = 0;
+    for (const msg of messages) {
+      if (typeof msg.content === 'string') {
+        totalChars += msg.content.length;
+      }
+      if (msg.tool_calls) {
+        totalChars += JSON.stringify(msg.tool_calls).length;
+      }
+    }
+    return Math.ceil(totalChars / 4);
+  }
+
+  /**
+   * Compress old tool results to save context space
+   * Keeps recent messages intact, summarizes older tool results
+   */
+  private compressContext(messages: ChatMessage[], keepRecent: number = 6): ChatMessage[] {
+    if (messages.length <= keepRecent + 2) {
+      return messages; // Not enough to compress
+    }
+
+    // Always keep: system message (first), user message (second), and recent messages
+    const systemMsg = messages[0];
+    const userMsg = messages[1];
+    const recentMessages = messages.slice(-keepRecent);
+    const middleMessages = messages.slice(2, -keepRecent);
+
+    // Compress middle messages - summarize tool results
+    const compressedMiddle: ChatMessage[] = [];
+    let toolSummary: string[] = [];
+
+    for (const msg of middleMessages) {
+      if (msg.role === 'tool') {
+        // Summarize tool results into brief descriptions
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        const preview = content.slice(0, 200).replace(/\n/g, ' ');
+        toolSummary.push(`[Tool result: ${preview}...]`);
+      } else if (msg.role === 'assistant' && msg.tool_calls) {
+        // Keep assistant tool call messages but summarize
+        const toolNames = msg.tool_calls.map(tc => tc.function.name).join(', ');
+        toolSummary.push(`[Called: ${toolNames}]`);
+      } else if (msg.role === 'assistant' && msg.content) {
+        // Flush tool summary and add assistant message
+        if (toolSummary.length > 0) {
+          compressedMiddle.push({
+            role: 'assistant',
+            content: `[Previous actions: ${toolSummary.join(' → ')}]`,
+          });
+          toolSummary = [];
+        }
+        // Keep assistant messages but truncate
+        compressedMiddle.push({
+          role: 'assistant',
+          content: typeof msg.content === 'string' && msg.content.length > 500
+            ? msg.content.slice(0, 500) + '...'
+            : msg.content,
+        });
+      }
+    }
+
+    // Flush remaining tool summary
+    if (toolSummary.length > 0) {
+      compressedMiddle.push({
+        role: 'assistant',
+        content: `[Previous actions: ${toolSummary.join(' → ')}]`,
+      });
+    }
+
+    return [systemMsg, userMsg, ...compressedMiddle, ...recentMessages];
   }
 
   /**
@@ -157,11 +255,13 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
         if (Date.now() - lastProgressUpdate > 15000 && statusMessageId) {
           lastProgressUpdate = Date.now();
           const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+          const tokens = this.estimateTokens(conversationMessages);
+          const tokensK = Math.round(tokens / 1000);
           await this.editTelegramMessage(
             request.telegramToken,
             request.chatId,
             statusMessageId,
-            `⏳ Processing... (${task.iterations} iterations, ${task.toolsUsed.length} tools, ${elapsed}s elapsed)`
+            `⏳ Processing... (${task.iterations} iter, ${task.toolsUsed.length} tools, ~${tokensK}K tokens, ${elapsed}s)`
           );
         }
 
@@ -223,15 +323,47 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
             const toolName = toolCall.function.name;
             task.toolsUsed.push(toolName);
 
-            // Execute tool
-            const toolResult = await executeTool(toolCall, toolContext);
+            // Execute tool with timeout
+            let toolResult;
+            try {
+              const toolPromise = executeTool(toolCall, toolContext);
+              const toolTimeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
+              });
+              toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
+            } catch (toolError) {
+              // Tool failed - add error as result and continue
+              toolResult = {
+                tool_call_id: toolCall.id,
+                content: `Error: ${toolError instanceof Error ? toolError.message : String(toolError)}`,
+              };
+            }
+
+            // Truncate large tool results to prevent context explosion
+            const truncatedContent = this.truncateToolResult(toolResult.content, toolName);
 
             // Add tool result to conversation
             conversationMessages.push({
               role: 'tool',
-              content: toolResult.content,
+              content: truncatedContent,
               tool_call_id: toolResult.tool_call_id,
             });
+          }
+
+          // Compress context if it's getting too large
+          const estimatedTokens = this.estimateTokens(conversationMessages);
+          if (task.toolsUsed.length > 0 && task.toolsUsed.length % COMPRESS_AFTER_TOOLS === 0) {
+            const beforeCount = conversationMessages.length;
+            const compressed = this.compressContext(conversationMessages);
+            conversationMessages.length = 0;
+            conversationMessages.push(...compressed);
+            console.log(`[TaskProcessor] Compressed context: ${beforeCount} -> ${compressed.length} messages`);
+          } else if (estimatedTokens > MAX_CONTEXT_TOKENS) {
+            // Force compression if tokens too high
+            const compressed = this.compressContext(conversationMessages, 4);
+            conversationMessages.length = 0;
+            conversationMessages.push(...compressed);
+            console.log(`[TaskProcessor] Force compressed due to ${estimatedTokens} estimated tokens`);
           }
 
           // Continue loop for next iteration
