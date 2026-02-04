@@ -6,8 +6,15 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, type ChatMessage } from '../openrouter/client';
-import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall } from '../openrouter/tools';
+import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId } from '../openrouter/models';
+
+// Max characters for a single tool result before truncation
+const MAX_TOOL_RESULT_LENGTH = 15000; // ~4K tokens
+// Compress context after this many tool calls
+const COMPRESS_AFTER_TOOLS = 10;
+// Max estimated tokens before forcing compression
+const MAX_CONTEXT_TOKENS = 80000;
 
 // Task state stored in DO
 interface TaskState {
@@ -16,13 +23,15 @@ interface TaskState {
   userId: string;
   modelAlias: string;
   messages: ChatMessage[];
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
   toolsUsed: string[];
   iterations: number;
   startTime: number;
   lastUpdate: number;
   result?: string;
   error?: string;
+  statusMessageId?: number;
+  telegramToken?: string; // Store for cancel
 }
 
 // Task request from the worker
@@ -43,6 +52,97 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
   constructor(state: DurableObjectState, env: Record<string, unknown>) {
     super(state, env);
     this.doState = state;
+  }
+
+  /**
+   * Truncate a tool result if it's too long
+   */
+  private truncateToolResult(content: string, toolName: string): string {
+    if (content.length <= MAX_TOOL_RESULT_LENGTH) {
+      return content;
+    }
+
+    // For file contents, keep beginning and end
+    const halfLength = Math.floor(MAX_TOOL_RESULT_LENGTH / 2) - 100;
+    const beginning = content.slice(0, halfLength);
+    const ending = content.slice(-halfLength);
+
+    return `${beginning}\n\n... [TRUNCATED ${content.length - MAX_TOOL_RESULT_LENGTH} chars from ${toolName}] ...\n\n${ending}`;
+  }
+
+  /**
+   * Estimate token count (rough: 1 token ≈ 4 chars)
+   */
+  private estimateTokens(messages: ChatMessage[]): number {
+    let totalChars = 0;
+    for (const msg of messages) {
+      if (typeof msg.content === 'string') {
+        totalChars += msg.content.length;
+      }
+      if (msg.tool_calls) {
+        totalChars += JSON.stringify(msg.tool_calls).length;
+      }
+    }
+    return Math.ceil(totalChars / 4);
+  }
+
+  /**
+   * Compress old tool results to save context space
+   * Keeps recent messages intact, summarizes older tool results
+   */
+  private compressContext(messages: ChatMessage[], keepRecent: number = 6): ChatMessage[] {
+    if (messages.length <= keepRecent + 2) {
+      return messages; // Not enough to compress
+    }
+
+    // Always keep: system message (first), user message (second), and recent messages
+    const systemMsg = messages[0];
+    const userMsg = messages[1];
+    const recentMessages = messages.slice(-keepRecent);
+    const middleMessages = messages.slice(2, -keepRecent);
+
+    // Compress middle messages - summarize tool results
+    const compressedMiddle: ChatMessage[] = [];
+    let toolSummary: string[] = [];
+
+    for (const msg of middleMessages) {
+      if (msg.role === 'tool') {
+        // Summarize tool results into brief descriptions
+        const content = typeof msg.content === 'string' ? msg.content : '';
+        const preview = content.slice(0, 200).replace(/\n/g, ' ');
+        toolSummary.push(`[Tool result: ${preview}...]`);
+      } else if (msg.role === 'assistant' && msg.tool_calls) {
+        // Keep assistant tool call messages but summarize
+        const toolNames = msg.tool_calls.map(tc => tc.function.name).join(', ');
+        toolSummary.push(`[Called: ${toolNames}]`);
+      } else if (msg.role === 'assistant' && msg.content) {
+        // Flush tool summary and add assistant message
+        if (toolSummary.length > 0) {
+          compressedMiddle.push({
+            role: 'assistant',
+            content: `[Previous actions: ${toolSummary.join(' → ')}]`,
+          });
+          toolSummary = [];
+        }
+        // Keep assistant messages but truncate
+        compressedMiddle.push({
+          role: 'assistant',
+          content: typeof msg.content === 'string' && msg.content.length > 500
+            ? msg.content.slice(0, 500) + '...'
+            : msg.content,
+        });
+      }
+    }
+
+    // Flush remaining tool summary
+    if (toolSummary.length > 0) {
+      compressedMiddle.push({
+        role: 'assistant',
+        content: `[Previous actions: ${toolSummary.join(' → ')}]`,
+      });
+    }
+
+    return [systemMsg, userMsg, ...compressedMiddle, ...recentMessages];
   }
 
   /**
@@ -72,6 +172,30 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       });
     }
 
+    if (url.pathname === '/cancel' && request.method === 'POST') {
+      const task = await this.doState.storage.get<TaskState>('task');
+      if (task && task.status === 'processing') {
+        task.status = 'cancelled';
+        task.error = 'Cancelled by user';
+        await this.doState.storage.put('task', task);
+
+        // Try to send cancellation message
+        if (task.telegramToken && task.chatId) {
+          if (task.statusMessageId) {
+            await this.deleteTelegramMessage(task.telegramToken, task.chatId, task.statusMessageId);
+          }
+          await this.sendTelegramMessage(task.telegramToken, task.chatId, '🛑 Task cancelled.');
+        }
+
+        return new Response(JSON.stringify({ status: 'cancelled' }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({ status: 'not_processing', current: task?.status }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     return new Response('Not found', { status: 404 });
   }
 
@@ -92,6 +216,8 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       lastUpdate: Date.now(),
     };
 
+    // Store telegram token for cancel functionality
+    task.telegramToken = request.telegramToken;
     await this.doState.storage.put('task', task);
 
     // Send initial status to Telegram
@@ -100,6 +226,10 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
       request.chatId,
       '⏳ Processing complex task...'
     );
+
+    // Store status message ID for cancel cleanup
+    task.statusMessageId = statusMessageId || undefined;
+    await this.doState.storage.put('task', task);
 
     const client = createOpenRouterClient(request.openrouterKey);
     const modelId = getModelId(request.modelAlias);
@@ -111,6 +241,12 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
 
     try {
       while (task.iterations < maxIterations) {
+        // Check if cancelled
+        const currentTask = await this.doState.storage.get<TaskState>('task');
+        if (currentTask?.status === 'cancelled') {
+          return; // Exit silently - cancel handler already notified user
+        }
+
         task.iterations++;
         task.lastUpdate = Date.now();
         await this.doState.storage.put('task', task);
@@ -119,16 +255,18 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
         if (Date.now() - lastProgressUpdate > 15000 && statusMessageId) {
           lastProgressUpdate = Date.now();
           const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+          const tokens = this.estimateTokens(conversationMessages);
+          const tokensK = Math.round(tokens / 1000);
           await this.editTelegramMessage(
             request.telegramToken,
             request.chatId,
             statusMessageId,
-            `⏳ Processing... (${task.iterations} iterations, ${task.toolsUsed.length} tools, ${elapsed}s elapsed)`
+            `⏳ Processing... (${task.iterations} iter, ${task.toolsUsed.length} tools, ~${tokensK}K tokens, ${elapsed}s)`
           );
         }
 
-        // Make API call to OpenRouter
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        // Make API call to OpenRouter with timeout
+        const fetchPromise = fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${request.openrouterKey}`,
@@ -141,10 +279,17 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
             messages: conversationMessages,
             max_tokens: 4096,
             temperature: 0.7,
-            tools: AVAILABLE_TOOLS,
+            tools: TOOLS_WITHOUT_BROWSER, // Use tools without browser (not available in DO)
             tool_choice: 'auto',
           }),
         });
+
+        // 3 minute timeout per API call
+        const timeoutPromise = new Promise<Response>((_, reject) => {
+          setTimeout(() => reject(new Error('OpenRouter API timeout (3 minutes)')), 180000);
+        });
+
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -178,15 +323,47 @@ export class TaskProcessor extends DurableObject<Record<string, unknown>> {
             const toolName = toolCall.function.name;
             task.toolsUsed.push(toolName);
 
-            // Execute tool
-            const toolResult = await executeTool(toolCall, toolContext);
+            // Execute tool with timeout
+            let toolResult;
+            try {
+              const toolPromise = executeTool(toolCall, toolContext);
+              const toolTimeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
+              });
+              toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
+            } catch (toolError) {
+              // Tool failed - add error as result and continue
+              toolResult = {
+                tool_call_id: toolCall.id,
+                content: `Error: ${toolError instanceof Error ? toolError.message : String(toolError)}`,
+              };
+            }
+
+            // Truncate large tool results to prevent context explosion
+            const truncatedContent = this.truncateToolResult(toolResult.content, toolName);
 
             // Add tool result to conversation
             conversationMessages.push({
               role: 'tool',
-              content: toolResult.content,
+              content: truncatedContent,
               tool_call_id: toolResult.tool_call_id,
             });
+          }
+
+          // Compress context if it's getting too large
+          const estimatedTokens = this.estimateTokens(conversationMessages);
+          if (task.toolsUsed.length > 0 && task.toolsUsed.length % COMPRESS_AFTER_TOOLS === 0) {
+            const beforeCount = conversationMessages.length;
+            const compressed = this.compressContext(conversationMessages);
+            conversationMessages.length = 0;
+            conversationMessages.push(...compressed);
+            console.log(`[TaskProcessor] Compressed context: ${beforeCount} -> ${compressed.length} messages`);
+          } else if (estimatedTokens > MAX_CONTEXT_TOKENS) {
+            // Force compression if tokens too high
+            const compressed = this.compressContext(conversationMessages, 4);
+            conversationMessages.length = 0;
+            conversationMessages.push(...compressed);
+            console.log(`[TaskProcessor] Force compressed due to ${estimatedTokens} estimated tokens`);
           }
 
           // Continue loop for next iteration

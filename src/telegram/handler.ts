@@ -72,6 +72,17 @@ export interface TelegramFile {
   file_path?: string;
 }
 
+// Inline keyboard types
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data?: string;
+  url?: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
 /**
  * Telegram Bot API client
  */
@@ -269,6 +280,78 @@ export class TelegramBot {
     const result = await response.json() as { ok: boolean; description?: string };
     return result.ok;
   }
+
+  /**
+   * Send a message with inline keyboard buttons
+   */
+  async sendMessageWithButtons(
+    chatId: number,
+    text: string,
+    buttons: InlineKeyboardButton[][],
+    options?: { parseMode?: 'Markdown' | 'MarkdownV2' | 'HTML' }
+  ): Promise<TelegramMessage> {
+    // Truncate if too long
+    if (text.length > 4000) {
+      text = text.slice(0, 3997) + '...';
+    }
+
+    const response = await fetch(`${this.baseUrl}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: options?.parseMode,
+        reply_markup: {
+          inline_keyboard: buttons,
+        },
+      }),
+    });
+
+    const result = await response.json() as { ok: boolean; result?: TelegramMessage; description?: string };
+    if (!result.ok) {
+      throw new Error(`Telegram API error: ${result.description}`);
+    }
+
+    return result.result!;
+  }
+
+  /**
+   * Answer a callback query (acknowledge button press)
+   */
+  async answerCallbackQuery(
+    callbackQueryId: string,
+    options?: { text?: string; showAlert?: boolean }
+  ): Promise<void> {
+    await fetch(`${this.baseUrl}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        text: options?.text,
+        show_alert: options?.showAlert,
+      }),
+    });
+  }
+
+  /**
+   * Edit message reply markup (update buttons)
+   */
+  async editMessageReplyMarkup(
+    chatId: number,
+    messageId: number,
+    buttons: InlineKeyboardButton[][] | null
+  ): Promise<void> {
+    await fetch(`${this.baseUrl}/editMessageReplyMarkup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: buttons ? { inline_keyboard: buttons } : undefined,
+      }),
+    });
+  }
 }
 
 /**
@@ -286,6 +369,7 @@ export class TelegramHandler {
   private telegramToken: string; // Store for DO
   private openrouterKey: string; // Store for DO
   private taskProcessor?: DurableObjectNamespace<TaskProcessor>; // For long-running tasks
+  private browser?: Fetcher; // Browser binding for browse_url tool
 
   constructor(
     telegramToken: string,
@@ -295,7 +379,8 @@ export class TelegramHandler {
     defaultSkill: string = 'storia-orchestrator',
     allowedUserIds?: string[], // Pass user IDs to restrict access
     githubToken?: string, // GitHub token for tool authentication
-    taskProcessor?: DurableObjectNamespace<TaskProcessor> // DO for long tasks
+    taskProcessor?: DurableObjectNamespace<TaskProcessor>, // DO for long tasks
+    browser?: Fetcher // Browser binding for browse_url tool
   ) {
     this.bot = new TelegramBot(telegramToken);
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
@@ -306,6 +391,7 @@ export class TelegramHandler {
     this.telegramToken = telegramToken;
     this.openrouterKey = openrouterKey;
     this.taskProcessor = taskProcessor;
+    this.browser = browser;
     if (allowedUserIds && allowedUserIds.length > 0) {
       this.allowedUsers = new Set(allowedUserIds);
     }
@@ -476,12 +562,14 @@ export class TelegramHandler {
         const statusModelInfo = getModel(statusModel);
         const statusHistory = await this.storage.getConversation(userId, 100);
         const hasGithub = !!this.githubToken;
+        const hasBrowser = !!this.browser;
         await this.bot.sendMessage(
           chatId,
           `📊 Bot Status\n\n` +
           `Model: ${statusModelInfo?.name || statusModel}\n` +
           `Conversation: ${statusHistory.length} messages\n` +
           `GitHub Tools: ${hasGithub ? '✓ Configured' : '✗ Not configured'}\n` +
+          `Browser Tools: ${hasBrowser ? '✓ Configured' : '✗ Not configured'}\n` +
           `Skill: ${this.defaultSkill}\n\n` +
           `Use /clear to reset conversation\n` +
           `Use /models to see available models`
@@ -492,6 +580,32 @@ export class TelegramHandler {
         // Alias for /clear - fresh conversation
         await this.storage.clearConversation(userId);
         await this.bot.sendMessage(chatId, '🆕 New conversation started. How can I help you?');
+        break;
+
+      case '/pick':
+        // Show model picker with inline buttons
+        await this.sendModelPicker(chatId);
+        break;
+
+      case '/cancel':
+        // Cancel any running task
+        if (this.taskProcessor) {
+          try {
+            const doId = this.taskProcessor.idFromName(userId);
+            const doStub = this.taskProcessor.get(doId);
+            const response = await doStub.fetch(new Request('https://do/cancel', { method: 'POST' }));
+            const result = await response.json() as { status: string };
+            if (result.status === 'cancelled') {
+              // Message already sent by DO
+            } else {
+              await this.bot.sendMessage(chatId, 'No task is currently running.');
+            }
+          } catch (error) {
+            await this.bot.sendMessage(chatId, 'Failed to cancel task.');
+          }
+        } else {
+          await this.bot.sendMessage(chatId, 'Task processor not available.');
+        }
         break;
 
       default:
@@ -846,6 +960,7 @@ export class TelegramHandler {
             },
             toolContext: {
               githubToken: this.githubToken,
+              browser: this.browser,
             },
           }
         );
@@ -931,8 +1046,116 @@ export class TelegramHandler {
    * Handle callback queries (from inline keyboards)
    */
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
-    // Handle callback query if needed
-    console.log('[Telegram] Callback query:', query.data);
+    const callbackData = query.data;
+    const userId = String(query.from.id);
+    const chatId = query.message?.chat.id;
+
+    console.log('[Telegram] Callback query:', callbackData);
+
+    // Acknowledge the callback immediately
+    await this.bot.answerCallbackQuery(query.id);
+
+    if (!callbackData || !chatId) {
+      return;
+    }
+
+    // Check if user is allowed
+    if (!this.isUserAllowed(userId)) {
+      return;
+    }
+
+    // Parse callback data format: action:param1:param2...
+    const parts = callbackData.split(':');
+    const action = parts[0];
+
+    switch (action) {
+      case 'model':
+        // Quick model switch: model:alias
+        const modelAlias = parts[1];
+        if (modelAlias) {
+          await this.handleUseCommand(chatId, userId, query.from.username, [modelAlias]);
+          // Remove buttons after selection
+          if (query.message) {
+            await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+          }
+        }
+        break;
+
+      case 'confirm':
+        // Confirmation action: confirm:yes or confirm:no
+        const confirmed = parts[1] === 'yes';
+        const confirmAction = parts[2]; // What was being confirmed
+        if (query.message) {
+          await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+        }
+        if (confirmed && confirmAction) {
+          await this.bot.sendMessage(chatId, `✓ Confirmed: ${confirmAction}`);
+          // Handle the confirmed action based on confirmAction value
+        } else {
+          await this.bot.sendMessage(chatId, '✗ Cancelled');
+        }
+        break;
+
+      case 'clear':
+        // Clear conversation confirmation
+        if (parts[1] === 'yes') {
+          await this.storage.clearConversation(userId);
+          await this.bot.sendMessage(chatId, '✓ Conversation cleared');
+        }
+        if (query.message) {
+          await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+        }
+        break;
+
+      default:
+        console.log('[Telegram] Unknown callback action:', action);
+    }
+  }
+
+  /**
+   * Send a quick model picker
+   */
+  async sendModelPicker(chatId: number): Promise<void> {
+    const buttons: InlineKeyboardButton[][] = [
+      [
+        { text: '🧠 DeepSeek', callback_data: 'model:deep' },
+        { text: '⚡ Grok', callback_data: 'model:grok' },
+        { text: '🤖 GPT-4o', callback_data: 'model:gpt' },
+      ],
+      [
+        { text: '🎭 Claude Sonnet', callback_data: 'model:sonnet' },
+        { text: '💨 Claude Haiku', callback_data: 'model:haiku' },
+        { text: '🔮 Qwen', callback_data: 'model:qwennext' },
+      ],
+      [
+        { text: '🆓 Trinity (Free)', callback_data: 'model:trinity' },
+        { text: '🆓 Mimo (Free)', callback_data: 'model:mimo' },
+      ],
+    ];
+
+    await this.bot.sendMessageWithButtons(
+      chatId,
+      '🤖 Select a model:',
+      buttons
+    );
+  }
+
+  /**
+   * Send a confirmation dialog
+   */
+  async sendConfirmation(
+    chatId: number,
+    message: string,
+    actionId: string
+  ): Promise<void> {
+    const buttons: InlineKeyboardButton[][] = [
+      [
+        { text: '✓ Yes', callback_data: `confirm:yes:${actionId}` },
+        { text: '✗ No', callback_data: `confirm:no:${actionId}` },
+      ],
+    ];
+
+    await this.bot.sendMessageWithButtons(chatId, message, buttons);
   }
 
   /**
@@ -944,10 +1167,12 @@ export class TelegramHandler {
 📋 Commands:
 /models - List all AI models
 /use <alias> - Set your model
+/pick - Quick model picker (buttons)
 /model - Show current model
 /status - Show bot status
 /new - Start fresh conversation
 /clear - Clear history
+/cancel - Cancel running task
 /credits - Check OpenRouter credits
 /ping - Test bot response
 
@@ -971,9 +1196,11 @@ Models: fluxklein, fluxpro, fluxflex, fluxmax
 /mimo - Coding
 /llama405free - Llama 3.1 405B
 
+🛠️ Tools:
+Models with tools can use GitHub, browse URLs, and more.
+
 💬 Just send a message to chat!
-📷 Send a photo with caption for vision.
-🔗 Models with tools can access GitHub repos.`;
+📷 Send a photo with caption for vision.`;
   }
 
   /**
@@ -995,7 +1222,8 @@ export function createTelegramHandler(
   defaultSkill?: string,
   allowedUserIds?: string[],
   githubToken?: string,
-  taskProcessor?: DurableObjectNamespace<TaskProcessor>
+  taskProcessor?: DurableObjectNamespace<TaskProcessor>,
+  browser?: Fetcher
 ): TelegramHandler {
   return new TelegramHandler(
     telegramToken,
@@ -1005,6 +1233,7 @@ export function createTelegramHandler(
     defaultSkill,
     allowedUserIds,
     githubToken,
-    taskProcessor
+    taskProcessor,
+    browser
   );
 }

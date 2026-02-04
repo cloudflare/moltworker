@@ -30,6 +30,8 @@ export interface MoltbotEnv {
   GITHUB_TOKEN?: string; // GitHub PAT for tool calls (repo access)
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
+  DISCORD_ANNOUNCEMENT_CHANNELS?: string; // Comma-separated channel IDs to monitor
+  DISCORD_FORWARD_TO_TELEGRAM?: string; // Telegram chat ID to forward announcements to
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
   // Cloudflare Access configuration for admin routes

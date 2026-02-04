@@ -27,10 +27,11 @@ import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
-import { publicRoutes, api, adminUi, debug, cdp, telegram } from './routes';
+import { publicRoutes, api, adminUi, debug, cdp, telegram, discord } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
+import { createDiscordHandler } from './discord/handler';
 
 /**
  * Transform error messages from the gateway to be more user-friendly.
@@ -147,6 +148,9 @@ app.route('/', publicRoutes);
 // Mount Telegram webhook routes (uses token auth, not CF Access)
 // Direct OpenRouter integration for Telegram bot
 app.route('/telegram', telegram);
+
+// Mount Discord routes (public API for announcements)
+app.route('/discord', discord);
 
 // Mount CDP routes (uses shared secret auth via query param, not CF Access)
 app.route('/cdp', cdp);
@@ -435,6 +439,7 @@ app.all('*', async (c) => {
 /**
  * Scheduled handler for cron triggers.
  * Syncs moltbot config/state from container to R2 for persistence.
+ * Also checks Discord channels for new announcements.
  */
 async function scheduled(
   _event: ScheduledEvent,
@@ -444,6 +449,7 @@ async function scheduled(
   const options = buildSandboxOptions(env);
   const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
 
+  // Backup sync to R2
   console.log('[cron] Starting backup sync to R2...');
   const result = await syncToR2(sandbox, env);
 
@@ -451,6 +457,32 @@ async function scheduled(
     console.log('[cron] Backup sync completed successfully at', result.lastSync);
   } else {
     console.error('[cron] Backup sync failed:', result.error, result.details || '');
+  }
+
+  // Check Discord announcements if configured
+  if (env.DISCORD_BOT_TOKEN && env.DISCORD_ANNOUNCEMENT_CHANNELS && env.DISCORD_FORWARD_TO_TELEGRAM && env.TELEGRAM_BOT_TOKEN && env.OPENROUTER_API_KEY) {
+    console.log('[cron] Checking Discord announcements...');
+
+    try {
+      const channelIds = env.DISCORD_ANNOUNCEMENT_CHANNELS.split(',').map(id => id.trim());
+      const telegramChatId = parseInt(env.DISCORD_FORWARD_TO_TELEGRAM, 10);
+
+      const discordHandler = createDiscordHandler(
+        env.DISCORD_BOT_TOKEN,
+        env.TELEGRAM_BOT_TOKEN,
+        env.OPENROUTER_API_KEY,
+        env.MOLTBOT_BUCKET,
+        channelIds,
+        telegramChatId
+      );
+
+      const results = await discordHandler.checkAllChannels();
+      const totalNew = results.reduce((sum, r) => sum + (r.newMessages > 0 ? r.newMessages : 0), 0);
+
+      console.log(`[cron] Discord check complete: ${totalNew} new messages across ${results.length} channels`);
+    } catch (error) {
+      console.error('[cron] Discord check failed:', error);
+    }
   }
 }
 

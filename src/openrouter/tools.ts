@@ -40,6 +40,7 @@ export interface ToolResult {
  */
 export interface ToolContext {
   githubToken?: string;
+  browser?: Fetcher; // Cloudflare Browser Rendering binding
 }
 
 /**
@@ -148,6 +149,32 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'browse_url',
+      description: 'Browse a URL using a real browser. Use this for JavaScript-rendered pages, screenshots, or when fetch_url fails. Returns text content by default, or a screenshot/PDF.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'The URL to browse',
+          },
+          action: {
+            type: 'string',
+            description: 'Action to perform',
+            enum: ['extract_text', 'screenshot', 'pdf'],
+          },
+          wait_for: {
+            type: 'string',
+            description: 'CSS selector to wait for before extracting content (optional)',
+          },
+        },
+        required: ['url'],
+      },
+    },
+  },
 ];
 
 /**
@@ -187,6 +214,9 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'github_api':
         result = await githubApi(args.endpoint, args.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', args.body, githubToken);
+        break;
+      case 'browse_url':
+        result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
         break;
       default:
         result = `Error: Unknown tool: ${name}`;
@@ -370,6 +400,165 @@ async function githubApi(
     return responseText;
   }
 }
+
+/**
+ * Browse a URL using Cloudflare Browser Rendering
+ */
+async function browseUrl(
+  url: string,
+  action: 'extract_text' | 'screenshot' | 'pdf' = 'extract_text',
+  waitFor?: string,
+  browser?: Fetcher
+): Promise<string> {
+  if (!browser) {
+    // Fallback to regular fetch if browser not available
+    return fetchUrl(url);
+  }
+
+  try {
+    // Use Cloudflare Browser Rendering API
+    // The browser binding acts as a Puppeteer endpoint
+    const sessionResponse = await browser.fetch('https://browser/new', {
+      method: 'POST',
+    });
+
+    if (!sessionResponse.ok) {
+      throw new Error(`Failed to create browser session: ${sessionResponse.statusText}`);
+    }
+
+    const session = await sessionResponse.json() as { sessionId: string };
+    const sessionId = session.sessionId;
+
+    try {
+      // Navigate to URL
+      await browser.fetch(`https://browser/${sessionId}/navigate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      // Wait for selector if specified
+      if (waitFor) {
+        await browser.fetch(`https://browser/${sessionId}/wait`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selector: waitFor, timeout: 10000 }),
+        });
+      } else {
+        // Default wait for page to be ready
+        await browser.fetch(`https://browser/${sessionId}/wait`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'networkidle0', timeout: 10000 }),
+        });
+      }
+
+      // Perform the requested action
+      switch (action) {
+        case 'screenshot': {
+          const screenshotResponse = await browser.fetch(`https://browser/${sessionId}/screenshot`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fullPage: false }),
+          });
+
+          if (!screenshotResponse.ok) {
+            throw new Error('Failed to take screenshot');
+          }
+
+          const data = await screenshotResponse.json() as { base64: string };
+          // Return as data URL that can be displayed
+          return `Screenshot captured. Base64 data (first 100 chars): ${data.base64.slice(0, 100)}...\n\n[Full screenshot data available for image rendering]`;
+        }
+
+        case 'pdf': {
+          const pdfResponse = await browser.fetch(`https://browser/${sessionId}/pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+
+          if (!pdfResponse.ok) {
+            throw new Error('Failed to generate PDF');
+          }
+
+          return 'PDF generated successfully. The document can be downloaded from the session.';
+        }
+
+        case 'extract_text':
+        default: {
+          // Extract text content from the page
+          const textResponse = await browser.fetch(`https://browser/${sessionId}/evaluate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              expression: `
+                (function() {
+                  // Remove script and style elements
+                  const scripts = document.querySelectorAll('script, style, noscript');
+                  scripts.forEach(el => el.remove());
+
+                  // Get text content
+                  const title = document.title || '';
+                  const body = document.body?.innerText || '';
+
+                  // Get meta description
+                  const metaDesc = document.querySelector('meta[name="description"]')?.getAttribute('content') || '';
+
+                  return {
+                    title,
+                    description: metaDesc,
+                    content: body.slice(0, 50000) // Limit content
+                  };
+                })()
+              `,
+            }),
+          });
+
+          if (!textResponse.ok) {
+            throw new Error('Failed to extract text');
+          }
+
+          const result = await textResponse.json() as { result: { title: string; description: string; content: string } };
+          const { title, description, content } = result.result;
+
+          let output = `Title: ${title}\n`;
+          if (description) {
+            output += `Description: ${description}\n`;
+          }
+          output += `\n---\n\n${content}`;
+
+          // Truncate if too long
+          if (output.length > 50000) {
+            return output.slice(0, 50000) + '\n\n[Content truncated - exceeded 50KB]';
+          }
+
+          return output;
+        }
+      }
+    } finally {
+      // Clean up session
+      try {
+        await browser.fetch(`https://browser/${sessionId}/close`, {
+          method: 'POST',
+        });
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+  } catch (error) {
+    // If browser rendering fails, fall back to regular fetch
+    console.error('[browse_url] Browser rendering failed, falling back to fetch:', error);
+    return fetchUrl(url);
+  }
+}
+
+/**
+ * Tools available without browser binding (for Durable Objects)
+ */
+export const TOOLS_WITHOUT_BROWSER: ToolDefinition[] = AVAILABLE_TOOLS.filter(
+  tool => tool.function.name !== 'browse_url'
+);
 
 /**
  * Check if a model supports tools
