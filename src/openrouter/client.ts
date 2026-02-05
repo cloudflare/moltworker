@@ -449,7 +449,12 @@ export class OpenRouterClient {
       // Set a timeout for the initial fetch (in case connection hangs)
       const fetchTimeout = setTimeout(() => controller.abort(), 60000); // 60s for initial connection
 
-      const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      // Add unique query param to bypass stale pooled connections
+      // Cloudflare Workers aggressively pool connections; stale ones cause hangs
+      const url = new URL(`${OPENROUTER_BASE_URL}/chat/completions`);
+      url.searchParams.append('_nc', crypto.randomUUID().slice(0, 8)); // no-cache bust
+
+      const response = await fetch(url.toString(), {
         method: 'POST',
         headers: this.getHeaders(),
         signal: controller.signal,
