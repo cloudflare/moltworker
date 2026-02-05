@@ -250,7 +250,7 @@ if [ ! -x "$(command -v clawdbot)" ]; then
 fi
 
 # Map Cloudflare secret to Clawdbot env var
-if [ -n "$MOLTBOT_GATEWAY_TOKEN" ]; then
+if [ -n "${MOLTBOT_GATEWAY_TOKEN:-}" ]; then
     export CLAWDBOT_GATEWAY_TOKEN="$MOLTBOT_GATEWAY_TOKEN"
     echo "Gateway token configured"
 fi
