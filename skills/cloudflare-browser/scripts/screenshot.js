@@ -15,7 +15,15 @@ if (!CDP_SECRET) {
 }
 
 const WORKER_URL = process.env.WORKER_URL.replace(/^https?:\/\//, '');
+// Keep query param for backwards compatibility
 const WS_URL = `wss://${WORKER_URL}/cdp?secret=${encodeURIComponent(CDP_SECRET)}`;
+
+// Security: Send secret via Authorization header (preferred over URL)
+const WS_OPTIONS = {
+  headers: {
+    'Authorization': `Bearer ${CDP_SECRET}`,
+  },
+};
 
 const url = process.argv[2];
 const output = process.argv[3] || 'screenshot.png';
@@ -31,7 +39,7 @@ const pending = new Map();
 async function main() {
   console.log(`Capturing screenshot of ${url}`);
   
-  const ws = new WebSocket(WS_URL);
+  const ws = new WebSocket(WS_URL, WS_OPTIONS);
   let targetResolve;
   const targetReady = new Promise(r => { targetResolve = r; });
   
