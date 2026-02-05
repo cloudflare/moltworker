@@ -470,6 +470,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         task.iterations = checkpoint.iterations;
         await this.doState.storage.put('task', task);
 
+        // CRITICAL: Add resume instruction to break the "re-read rules" loop
+        // The model tends to re-acknowledge on every resume; this prevents it
+        conversationMessages.push({
+          role: 'user',
+          content: '[SYSTEM RESUME NOTICE] You are resuming from a checkpoint. Your previous work is preserved in this conversation. Do NOT re-read rules or re-acknowledge the task. Continue EXACTLY where you left off. If you were in the middle of creating files, continue creating them. If you showed "Ready to start", that phase is DONE - proceed to implementation immediately.',
+        });
+
         // Update status to show we're resuming
         if (statusMessageId) {
           await this.editTelegramMessage(
