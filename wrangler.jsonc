@@ -34,21 +34,25 @@
   },
   // Container configuration for the Moltbot sandbox
   "containers": [
+  {
+    "name": "moltbot-sandbox-sandbox",
+    "class_name": "Sandbox",
+    "image": "./Dockerfile",
+    "instance_type": "standard-4",
+    "max_instances": 1
+  }
+],
+
+"durable_objects": {
+  "bindings": [
     {
+      "name": "SANDBOX",
       "class_name": "Sandbox",
-      "image": "./Dockerfile",
-      "instance_type": "standard-4",
-      "max_instances": 1,
-    },
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "class_name": "Sandbox",
-        "name": "Sandbox",
-      },
-    ],
-  },
+      "container": "moltbot-sandbox-sandbox"
+    }
+  ]
+}
+,
   "migrations": [
     {
       "new_sqlite_classes": ["Sandbox"],
