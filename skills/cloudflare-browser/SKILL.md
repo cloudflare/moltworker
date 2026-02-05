@@ -10,7 +10,7 @@ Control headless browsers via Cloudflare's Browser Rendering service using CDP (
 ## Prerequisites
 
 - `CDP_SECRET` environment variable set
-- Browser profile configured in clawdbot.json with `cdpUrl` pointing to the worker endpoint:
+- Browser profile configured in openclaw.json with `cdpUrl` pointing to the worker endpoint:
   ```json
   "browser": {
     "profiles": {
