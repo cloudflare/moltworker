@@ -38,22 +38,22 @@
       "class_name": "Sandbox",
       "image": "./Dockerfile",
       "instance_type": "standard-4",
-      "max_instances": 1
-    }
+      "max_instances": 1,
+    },
   ],
   "durable_objects": {
     "bindings": [
       {
         "class_name": "Sandbox",
-        "name": "Sandbox"
-      }
-    ]
+        "name": "Sandbox",
+      },
+    ],
   },
   "migrations": [
     {
       "new_sqlite_classes": ["Sandbox"],
-      "tag": "v1"
-    }
+      "tag": "v1",
+    },
   ],
   // R2 bucket for persistent storage (moltbot data, conversations, etc.)
   "r2_buckets": [
