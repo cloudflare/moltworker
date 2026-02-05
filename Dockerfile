@@ -1,6 +1,9 @@
 # Force rebuild: 2026-02-05-20-09-FINAL
 FROM docker.io/cloudflare/sandbox:0.7.0
 
+# Force new layer with timestamp to bypass ALL Docker cache
+COPY .dockertimestamp /tmp/.dockertimestamp
+
 # Install Node.js 22 (required by clawdbot) and rsync (for R2 backup sync)
 # The base image has Node 20, we need to replace it with Node 22
 # Using direct binary download for reliability
@@ -32,9 +35,6 @@ RUN mkdir -p /root/.clawdbot \
     && mkdir -p /root/.clawdbot-templates \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
-
-# Force new layer with timestamp to bypass Docker cache
-COPY .dockertimestamp /tmp/.dockertimestamp
 
 # Copy startup script
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
