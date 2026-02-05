@@ -567,12 +567,29 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         try {
           console.log(`[TaskProcessor] Reading response body...`);
-          const responseText = await response.text();
-          console.log(`[TaskProcessor] Response size: ${responseText.length} chars`);
 
-          console.log(`[TaskProcessor] Parsing JSON...`);
-          result = JSON.parse(responseText);
-          console.log(`[TaskProcessor] JSON parsed successfully`);
+          // Heartbeat while reading response body (can be slow for large responses)
+          let readHeartbeat: ReturnType<typeof setInterval> | null = null;
+          let readHeartbeatCount = 0;
+          try {
+            readHeartbeat = setInterval(() => {
+              readHeartbeatCount++;
+              console.log(`[TaskProcessor] Reading body heartbeat #${readHeartbeatCount} (${readHeartbeatCount * 5}s)`);
+              task.lastUpdate = Date.now();
+              this.doState.storage.put('task', task).catch(() => {});
+            }, 5000);
+
+            const responseText = await response.text();
+            console.log(`[TaskProcessor] Response size: ${responseText.length} chars`);
+
+            console.log(`[TaskProcessor] Parsing JSON...`);
+            result = JSON.parse(responseText);
+            console.log(`[TaskProcessor] JSON parsed successfully`);
+          } finally {
+            if (readHeartbeat) {
+              clearInterval(readHeartbeat);
+            }
+          }
         } catch (parseError) {
           throw new Error(`Failed to parse API response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
         }
