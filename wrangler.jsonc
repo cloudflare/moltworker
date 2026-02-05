@@ -52,7 +52,6 @@
     }
   ]
 },
-,
   "migrations": [
     {
       "new_sqlite_classes": ["Sandbox"],
