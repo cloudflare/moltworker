@@ -166,7 +166,7 @@ Local development with `wrangler dev` has issues proxying WebSocket connections 
 The Dockerfile includes a cache bust comment. When changing `moltbot.json.template` or `start-moltbot.sh`, bump the version:
 
 ```dockerfile
-# Build cache bust: 2026-02-03-v27-openclaw-migration
+# Build cache bust: 2026-02-05-v28-workspace-persistence
 ```
 
 ## Gateway Configuration
@@ -232,7 +232,12 @@ Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
 
 ## R2 Storage Notes
 
-R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
+R2 is mounted via s3fs at `/data/moltbot`. The following directories are synced to R2:
+- `/root/.openclaw/` → `openclaw/` (config, sessions, paired devices)
+- `/root/clawd/skills/` → `skills/` (custom skills)
+- `/root/clawd/` → `workspace/` (MEMORY.md, IDENTITY.md, memory/, user files)
+
+Important gotchas:
 
 - **rsync compatibility**: Use `rsync -r --no-times` instead of `rsync -a`. s3fs doesn't support setting timestamps, which causes rsync to fail with "Input/output error".
 

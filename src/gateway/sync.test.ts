@@ -113,7 +113,11 @@ describe('syncToR2', () => {
       expect(rsyncCall).toContain('--no-times');
       expect(rsyncCall).toContain('--delete');
       expect(rsyncCall).toContain('/root/.openclaw/');
-      expect(rsyncCall).toContain('/data/moltbot/');
+      expect(rsyncCall).toContain('/data/moltbot/openclaw/');
+      expect(rsyncCall).toContain('/root/clawd/skills/');
+      expect(rsyncCall).toContain('/data/moltbot/skills/');
+      expect(rsyncCall).toContain('/root/clawd/');
+      expect(rsyncCall).toContain('/data/moltbot/workspace/');
     });
   });
 });
