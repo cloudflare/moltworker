@@ -9,6 +9,7 @@ export interface UserPreferences {
   userId: string;
   username?: string;
   model: string;
+  autoResume?: boolean; // Auto-resume tasks on timeout
   createdAt: string;
   updatedAt: string;
 }
@@ -101,6 +102,23 @@ export class UserStorage {
     const prefs = await this.getPreferences(userId);
     prefs.model = model;
     prefs.username = username || prefs.username;
+    await this.setPreferences(prefs);
+  }
+
+  /**
+   * Get user's auto-resume setting
+   */
+  async getUserAutoResume(userId: string): Promise<boolean> {
+    const prefs = await this.getPreferences(userId);
+    return prefs.autoResume ?? false;
+  }
+
+  /**
+   * Set user's auto-resume setting
+   */
+  async setUserAutoResume(userId: string, autoResume: boolean): Promise<void> {
+    const prefs = await this.getPreferences(userId);
+    prefs.autoResume = autoResume;
     await this.setPreferences(prefs);
   }
 

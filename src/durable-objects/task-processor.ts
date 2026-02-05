@@ -34,6 +34,9 @@ interface TaskState {
   telegramToken?: string; // Store for cancel
   openrouterKey?: string; // Store for alarm recovery
   githubToken?: string; // Store for alarm recovery
+  // Auto-resume settings
+  autoResume?: boolean; // If true, automatically resume on timeout
+  autoResumeCount?: number; // Number of auto-resumes so far
 }
 
 // Task request from the worker
@@ -50,6 +53,8 @@ export interface TaskRequest {
   dashscopeKey?: string;   // For Qwen (DashScope/Alibaba)
   moonshotKey?: string;    // For Kimi (Moonshot)
   deepseekKey?: string;    // For DeepSeek
+  // Auto-resume setting
+  autoResume?: boolean;    // If true, auto-resume on timeout
 }
 
 // DO environment with R2 binding
@@ -63,6 +68,8 @@ const WATCHDOG_INTERVAL_MS = 90000;
 const STUCK_THRESHOLD_MS = 60000;
 // Save checkpoint every N tools (more frequent = less lost progress on crash)
 const CHECKPOINT_EVERY_N_TOOLS = 3;
+// Max auto-resume attempts before requiring manual intervention
+const MAX_AUTO_RESUMES = 10;
 
 export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private doState: DurableObjectState;
@@ -104,25 +111,64 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     }
 
     // Task appears stuck - likely DO was terminated by Cloudflare
-    console.log('[TaskProcessor] Task appears stuck, notifying user');
-
-    // Mark as failed
-    task.status = 'failed';
-    task.error = 'Task stopped unexpectedly (Cloudflare terminated the worker)';
-    await this.doState.storage.put('task', task);
+    console.log('[TaskProcessor] Task appears stuck');
 
     // Delete stale status message if it exists
     if (task.telegramToken && task.statusMessageId) {
       await this.deleteTelegramMessage(task.telegramToken, task.chatId, task.statusMessageId);
     }
 
-    // Notify user with resume option
+    const resumeCount = task.autoResumeCount ?? 0;
+    const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+
+    // Check if auto-resume is enabled and under limit
+    if (task.autoResume && resumeCount < MAX_AUTO_RESUMES && task.telegramToken && task.openrouterKey) {
+      console.log(`[TaskProcessor] Auto-resuming (attempt ${resumeCount + 1}/${MAX_AUTO_RESUMES})`);
+
+      // Update resume count
+      task.autoResumeCount = resumeCount + 1;
+      task.status = 'processing'; // Keep processing status
+      task.lastUpdate = Date.now();
+      await this.doState.storage.put('task', task);
+
+      // Notify user about auto-resume
+      await this.sendTelegramMessage(
+        task.telegramToken,
+        task.chatId,
+        `🔄 Auto-resuming... (${resumeCount + 1}/${MAX_AUTO_RESUMES})\n⏱️ ${elapsed}s elapsed, ${task.iterations} iterations`
+      );
+
+      // Reconstruct TaskRequest and trigger resume
+      const taskRequest: TaskRequest = {
+        taskId: task.taskId,
+        chatId: task.chatId,
+        userId: task.userId,
+        modelAlias: task.modelAlias,
+        messages: task.messages,
+        telegramToken: task.telegramToken,
+        openrouterKey: task.openrouterKey,
+        githubToken: task.githubToken,
+        autoResume: task.autoResume,
+      };
+
+      // Use waitUntil to trigger resume without blocking alarm
+      this.doState.waitUntil(this.processTask(taskRequest));
+      return;
+    }
+
+    // Auto-resume disabled or limit reached - mark as failed and notify user
+    task.status = 'failed';
+    task.error = 'Task stopped unexpectedly (API timeout or network issue)';
+    await this.doState.storage.put('task', task);
+
     if (task.telegramToken) {
-      const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+      const limitReachedMsg = resumeCount >= MAX_AUTO_RESUMES
+        ? `\n\n⚠️ Auto-resume limit (${MAX_AUTO_RESUMES}) reached.`
+        : '';
       await this.sendTelegramMessageWithButtons(
         task.telegramToken,
         task.chatId,
-        `⚠️ Task stopped unexpectedly after ${elapsed}s (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\nThis can happen due to API timeouts or network issues. Tap Resume to continue.\n\n💡 Progress saved.`,
+        `⚠️ Task stopped unexpectedly after ${elapsed}s (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\nThis can happen due to API timeouts or network issues. Tap Resume to continue.${limitReachedMsg}\n\n💡 Progress saved.`,
         [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
       );
     }
@@ -381,6 +427,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     task.telegramToken = request.telegramToken;
     task.openrouterKey = request.openrouterKey;
     task.githubToken = request.githubToken;
+    // Preserve auto-resume setting (and count if resuming)
+    task.autoResume = request.autoResume;
+    // Keep existing autoResumeCount if resuming, otherwise start at 0
+    const existingTask = await this.doState.storage.get<TaskState>('task');
+    if (existingTask?.autoResumeCount !== undefined) {
+      task.autoResumeCount = existingTask.autoResumeCount;
+    }
     await this.doState.storage.put('task', task);
 
     // Set watchdog alarm to detect if DO is terminated

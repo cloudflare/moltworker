@@ -571,6 +571,7 @@ export class TelegramHandler {
         const statusModel = await this.storage.getUserModel(userId);
         const statusModelInfo = getModel(statusModel);
         const statusHistory = await this.storage.getConversation(userId, 100);
+        const statusAutoResume = await this.storage.getUserAutoResume(userId);
         const hasGithub = !!this.githubToken;
         const hasBrowser = !!this.browser;
         await this.bot.sendMessage(
@@ -578,9 +579,11 @@ export class TelegramHandler {
           `📊 Bot Status\n\n` +
           `Model: ${statusModelInfo?.name || statusModel}\n` +
           `Conversation: ${statusHistory.length} messages\n` +
+          `Auto-resume: ${statusAutoResume ? '✓ Enabled' : '✗ Disabled'}\n` +
           `GitHub Tools: ${hasGithub ? '✓ Configured' : '✗ Not configured'}\n` +
           `Browser Tools: ${hasBrowser ? '✓ Configured' : '✗ Not configured'}\n` +
           `Skill: ${this.defaultSkill}\n\n` +
+          `Use /automode to toggle auto-resume\n` +
           `Use /clear to reset conversation\n` +
           `Use /models to see available models`
         );
@@ -590,6 +593,20 @@ export class TelegramHandler {
         // Alias for /clear - fresh conversation
         await this.storage.clearConversation(userId);
         await this.bot.sendMessage(chatId, '🆕 New conversation started. How can I help you?');
+        break;
+
+      case '/automode':
+      case '/auto':
+        // Toggle auto-resume mode
+        const currentAutoResume = await this.storage.getUserAutoResume(userId);
+        const newAutoResume = !currentAutoResume;
+        await this.storage.setUserAutoResume(userId, newAutoResume);
+        await this.bot.sendMessage(
+          chatId,
+          newAutoResume
+            ? '✓ Auto-resume enabled. Tasks will automatically retry on timeout (up to 10 times).'
+            : '✗ Auto-resume disabled. You will need to manually tap Resume when tasks timeout.'
+        );
         break;
 
       case '/pick':
@@ -864,6 +881,7 @@ export class TelegramHandler {
         if (this.taskProcessor) {
           // Route to Durable Object for long-running processing
           const taskId = `${userId}-${Date.now()}`;
+          const autoResume = await this.storage.getUserAutoResume(userId);
           const taskRequest: TaskRequest = {
             taskId,
             chatId,
@@ -876,6 +894,7 @@ export class TelegramHandler {
             dashscopeKey: this.dashscopeKey,
             moonshotKey: this.moonshotKey,
             deepseekKey: this.deepseekKey,
+            autoResume,
           };
 
           // Get or create DO instance for this user
@@ -1141,6 +1160,7 @@ export class TelegramHandler {
             ];
 
             const modelAlias = await this.storage.getUserModel(userId);
+            const autoResume = await this.storage.getUserAutoResume(userId);
             const taskId = `${userId}-${Date.now()}`;
             const taskRequest: TaskRequest = {
               taskId,
@@ -1154,6 +1174,7 @@ export class TelegramHandler {
               dashscopeKey: this.dashscopeKey,
               moonshotKey: this.moonshotKey,
               deepseekKey: this.deepseekKey,
+              autoResume,
             };
 
             const doId = this.taskProcessor.idFromName(userId);
