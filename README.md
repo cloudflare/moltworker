@@ -187,6 +187,9 @@ npx wrangler secret put R2_SECRET_ACCESS_KEY
 
 # Your Cloudflare Account ID
 npx wrangler secret put CF_ACCOUNT_ID
+
+# Deploy
+npm run deploy
 ```
 
 To find your Account ID: Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/), click the three dots menu next to your account name, and select "Copy Account ID".
