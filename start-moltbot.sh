@@ -249,14 +249,8 @@ if [ ! -x "$(command -v clawdbot)" ]; then
   exit 1
 fi
 
-# Map Cloudflare secret to Clawdbot env var
-if [ -n "${MOLTBOT_GATEWAY_TOKEN:-}" ]; then
-    export CLAWDBOT_GATEWAY_TOKEN="$MOLTBOT_GATEWAY_TOKEN"
-    echo "Gateway token configured"
-fi
-
 echo "Starting Clawdbot gateway on port 18789..."
-echo "DEV_MODE: $CLAWDBOT_DEV_MODE"
+echo "DEV_MODE: ${CLAWDBOT_DEV_MODE:-not set}"
 
-# Start the gateway with explicit binding
+# Start the gateway with explicit binding - NO TOKEN
 exec clawdbot gateway --bind lan --port 18789
