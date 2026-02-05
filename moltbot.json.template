@@ -1,7 +1,10 @@
 {
   "agents": {
     "defaults": {
-      "workspace": "/root/clawd"
+      "workspace": "/root/clawd",
+      "model": {
+        "primary": "anthropic/claude-3-5-sonnet-20240620"
+      }
     }
   },
   "gateway": {
