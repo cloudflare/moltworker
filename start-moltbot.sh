@@ -1,15 +1,44 @@
 #!/bin/bash
-# OpenClaw Startup Script v45 - With Telegram via env var
-# Cache bust: 2026-02-05-v45-telegram-env
+# OpenClaw Startup Script v46 - With persistent storage
+# Cache bust: 2026-02-05-v46-persistent
 
 echo "============================================"
-echo "Starting OpenClaw v45"
+echo "Starting OpenClaw v46 (with persistence)"
 echo "============================================"
 
 CONFIG_DIR="/root/.openclaw"
-mkdir -p "$CONFIG_DIR"
+R2_BACKUP_DIR="/data/moltbot/openclaw-backup"
 
-# Create minimal config - Telegram token is read from TELEGRAM_BOT_TOKEN env var
+# Function to sync OpenClaw data to R2
+sync_to_r2() {
+  if [ -d "/data/moltbot" ]; then
+    echo "Syncing OpenClaw data to R2..."
+    mkdir -p "$R2_BACKUP_DIR"
+    rsync -av --delete "$CONFIG_DIR/" "$R2_BACKUP_DIR/" 2>/dev/null || true
+    echo "Sync to R2 complete"
+  fi
+}
+
+# Function to restore OpenClaw data from R2
+restore_from_r2() {
+  if [ -d "$R2_BACKUP_DIR" ] && [ "$(ls -A $R2_BACKUP_DIR 2>/dev/null)" ]; then
+    echo "Restoring OpenClaw data from R2..."
+    mkdir -p "$CONFIG_DIR"
+    rsync -av "$R2_BACKUP_DIR/" "$CONFIG_DIR/" 2>/dev/null || true
+    echo "Restore from R2 complete"
+    return 0
+  else
+    echo "No backup found in R2, starting fresh"
+    return 1
+  fi
+}
+
+# Try to restore from R2 first
+mkdir -p "$CONFIG_DIR"
+restore_from_r2
+RESTORED=$?
+
+# Create/update config file
 cat > "$CONFIG_DIR/openclaw.json" << 'EOFCONFIG'
 {
   "agents": {
@@ -35,6 +64,19 @@ fi
 # Run doctor to auto-configure channels from environment
 echo "Running openclaw doctor --fix..."
 openclaw doctor --fix || true
+
+# Start background sync process (every 60 seconds)
+(
+  while true; do
+    sleep 60
+    sync_to_r2
+  done
+) &
+SYNC_PID=$!
+echo "Background sync started (PID: $SYNC_PID)"
+
+# Trap to sync on exit
+trap 'echo "Shutting down, syncing to R2..."; sync_to_r2; kill $SYNC_PID 2>/dev/null' EXIT INT TERM
 
 echo "Starting gateway..."
 exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
