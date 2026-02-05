@@ -8,6 +8,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 # AI_GATEWAY_API_KEY=your-ai-gateway-key
 # AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
 
+# Optional: Brave Search API key for web_search tool
+# BRAVE_API_KEY=your-brave-api-key
+
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true
 

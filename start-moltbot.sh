@@ -289,8 +289,18 @@ if (isOpenAI) {
 
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+const provider = isOpenAI ? 'openai' : (baseUrl ? 'anthropic-custom' : 'anthropic-default');
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
+console.log('Config summary:', JSON.stringify({
+    provider,
+    hasCustomBaseUrl: !!baseUrl,
+    channelsEnabled: {
+        telegram: !!config.channels.telegram?.enabled,
+        discord: !!config.channels.discord?.enabled,
+        slack: !!config.channels.slack?.enabled,
+    },
+    devMode: process.env.CLAWDBOT_DEV_MODE === 'true',
+}, null, 2));
 EOFNODE
 
 # ============================================================

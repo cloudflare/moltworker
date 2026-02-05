@@ -86,6 +86,12 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_API_KEY).toBe('sk-openai-key');
   });
 
+  it('includes BRAVE_API_KEY when set directly', () => {
+    const env = createMockEnv({ BRAVE_API_KEY: 'brave-test-key' });
+    const result = buildEnvVars(env);
+    expect(result.BRAVE_API_KEY).toBe('brave-test-key');
+  });
+
   it('maps MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN for container', () => {
     const env = createMockEnv({ MOLTBOT_GATEWAY_TOKEN: 'my-token' });
     const result = buildEnvVars(env);
@@ -127,6 +133,7 @@ describe('buildEnvVars', () => {
       ANTHROPIC_API_KEY: 'sk-key',
       MOLTBOT_GATEWAY_TOKEN: 'token',
       TELEGRAM_BOT_TOKEN: 'tg',
+      BRAVE_API_KEY: 'brave-key',
     });
     const result = buildEnvVars(env);
     
@@ -134,6 +141,7 @@ describe('buildEnvVars', () => {
       ANTHROPIC_API_KEY: 'sk-key',
       CLAWDBOT_GATEWAY_TOKEN: 'token',
       TELEGRAM_BOT_TOKEN: 'tg',
+      BRAVE_API_KEY: 'brave-key',
     });
   });
 

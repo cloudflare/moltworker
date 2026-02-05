@@ -371,6 +371,16 @@ OpenAI behavior with `AI_GATEWAY_BASE_URL=.../openai`:
 - If `OPENAI_API_KEY` and `AI_GATEWAY_API_KEY` are both set, `OPENAI_API_KEY` is used for provider auth and `AI_GATEWAY_API_KEY` is sent via `cf-aig-authorization`.
 - If `OPENAI_API_KEY` is not set, `AI_GATEWAY_API_KEY` is used as the OpenAI provider key (backward compatible behavior).
 
+### Optional: Brave Search API
+
+To enable Brave Search for web search tools, set:
+
+```bash
+npx wrangler secret put BRAVE_API_KEY
+```
+
+`BRAVE_API_KEY` is passed to the gateway process via environment variable only. It is not written to `clawdbot.json`.
+
 ## All Secrets Reference
 
 | Secret | Required | Description |
@@ -380,6 +390,7 @@ OpenAI behavior with `AI_GATEWAY_BASE_URL=.../openai`:
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (fallback if AI Gateway not configured) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL (fallback) |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
+| `BRAVE_API_KEY` | No | Brave Search API key for web_search tooling |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
 | `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
