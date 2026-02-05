@@ -408,6 +408,15 @@ app.all('*', async (c) => {
   newHeaders.set('X-Worker-Debug', 'proxy-to-moltbot');
   newHeaders.set('X-Debug-Path', url.pathname);
 
+  // Security: Prevent cache poisoning for authenticated responses
+  // Add appropriate Cache-Control headers when authentication is involved
+  const hasAuthHeader = request.headers.get('Authorization') || request.headers.get('Cookie');
+  const hasSetCookie = httpResponse.headers.get('Set-Cookie');
+  if (hasAuthHeader || hasSetCookie) {
+    newHeaders.set('Cache-Control', 'private, no-store, must-revalidate');
+    newHeaders.set('Vary', 'Authorization, Cookie');
+  }
+
   return new Response(httpResponse.body, {
     status: httpResponse.status,
     statusText: httpResponse.statusText,

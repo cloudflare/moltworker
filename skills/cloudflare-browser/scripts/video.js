@@ -19,7 +19,15 @@ if (!CDP_SECRET) {
 }
 
 const WORKER_URL = process.env.WORKER_URL.replace(/^https?:\/\//, '');
+// Keep query param for backwards compatibility
 const WS_URL = `wss://${WORKER_URL}/cdp?secret=${encodeURIComponent(CDP_SECRET)}`;
+
+// Security: Use Authorization header (preferred over query param to avoid logging secrets)
+const WS_OPTIONS = {
+  headers: {
+    'Authorization': `Bearer ${CDP_SECRET}`,
+  },
+};
 
 // Parse args
 const args = process.argv.slice(2);
@@ -44,7 +52,7 @@ async function main() {
   console.log(`Creating video from ${urls.length} URL(s)`);
   console.log(`Output: ${output}, FPS: ${fps}, Scroll: ${doScroll}\n`);
   
-  const ws = new WebSocket(WS_URL);
+  const ws = new WebSocket(WS_URL, WS_OPTIONS);
   let targetResolve;
   const targetReady = new Promise(r => { targetResolve = r; });
   
