@@ -537,7 +537,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   temperature: 0.7,
                   tools: TOOLS_WITHOUT_BROWSER,
                   toolChoice: 'auto',
-                  idleTimeoutMs: 30000, // 30s without data = timeout
+                  idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
                   onProgress: () => {
                     progressCount++;
                     // Update watchdog every 50 chunks (~every few seconds)

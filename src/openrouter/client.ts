@@ -434,7 +434,7 @@ export class OpenRouterClient {
     }
   ): Promise<ChatCompletionResponse> {
     const modelId = getModelId(modelAlias);
-    const idleTimeoutMs = options?.idleTimeoutMs ?? 30000;
+    const idleTimeoutMs = options?.idleTimeoutMs ?? 45000; // 45s default for network resilience
 
     const controller = new AbortController();
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -607,9 +607,10 @@ export class OpenRouterClient {
       if (idleTimer !== null) clearTimeout(idleTimer);
       if (err instanceof Error && err.name === 'AbortError') {
         if (chunksReceived === 0) {
-          throw new Error(`Streaming connection timeout (no response after 60s)`);
+          throw new Error(`Streaming connection timeout (no response after 60s) - model: ${modelId}`);
         } else {
-          throw new Error(`Streaming idle timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks)`);
+          // Mid-stream hang - include diagnostic info for debugging
+          throw new Error(`Streaming idle timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks) - model: ${modelId}, content_length: ${content.length}`);
         }
       }
       throw err;
