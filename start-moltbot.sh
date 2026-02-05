@@ -1,5 +1,5 @@
 #!/bin/bash
-# Force rebuild: 2026-02-05
+# Force rebuild: 2026-02-05-v2
 set -euo pipefail
 
 # Moltbot Startup Script for Cloudflare Workers
