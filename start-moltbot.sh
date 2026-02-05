@@ -214,12 +214,6 @@ config.gateway = config.gateway || {};
 config.gateway.mode = 'local';
 config.gateway.port = 18789;
 
-// Set insecure auth based on DEV_MODE
-if (process.env.CLAWDBOT_DEV_MODE === 'true') {
-  console.log('DEV_MODE enabled - allowing insecure auth');
-  config.gateway.allowInsecureAuth = true;
-}
-
 // Write updated config
 try {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
