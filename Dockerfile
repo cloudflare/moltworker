@@ -1,3 +1,4 @@
+# Force rebuild: 2026-02-05-v2
 FROM docker.io/cloudflare/sandbox:0.7.0
 
 # Install Node.js 22 (required by clawdbot) and rsync (for R2 backup sync)
