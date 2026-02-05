@@ -437,13 +437,8 @@ export class OpenRouterClient {
     const idleTimeoutMs = options?.idleTimeoutMs ?? 45000; // 45s default for network resilience
 
     const controller = new AbortController();
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let chunksReceived = 0;
-
-    const startIdleTimer = () => {
-      if (idleTimer !== null) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => controller.abort(), idleTimeoutMs);
-    };
+    let content = ''; // Declare here for error reporting
 
     try {
       // Set a timeout for the initial fetch (in case connection hangs)
@@ -485,24 +480,27 @@ export class OpenRouterClient {
       let id = '';
       let created = 0;
       let model = '';
-      let content = '';
       const toolCalls: (ToolCall | undefined)[] = [];
       let finishReason: string | null = null;
       let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
 
-      startIdleTimer(); // Start timer for first chunk
+      // Helper to timeout reader.read() - AbortController only affects fetch(), not stream reading
+      const readWithTimeout = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('STREAM_READ_TIMEOUT')), idleTimeoutMs);
+        });
+        return Promise.race([reader.read(), timeoutPromise]);
+      };
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await readWithTimeout();
 
         if (done) {
-          if (idleTimer !== null) clearTimeout(idleTimer);
           break;
         }
 
-        // Progress received → reset idle timer and notify
+        // Progress received - notify caller
         chunksReceived++;
-        startIdleTimer();
         if (options?.onProgress) {
           options.onProgress();
         }
@@ -604,13 +602,15 @@ export class OpenRouterClient {
       return completion;
 
     } catch (err: unknown) {
-      if (idleTimer !== null) clearTimeout(idleTimer);
-      if (err instanceof Error && err.name === 'AbortError') {
-        if (chunksReceived === 0) {
+      // Handle different timeout scenarios
+      if (err instanceof Error) {
+        if (err.message === 'STREAM_READ_TIMEOUT') {
+          // reader.read() hung - this is the new timeout mechanism
+          throw new Error(`Streaming read timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks) - model: ${modelId}, content_length: ${content.length}`);
+        }
+        if (err.name === 'AbortError') {
+          // Initial fetch timed out
           throw new Error(`Streaming connection timeout (no response after 60s) - model: ${modelId}`);
-        } else {
-          // Mid-stream hang - include diagnostic info for debugging
-          throw new Error(`Streaming idle timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks) - model: ${modelId}, content_length: ${content.length}`);
         }
       }
       throw err;
