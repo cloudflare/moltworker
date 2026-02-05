@@ -250,4 +250,4 @@ if [ ! -x "$(command -v clawdbot)" ]; then
 fi
 
 # Start the gateway with explicit binding
-exec clawdbot gateway --bind custom --port 18789
+exec clawdbot gateway --bind lan --port 18789
