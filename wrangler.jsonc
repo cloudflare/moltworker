@@ -35,7 +35,7 @@
       "image": "./Dockerfile",
       "instance_type": "standard-4",
       "max_instances": 1,
-      "name": "moltbot-sandbox-v2"
+      "name": "moltbot-sandbox-sandbox"
     }
   ],
   "durable_objects": {
