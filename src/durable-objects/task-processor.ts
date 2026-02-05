@@ -122,7 +122,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       await this.sendTelegramMessageWithButtons(
         task.telegramToken,
         task.chatId,
-        `⚠️ Task stopped unexpectedly after ${elapsed}s (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\nThis usually happens when the task uses too much CPU. Try simplifying your request.\n\n💡 Progress saved.`,
+        `⚠️ Task stopped unexpectedly after ${elapsed}s (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\nThis can happen due to API timeouts or network issues. Tap Resume to continue.\n\n💡 Progress saved.`,
         [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
       );
     }
