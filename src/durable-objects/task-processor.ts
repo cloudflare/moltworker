@@ -566,7 +566,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         };
 
         try {
-          result = await response.json();
+          console.log(`[TaskProcessor] Reading response body...`);
+          const responseText = await response.text();
+          console.log(`[TaskProcessor] Response size: ${responseText.length} chars`);
+
+          console.log(`[TaskProcessor] Parsing JSON...`);
+          result = JSON.parse(responseText);
+          console.log(`[TaskProcessor] JSON parsed successfully`);
         } catch (parseError) {
           throw new Error(`Failed to parse API response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
         }
