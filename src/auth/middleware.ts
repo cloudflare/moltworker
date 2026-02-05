@@ -79,8 +79,19 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
 
     // Get JWT
     const jwt = extractJWT(c);
+    const clientIP = c.req.header('CF-Connecting-IP') || 'unknown';
+    const path = c.req.path;
 
     if (!jwt) {
+      // Security: Log authentication failure
+      console.log(JSON.stringify({
+        event: 'auth_failure',
+        reason: 'missing_jwt',
+        ip: clientIP,
+        path,
+        timestamp: new Date().toISOString(),
+      }));
+
       if (type === 'html' && redirectOnMissing) {
         return c.redirect(`https://${teamDomain}`, 302);
       }
@@ -107,9 +118,27 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
     try {
       const payload = await verifyAccessJWT(jwt, teamDomain, expectedAud);
       c.set('accessUser', { email: payload.email, name: payload.name });
+      
+      // Security: Log successful authentication
+      console.log(JSON.stringify({
+        event: 'auth_success',
+        email: payload.email,
+        ip: clientIP,
+        path,
+        timestamp: new Date().toISOString(),
+      }));
+      
       await next();
     } catch (err) {
-      console.error('Access JWT verification failed:', err);
+      // Security: Log authentication failure with details
+      console.log(JSON.stringify({
+        event: 'auth_failure',
+        reason: 'invalid_jwt',
+        error: err instanceof Error ? err.message : 'Unknown error',
+        ip: clientIP,
+        path,
+        timestamp: new Date().toISOString(),
+      }));
       
       if (type === 'json') {
         return c.json({

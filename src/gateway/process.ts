@@ -5,6 +5,39 @@ import { buildEnvVars } from './env';
 import { mountR2Storage } from './r2';
 
 /**
+ * In-memory lock to prevent race conditions during gateway startup
+ */
+let gatewayLock: Promise<void> | null = null;
+
+/**
+ * Execute a function with the gateway lock held
+ */
+async function withGatewayLock<T>(fn: () => Promise<T>): Promise<T> {
+  // Wait for any existing lock to release
+  while (gatewayLock) {
+    try {
+      await gatewayLock;
+    } catch {
+      // Ignore errors from previous lock holder
+    }
+  }
+  
+  // Acquire the lock
+  let resolveLock: () => void;
+  gatewayLock = new Promise((resolve) => {
+    resolveLock = resolve;
+  });
+  
+  try {
+    return await fn();
+  } finally {
+    // Release the lock
+    resolveLock!();
+    gatewayLock = null;
+  }
+}
+
+/**
  * Find an existing Moltbot gateway process
  * 
  * @param sandbox - The sandbox instance
@@ -48,12 +81,14 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
  * @returns The running gateway process
  */
 export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): Promise<Process> {
-  // Mount R2 storage for persistent data (non-blocking if not configured)
-  // R2 is used as a backup - the startup script will restore from it on boot
-  await mountR2Storage(sandbox, env);
+  // Security: Use lock to prevent race conditions during gateway startup
+  return withGatewayLock(async () => {
+    // Mount R2 storage for persistent data (non-blocking if not configured)
+    // R2 is used as a backup - the startup script will restore from it on boot
+    await mountR2Storage(sandbox, env);
 
-  // Check if Moltbot is already running or starting
-  const existingProcess = await findExistingMoltbotProcess(sandbox);
+    // Check if Moltbot is already running or starting
+    const existingProcess = await findExistingMoltbotProcess(sandbox);
   if (existingProcess) {
     console.log('Found existing Moltbot process:', existingProcess.id, 'status:', existingProcess.status);
 
@@ -82,7 +117,8 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   const command = '/usr/local/bin/start-moltbot.sh';
 
   console.log('Starting process with command:', command);
-  console.log('Environment vars being passed:', Object.keys(envVars));
+  // Security: Only log count, not names (which could reveal secret types)
+  console.log('Environment vars count:', Object.keys(envVars).length);
 
   let process: Process;
   try {
@@ -121,4 +157,5 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   console.log('[Gateway] Verifying gateway health...');
   
   return process;
+  }); // End withGatewayLock
 }
