@@ -446,6 +446,9 @@ export class OpenRouterClient {
     };
 
     try {
+      // Set a timeout for the initial fetch (in case connection hangs)
+      const fetchTimeout = setTimeout(() => controller.abort(), 60000); // 60s for initial connection
+
       const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
         method: 'POST',
         headers: this.getHeaders(),
@@ -461,6 +464,8 @@ export class OpenRouterClient {
           stream_options: { include_usage: true },
         }),
       });
+
+      clearTimeout(fetchTimeout); // Clear fetch timeout once we have response
 
       if (!response.ok || !response.body) {
         const errorText = await response.text().catch(() => 'unknown');
@@ -596,7 +601,11 @@ export class OpenRouterClient {
     } catch (err: unknown) {
       if (idleTimer !== null) clearTimeout(idleTimer);
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`Streaming idle timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks)`);
+        if (chunksReceived === 0) {
+          throw new Error(`Streaming connection timeout (no response after 60s)`);
+        } else {
+          throw new Error(`Streaming idle timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks)`);
+        }
       }
       throw err;
     }
