@@ -10,7 +10,7 @@ This is a Cloudflare Worker that runs [Moltbot](https://molt.bot/) in a Cloudfla
 - API endpoints at `/api/*` for device pairing
 - Debug endpoints at `/debug/*` for troubleshooting
 
-**Note:** The CLI tool is still named `clawdbot` (upstream hasn't renamed yet), so CLI commands and internal config paths still use that name.
+**Note:** Upstream is now OpenClaw. This repo supports both `openclaw` (preferred) and legacy `clawdbot` as fallback.
 
 ## Project Structure
 
@@ -50,9 +50,9 @@ src/
 ### CLI Commands
 
 When calling the moltbot CLI from the worker, always include `--url ws://localhost:18789`.
-Note: The CLI is still named `clawdbot` until upstream renames it:
+Prefer `openclaw` and keep `clawdbot` fallback:
 ```typescript
-sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789')
+sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789')
 ```
 
 CLI commands take 10-15 seconds due to WebSocket connection overhead. Use `waitForProcess()` helper in `src/routes/api.ts`.
@@ -176,7 +176,7 @@ The Dockerfile includes a cache bust comment. When changing `moltbot.json.templa
 
 Moltbot configuration is built at container startup:
 
-1. `moltbot.json.template` is copied to `~/.clawdbot/clawdbot.json` (internal path unchanged)
+1. `moltbot.json.template` is copied to config path (`~/.openclaw/openclaw.json` preferred, `~/.clawdbot/clawdbot.json` fallback)
 2. `start-moltbot.sh` updates the config with values from environment variables
 3. Gateway starts with `--allow-unconfigured` flag (skips onboarding wizard)
 

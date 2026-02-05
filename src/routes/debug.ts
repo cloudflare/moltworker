@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { findExistingMoltbotProcess } from '../gateway';
+import { buildCliCommand, findExistingMoltbotProcess } from '../gateway';
 
 /**
  * Debug routes for inspecting container state
@@ -13,8 +13,8 @@ const debug = new Hono<AppEnv>();
 debug.get('/version', async (c) => {
   const sandbox = c.get('sandbox');
   try {
-    // Get moltbot version (CLI is still named clawdbot until upstream renames)
-    const versionProcess = await sandbox.startProcess('clawdbot --version');
+    // Get moltbot version (prefer openclaw, fallback to clawdbot)
+    const versionProcess = await sandbox.startProcess(buildCliCommand('--version'));
     await new Promise(resolve => setTimeout(resolve, 500));
     const versionLogs = await versionProcess.getLogs();
     const moltbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
@@ -123,10 +123,10 @@ debug.get('/gateway-api', async (c) => {
   }
 });
 
-// GET /debug/cli - Test moltbot CLI commands (CLI is still named clawdbot)
+// GET /debug/cli - Test moltbot CLI commands
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
-  const cmd = c.req.query('cmd') || 'clawdbot --help';
+  const cmd = c.req.query('cmd') || buildCliCommand('--help');
   
   try {
     const proc = await sandbox.startProcess(cmd);
@@ -358,7 +358,13 @@ debug.get('/container-config', async (c) => {
   const sandbox = c.get('sandbox');
   
   try {
-    const proc = await sandbox.startProcess('cat /root/.clawdbot/clawdbot.json');
+    const proc = await sandbox.startProcess(
+      'if [ -f /root/.openclaw/openclaw.json ]; then cat /root/.openclaw/openclaw.json; ' +
+      'elif [ -f /root/.openclaw/clawdbot.json ]; then cat /root/.openclaw/clawdbot.json; ' +
+      'elif [ -f /root/.clawdbot/openclaw.json ]; then cat /root/.clawdbot/openclaw.json; ' +
+      'elif [ -f /root/.clawdbot/clawdbot.json ]; then cat /root/.clawdbot/clawdbot.json; ' +
+      'else echo "No config file found" >&2; exit 1; fi'
+    );
     
     let attempts = 0;
     while (attempts < 10) {

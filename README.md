@@ -379,7 +379,7 @@ To enable Brave Search for web search tools, set:
 npx wrangler secret put BRAVE_API_KEY
 ```
 
-`BRAVE_API_KEY` is passed to the gateway process via environment variable only. It is not written to `clawdbot.json`.
+`BRAVE_API_KEY` is passed to the gateway process via environment variable only. It is not written to the persisted config JSON (`openclaw.json` / `clawdbot.json`).
 
 ## All Secrets Reference
 

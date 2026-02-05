@@ -39,7 +39,7 @@ describe('syncToR2', () => {
   });
 
   describe('sanity checks', () => {
-    it('returns error when source is missing clawdbot.json', async () => {
+    it('returns error when source is missing config json', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
@@ -49,9 +49,8 @@ describe('syncToR2', () => {
 
       const result = await syncToR2(sandbox, env);
 
-      // Error message still references clawdbot.json since that's the actual file name
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Sync aborted: source missing clawdbot.json');
+      expect(result.error).toBe('Sync aborted: source missing config json');
       expect(result.details).toContain('missing critical files');
     });
   });
@@ -108,11 +107,12 @@ describe('syncToR2', () => {
 
       await syncToR2(sandbox, env);
 
-      // Third call should be rsync (paths still use clawdbot internally)
+      // Third call should be rsync command for openclaw/clawdbot compatibility
       const rsyncCall = startProcessMock.mock.calls[2][0];
       expect(rsyncCall).toContain('rsync');
       expect(rsyncCall).toContain('--no-times');
       expect(rsyncCall).toContain('--delete');
+      expect(rsyncCall).toContain('/root/.openclaw/');
       expect(rsyncCall).toContain('/root/.clawdbot/');
       expect(rsyncCall).toContain('/data/moltbot/');
     });
