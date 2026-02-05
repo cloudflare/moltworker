@@ -504,56 +504,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         console.log(`[TaskProcessor] Using provider: ${provider}, URL: ${providerConfig.baseUrl}`);
 
-        // Make API call with timeout and heartbeat
-        // Heartbeat keeps the DO active during long waits
-        let response: Response;
-        let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-        try {
-          console.log(`[TaskProcessor] Starting API call...`);
-
-          // Heartbeat every 10 seconds to keep DO active and track progress
-          let heartbeatCount = 0;
-          heartbeatInterval = setInterval(() => {
-            heartbeatCount++;
-            console.log(`[TaskProcessor] Heartbeat #${heartbeatCount} - API call still in progress (${heartbeatCount * 10}s)`);
-            // Update lastUpdate to prevent watchdog from triggering
-            task.lastUpdate = Date.now();
-            this.doState.storage.put('task', task).catch(() => {});
-          }, 10000);
-
-          const fetchPromise = fetch(providerConfig.baseUrl, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              model: modelId,
-              messages: conversationMessages,
-              max_tokens: 4096,
-              temperature: 0.7,
-              tools: TOOLS_WITHOUT_BROWSER,
-              tool_choice: 'auto',
-            }),
-          });
-
-          // 5 minute timeout per API call (complex tasks need time)
-          const timeoutPromise = new Promise<Response>((_, reject) => {
-            setTimeout(() => reject(new Error(`${provider} API timeout (5 min)`)), 300000);
-          });
-
-          response = await Promise.race([fetchPromise, timeoutPromise]);
-          console.log(`[TaskProcessor] API call completed with status: ${response.status}`);
-        } catch (fetchError) {
-          throw new Error(`${provider} API fetch failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
-        } finally {
-          if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-          }
-        }
-
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => 'unknown error');
-          throw new Error(`${provider} API error (${response.status}): ${errorText.slice(0, 200)}`);
-        }
-
+        // Retry loop for API calls - DeepSeek sometimes hangs during response streaming
+        const MAX_API_RETRIES = 3;
         let result: {
           choices: Array<{
             message: {
@@ -563,45 +515,113 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             };
             finish_reason: string;
           }>;
-        };
+        } | null = null;
+        let lastError: Error | null = null;
 
-        try {
-          console.log(`[TaskProcessor] Reading response body...`);
-
-          // Wrap response.text() in a timeout to catch hangs
-          // Also keep heartbeat running to prevent hibernation
-          let readHeartbeat: ReturnType<typeof setInterval> | null = null;
-          let readHeartbeatCount = 0;
+        for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
+          // Make API call with timeout and heartbeat
+          // Heartbeat keeps the DO active during long waits
+          let response: Response;
+          let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
           try {
-            readHeartbeat = setInterval(() => {
-              readHeartbeatCount++;
-              console.log(`[TaskProcessor] Reading body heartbeat #${readHeartbeatCount} (${readHeartbeatCount * 2}s)`);
+            console.log(`[TaskProcessor] Starting API call (attempt ${attempt}/${MAX_API_RETRIES})...`);
+
+            // Heartbeat every 10 seconds to keep DO active and track progress
+            let heartbeatCount = 0;
+            heartbeatInterval = setInterval(() => {
+              heartbeatCount++;
+              console.log(`[TaskProcessor] Heartbeat #${heartbeatCount} - API call still in progress (${heartbeatCount * 10}s)`);
+              // Update lastUpdate to prevent watchdog from triggering
               task.lastUpdate = Date.now();
               this.doState.storage.put('task', task).catch(() => {});
-            }, 2000); // More frequent: every 2 seconds
+            }, 10000);
 
-            // Timeout after 30 seconds - if response.text() takes longer, something is wrong
-            const textPromise = response.text();
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(() => reject(new Error('response.text() timeout after 30s')), 30000);
+            const fetchPromise = fetch(providerConfig.baseUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                model: modelId,
+                messages: conversationMessages,
+                max_tokens: 4096,
+                temperature: 0.7,
+                tools: TOOLS_WITHOUT_BROWSER,
+                tool_choice: 'auto',
+              }),
             });
 
-            const responseText = await Promise.race([textPromise, timeoutPromise]);
-            console.log(`[TaskProcessor] Response size: ${responseText.length} chars`);
+            // 5 minute timeout per API call (complex tasks need time)
+            const timeoutPromise = new Promise<Response>((_, reject) => {
+              setTimeout(() => reject(new Error(`${provider} API timeout (5 min)`)), 300000);
+            });
 
-            console.log(`[TaskProcessor] Parsing JSON...`);
-            result = JSON.parse(responseText);
-            console.log(`[TaskProcessor] JSON parsed successfully`);
+            response = await Promise.race([fetchPromise, timeoutPromise]);
+            console.log(`[TaskProcessor] API call completed with status: ${response.status}`);
+          } catch (fetchError) {
+            lastError = new Error(`${provider} API fetch failed: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+            console.log(`[TaskProcessor] API fetch failed (attempt ${attempt}): ${lastError.message}`);
+            if (attempt < MAX_API_RETRIES) {
+              console.log(`[TaskProcessor] Retrying in 2 seconds...`);
+              await new Promise(r => setTimeout(r, 2000));
+              continue;
+            }
+            throw lastError;
           } finally {
-            if (readHeartbeat) {
-              clearInterval(readHeartbeat);
+            if (heartbeatInterval) {
+              clearInterval(heartbeatInterval);
             }
           }
-        } catch (parseError) {
-          throw new Error(`Failed to parse API response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+
+          if (!response.ok) {
+            const errorText = await response.text().catch(() => 'unknown error');
+            throw new Error(`${provider} API error (${response.status}): ${errorText.slice(0, 200)}`);
+          }
+
+          try {
+            console.log(`[TaskProcessor] Reading response body...`);
+
+            // Wrap response.text() in a timeout to catch hangs
+            // Also keep heartbeat running to prevent hibernation
+            let readHeartbeat: ReturnType<typeof setInterval> | null = null;
+            let readHeartbeatCount = 0;
+            try {
+              readHeartbeat = setInterval(() => {
+                readHeartbeatCount++;
+                console.log(`[TaskProcessor] Reading body heartbeat #${readHeartbeatCount} (${readHeartbeatCount * 2}s)`);
+                task.lastUpdate = Date.now();
+                this.doState.storage.put('task', task).catch(() => {});
+              }, 2000); // More frequent: every 2 seconds
+
+              // Timeout after 30 seconds - if response.text() takes longer, something is wrong
+              const textPromise = response.text();
+              const textTimeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error('response.text() timeout after 30s')), 30000);
+              });
+
+              const responseText = await Promise.race([textPromise, textTimeoutPromise]);
+              console.log(`[TaskProcessor] Response size: ${responseText.length} chars`);
+
+              console.log(`[TaskProcessor] Parsing JSON...`);
+              result = JSON.parse(responseText);
+              console.log(`[TaskProcessor] JSON parsed successfully`);
+              break; // Success! Exit retry loop
+            } finally {
+              if (readHeartbeat) {
+                clearInterval(readHeartbeat);
+              }
+            }
+          } catch (parseError) {
+            lastError = new Error(`Failed to parse API response: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+            console.log(`[TaskProcessor] Response parsing failed (attempt ${attempt}): ${lastError.message}`);
+            if (attempt < MAX_API_RETRIES) {
+              console.log(`[TaskProcessor] Retrying API call in 2 seconds...`);
+              await new Promise(r => setTimeout(r, 2000));
+              continue;
+            }
+            throw lastError;
+          }
         }
 
-        if (!result.choices || !result.choices[0]) {
+        if (!result || !result.choices || !result.choices[0]) {
           throw new Error('Invalid API response: no choices returned');
         }
 
