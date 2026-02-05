@@ -414,6 +414,195 @@ export class OpenRouterClient {
   }
 
   /**
+   * Streaming chat completion with tool calls support
+   * Uses SSE streaming to avoid response.text() hangs
+   * Returns the same structure as non-streaming for easy integration
+   *
+   * @param idleTimeoutMs - Time without receiving data before aborting (default 30s)
+   * @param onProgress - Callback when data is received (for heartbeat/watchdog updates)
+   */
+  async chatCompletionStreamingWithTools(
+    modelAlias: string,
+    messages: ChatMessage[],
+    options?: {
+      maxTokens?: number;
+      temperature?: number;
+      tools?: ToolDefinition[];
+      toolChoice?: 'auto' | 'none';
+      idleTimeoutMs?: number;
+      onProgress?: () => void; // Called when chunks received - use for heartbeat
+    }
+  ): Promise<ChatCompletionResponse> {
+    const modelId = getModelId(modelAlias);
+    const idleTimeoutMs = options?.idleTimeoutMs ?? 30000;
+
+    const controller = new AbortController();
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let chunksReceived = 0;
+
+    const startIdleTimer = () => {
+      if (idleTimer !== null) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), idleTimeoutMs);
+    };
+
+    try {
+      const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: modelId,
+          messages,
+          max_tokens: options?.maxTokens || 4096,
+          temperature: options?.temperature ?? 0.7,
+          tools: options?.tools,
+          tool_choice: options?.toolChoice ?? 'auto',
+          stream: true,
+          stream_options: { include_usage: true },
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        const errorText = await response.text().catch(() => 'unknown');
+        throw new Error(`OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // Accumulated state
+      let id = '';
+      let created = 0;
+      let model = '';
+      let content = '';
+      const toolCalls: (ToolCall | undefined)[] = [];
+      let finishReason: string | null = null;
+      let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
+
+      startIdleTimer(); // Start timer for first chunk
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          if (idleTimer !== null) clearTimeout(idleTimer);
+          break;
+        }
+
+        // Progress received → reset idle timer and notify
+        chunksReceived++;
+        startIdleTimer();
+        if (options?.onProgress) {
+          options.onProgress();
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete lines
+        const parts = buffer.split('\n');
+        buffer = parts.pop() || ''; // Last part may be incomplete
+
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (!trimmed) continue;
+
+          if (trimmed.startsWith('data: ')) {
+            const data = trimmed.slice(6).trim();
+
+            if (data === '[DONE]') continue;
+
+            try {
+              const chunk: {
+                id?: string;
+                created?: number;
+                model?: string;
+                usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+                choices?: Array<{
+                  finish_reason?: string | null;
+                  delta?: {
+                    content?: string;
+                    tool_calls?: Array<{
+                      index?: number;
+                      id?: string;
+                      type?: string;
+                      function?: {
+                        name?: string;
+                        arguments?: string;
+                      };
+                    }>;
+                  };
+                }>;
+              } = JSON.parse(data);
+
+              // Top-level metadata
+              if (chunk.id) id = chunk.id;
+              if (chunk.created) created = chunk.created;
+              if (chunk.model) model = chunk.model;
+              if (chunk.usage) usage = chunk.usage;
+
+              const choice = chunk.choices?.[0];
+              if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+              const delta = choice?.delta;
+              if (delta?.content) content += delta.content;
+
+              if (delta?.tool_calls) {
+                for (const tcDelta of delta.tool_calls) {
+                  const index = tcDelta.index ?? toolCalls.length;
+                  let tc = toolCalls[index];
+
+                  if (!tc) {
+                    tc = { id: '', type: 'function', function: { name: '', arguments: '' } };
+                    toolCalls[index] = tc;
+                  }
+
+                  if (tcDelta.id) tc.id = tcDelta.id;
+                  if (tcDelta.type) tc.type = tcDelta.type as 'function';
+                  if (tcDelta.function?.name) tc.function.name = tcDelta.function.name;
+                  if (tcDelta.function?.arguments !== undefined) {
+                    tc.function.arguments += tcDelta.function.arguments;
+                  }
+                }
+              }
+            } catch (e) {
+              console.error('[OpenRouterClient] Failed to parse SSE chunk:', data, e);
+              // Continue — malformed chunks are rare but recoverable
+            }
+          }
+        }
+      }
+
+      // Build final response matching ChatCompletionResponse structure
+      const completion: ChatCompletionResponse = {
+        id: id || 'unknown',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: content || null,
+            tool_calls: toolCalls.length > 0
+              ? toolCalls.filter((tc): tc is ToolCall => tc !== undefined)
+              : undefined,
+          },
+          finish_reason: finishReason ?? 'stop',
+        }],
+        usage,
+      };
+
+      console.log(`[OpenRouterClient] Streaming complete: ${chunksReceived} chunks received`);
+      return completion;
+
+    } catch (err: unknown) {
+      if (idleTimer !== null) clearTimeout(idleTimer);
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Streaming idle timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks)`);
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Get available models from OpenRouter
    */
   async listModels(): Promise<unknown> {
