@@ -3,6 +3,34 @@ import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH, getR2BucketName } from '../config';
 
 /**
+ * Lock to prevent race conditions during mount operations
+ */
+let mountLock: Promise<void> | null = null;
+
+/**
+ * Execute a function with a lock to prevent concurrent mount operations
+ */
+async function withMountLock<T>(fn: () => Promise<T>): Promise<T> {
+  // Wait for any existing lock to complete
+  while (mountLock) {
+    await mountLock;
+  }
+  
+  // Create our lock
+  let releaseLock: () => void;
+  mountLock = new Promise((resolve) => {
+    releaseLock = resolve;
+  });
+  
+  try {
+    return await fn();
+  } finally {
+    mountLock = null;
+    releaseLock!();
+  }
+}
+
+/**
  * Check if R2 is already mounted by looking at the mount table
  */
 async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
@@ -33,43 +61,45 @@ async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
  * @returns true if mounted successfully, false otherwise
  */
 export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
-  // Skip if R2 credentials are not configured
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
-    console.log('R2 storage not configured (missing R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, or CF_ACCOUNT_ID)');
-    return false;
-  }
+  return withMountLock(async () => {
+    // Skip if R2 credentials are not configured
+    if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
+      console.log('R2 storage not configured (missing R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, or CF_ACCOUNT_ID)');
+      return false;
+    }
 
-  // Check if already mounted first - this avoids errors and is faster
-  if (await isR2Mounted(sandbox)) {
-    console.log('R2 bucket already mounted at', R2_MOUNT_PATH);
-    return true;
-  }
-
-  const bucketName = getR2BucketName(env);
-  try {
-    console.log('Mounting R2 bucket', bucketName, 'at', R2_MOUNT_PATH);
-    await sandbox.mountBucket(bucketName, R2_MOUNT_PATH, {
-      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      // Pass credentials explicitly since we use R2_* naming instead of AWS_*
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      },
-    });
-    console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
-    return true;
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.log('R2 mount error:', errorMessage);
-    
-    // Check again if it's mounted - the error might be misleading
+    // Check if already mounted first - this avoids errors and is faster
     if (await isR2Mounted(sandbox)) {
-      console.log('R2 bucket is mounted despite error');
+      console.log('R2 bucket already mounted at', R2_MOUNT_PATH);
       return true;
     }
-    
-    // Don't fail if mounting fails - moltbot can still run without persistent storage
-    console.error('Failed to mount R2 bucket:', err);
-    return false;
-  }
+
+    const bucketName = getR2BucketName(env);
+    try {
+      console.log('Mounting R2 bucket', bucketName, 'at', R2_MOUNT_PATH);
+      await sandbox.mountBucket(bucketName, R2_MOUNT_PATH, {
+        endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+        // Pass credentials explicitly since we use R2_* naming instead of AWS_*
+        credentials: {
+          accessKeyId: env.R2_ACCESS_KEY_ID,
+          secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+        },
+      });
+      console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
+      return true;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.log('R2 mount error:', errorMessage);
+      
+      // Check again if it's mounted - the error might be misleading
+      if (await isR2Mounted(sandbox)) {
+        console.log('R2 bucket is mounted despite error');
+        return true;
+      }
+      
+      // Don't fail if mounting fails - moltbot can still run without persistent storage
+      console.error('Failed to mount R2 bucket:', err);
+      return false;
+    }
+  });
 }

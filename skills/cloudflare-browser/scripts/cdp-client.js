@@ -22,11 +22,19 @@ function createClient(options = {}) {
   }
   
   const workerUrl = (options.workerUrl || process.env.WORKER_URL).replace(/^https?:\/\//, '');
+  // Keep query param for backwards compatibility, but also use Authorization header (preferred)
   const wsUrl = `wss://${workerUrl}/cdp?secret=${encodeURIComponent(CDP_SECRET)}`;
   const timeout = options.timeout || 60000;
   
+  // Security: Use Authorization header (preferred over query param to avoid logging secrets)
+  const WS_OPTIONS = {
+    headers: {
+      'Authorization': `Bearer ${CDP_SECRET}`,
+    },
+  };
+  
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(wsUrl, WS_OPTIONS);
     let messageId = 1;
     const pending = new Map();
     let targetId = null;

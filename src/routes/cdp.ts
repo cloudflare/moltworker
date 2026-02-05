@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, MoltbotEnv } from '../types';
 import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
+import { cdpRateLimit } from '../middleware';
 
 /**
  * CDP (Chrome DevTools Protocol) WebSocket shim
@@ -8,7 +9,8 @@ import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
  * Implements a subset of the CDP protocol over WebSocket, translating commands
  * to Cloudflare Browser Rendering binding calls (Puppeteer interface).
  * 
- * Authentication: Pass secret as query param `?secret=<secret>` on WebSocket connect.
+ * Authentication: Pass secret via Authorization: Bearer header (preferred) or
+ * as query param `?secret=<secret>` on WebSocket connect (fallback for compatibility).
  * This route is intentionally NOT protected by Cloudflare Access.
  * 
  * Supported CDP domains:
@@ -22,6 +24,24 @@ import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
  * - Emulation: setDeviceMetricsOverride, setUserAgentOverride
  */
 const cdp = new Hono<AppEnv>();
+
+// Apply rate limiting to all CDP routes
+cdp.use('*', cdpRateLimit);
+
+/**
+ * Extract CDP secret from Authorization header (preferred) or query param (fallback)
+ * Prefers Authorization header to avoid logging secrets in URLs
+ */
+function extractCDPSecret(c: { req: { header: (name: string) => string | undefined; url: string } }): string | null {
+  // Prefer Authorization: Bearer header
+  const authHeader = c.req.header('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  // Fallback to query param for backwards compatibility
+  const url = new URL(c.req.url);
+  return url.searchParams.get('secret');
+}
 
 /**
  * CDP Message types
@@ -152,9 +172,8 @@ cdp.get('/', async (c) => {
     });
   }
 
-  // Verify secret from query param
-  const url = new URL(c.req.url);
-  const providedSecret = url.searchParams.get('secret');
+  // Verify secret from Authorization header (preferred) or query param (fallback)
+  const providedSecret = extractCDPSecret(c);
   const expectedSecret = c.env.CDP_SECRET;
 
   if (!expectedSecret) {
@@ -201,9 +220,9 @@ cdp.get('/', async (c) => {
  * Authentication: Pass secret as query param `?secret=<CDP_SECRET>`
  */
 cdp.get('/json/version', async (c) => {
-  // Verify secret from query param
+  // Verify secret from Authorization header (preferred) or query param (fallback)
   const url = new URL(c.req.url);
-  const providedSecret = url.searchParams.get('secret');
+  const providedSecret = extractCDPSecret(c);
   const expectedSecret = c.env.CDP_SECRET;
 
   if (!expectedSecret) {
@@ -247,9 +266,9 @@ cdp.get('/json/version', async (c) => {
  * Authentication: Pass secret as query param `?secret=<CDP_SECRET>`
  */
 cdp.get('/json/list', async (c) => {
-  // Verify secret from query param
+  // Verify secret from Authorization header (preferred) or query param (fallback)
   const url = new URL(c.req.url);
-  const providedSecret = url.searchParams.get('secret');
+  const providedSecret = extractCDPSecret(c);
   const expectedSecret = c.env.CDP_SECRET;
 
   if (!expectedSecret) {
@@ -296,8 +315,8 @@ cdp.get('/json', async (c) => {
   const url = new URL(c.req.url);
   url.pathname = url.pathname.replace(/\/json\/?$/, '/json/list');
   
-  // Verify secret from query param
-  const providedSecret = url.searchParams.get('secret');
+  // Verify secret from Authorization header (preferred) or query param (fallback)
+  const providedSecret = extractCDPSecret(c);
   const expectedSecret = c.env.CDP_SECRET;
 
   if (!expectedSecret) {
@@ -1265,6 +1284,23 @@ async function handleDOM(
       
       if (!selector) throw new Error(`Node not found: ${nodeId}`);
       
+      // Security: Validate file paths to prevent path traversal
+      const ALLOWED_BASE = '/root/clawd';
+      for (const filePath of files) {
+        // Normalize path to detect traversal attempts
+        const normalized = filePath.replace(/\/+/g, '/').replace(/\.\./g, '');
+        
+        // Block absolute paths outside allowed base
+        if (filePath.startsWith('/') && !normalized.startsWith(ALLOWED_BASE)) {
+          throw new Error(`Path not allowed: ${filePath}. Files must be within ${ALLOWED_BASE}`);
+        }
+        
+        // Block path traversal attempts
+        if (filePath.includes('..')) {
+          throw new Error(`Path traversal not allowed: ${filePath}`);
+        }
+      }
+      
       const element = await page.$(selector);
       if (element) {
         // Cast to input element handle for uploadFile
@@ -1758,10 +1794,16 @@ async function handleFetch(
       
       const request = pending.request as unknown as { respond: (opts: Record<string, unknown>) => Promise<void> };
       
+      // Security: Sanitize headers to prevent CRLF injection
       const headers: Record<string, string> = {};
       if (responseHeaders) {
         for (const h of responseHeaders) {
-          headers[h.name] = h.value;
+          // Remove CR, LF, and null bytes to prevent header injection
+          const name = String(h.name).replace(/[\r\n\x00]/g, '');
+          const value = String(h.value).replace(/[\r\n\x00]/g, '');
+          if (name) {
+            headers[name] = value;
+          }
         }
       }
       

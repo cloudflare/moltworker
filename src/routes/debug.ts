@@ -94,13 +94,35 @@ debug.get('/processes', async (c) => {
 });
 
 // GET /debug/gateway-api - Probe the moltbot gateway HTTP API
+// Security: Only allow whitelisted paths to prevent SSRF
 debug.get('/gateway-api', async (c) => {
   const sandbox = c.get('sandbox');
   const path = c.req.query('path') || '/';
   const MOLTBOT_PORT = 18789;
   
+  // Whitelist of allowed paths to prevent SSRF
+  const ALLOWED_PATHS = new Set([
+    '/',
+    '/health',
+    '/status',
+    '/version',
+    '/api/status',
+    '/api/version',
+  ]);
+  
+  // Normalize path and validate
+  const normalizedPath = path.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+  
+  if (!ALLOWED_PATHS.has(normalizedPath)) {
+    return c.json({
+      error: 'Path not allowed',
+      allowedPaths: Array.from(ALLOWED_PATHS),
+      provided: normalizedPath,
+    }, 403);
+  }
+  
   try {
-    const url = `http://localhost:${MOLTBOT_PORT}${path}`;
+    const url = `http://localhost:${MOLTBOT_PORT}${normalizedPath}`;
     const response = await sandbox.containerFetch(new Request(url), MOLTBOT_PORT);
     const contentType = response.headers.get('content-type') || '';
     
@@ -112,14 +134,14 @@ debug.get('/gateway-api', async (c) => {
     }
     
     return c.json({
-      path,
+      path: normalizedPath,
       status: response.status,
       contentType,
       body,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage, path }, 500);
+    return c.json({ error: errorMessage, path: normalizedPath }, 500);
   }
 });
 
@@ -204,10 +226,19 @@ debug.get('/logs', async (c) => {
 });
 
 // GET /debug/ws-test - Interactive WebSocket debug page
+// Security: Validate host header and escape output to prevent XSS
 debug.get('/ws-test', async (c) => {
-  const host = c.req.header('host') || 'localhost';
+  let host = c.req.header('host') || 'localhost';
   const protocol = c.req.header('x-forwarded-proto') || 'https';
   const wsProtocol = protocol === 'https' ? 'wss' : 'ws';
+  
+  // Security: Validate host header to prevent injection
+  if (!/^[a-zA-Z0-9.-]+(:\d+)?$/.test(host)) {
+    host = 'localhost';
+  }
+  
+  // Security: Use JSON.stringify for safe embedding in JavaScript
+  const safeWsUrl = JSON.stringify(`${wsProtocol}://${host}/`);
   
   const html = `<!DOCTYPE html>
 <html>
@@ -241,13 +272,15 @@ debug.get('/ws-test', async (c) => {
   <div id="log"></div>
   
   <script>
-    const wsUrl = '${wsProtocol}://${host}/';
+    const wsUrl = ${safeWsUrl};
     let ws = null;
     
     const log = (msg, className = '') => {
       const logEl = document.getElementById('log');
       const time = new Date().toISOString().substr(11, 12);
-      logEl.innerHTML += '<span class="' + className + '">[' + time + '] ' + msg + '</span>\\n';
+      // Security: Escape HTML to prevent XSS
+      const escaped = msg.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      logEl.innerHTML += '<span class="' + className + '">[' + time + '] ' + escaped + '</span>\\n';
       logEl.scrollTop = logEl.scrollHeight;
     };
     
@@ -354,8 +387,49 @@ debug.get('/env', async (c) => {
 });
 
 // GET /debug/container-config - Read the moltbot config from inside the container
+// Security: Redact sensitive fields before returning
 debug.get('/container-config', async (c) => {
   const sandbox = c.get('sandbox');
+  
+  // Patterns that indicate sensitive data
+  const SENSITIVE_PATTERNS = /key|token|secret|password|credential|auth/i;
+  
+  /**
+   * Recursively redact sensitive fields in an object
+   */
+  function redactSensitive(obj: unknown, path = ''): unknown {
+    if (obj === null || obj === undefined) {
+      return obj;
+    }
+    
+    if (typeof obj === 'string') {
+      // Check if the path suggests this is sensitive
+      if (SENSITIVE_PATTERNS.test(path)) {
+        return '[REDACTED]';
+      }
+      return obj;
+    }
+    
+    if (Array.isArray(obj)) {
+      return obj.map((item, i) => redactSensitive(item, `${path}[${i}]`));
+    }
+    
+    if (typeof obj === 'object') {
+      const result: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+        const newPath = path ? `${path}.${key}` : key;
+        // Check if this key is sensitive
+        if (SENSITIVE_PATTERNS.test(key)) {
+          result[key] = typeof value === 'string' ? '[REDACTED]' : redactSensitive(value, newPath);
+        } else {
+          result[key] = redactSensitive(value, newPath);
+        }
+      }
+      return result;
+    }
+    
+    return obj;
+  }
   
   try {
     const proc = await sandbox.startProcess('cat /root/.clawdbot/clawdbot.json');
@@ -372,8 +446,11 @@ debug.get('/container-config', async (c) => {
     const stderr = logs.stderr || '';
     
     let config = null;
+    let redactedConfig = null;
     try {
       config = JSON.parse(stdout);
+      // Redact sensitive fields
+      redactedConfig = redactSensitive(config);
     } catch {
       // Not valid JSON
     }
@@ -381,8 +458,8 @@ debug.get('/container-config', async (c) => {
     return c.json({
       status: proc.status,
       exitCode: proc.exitCode,
-      config,
-      raw: config ? undefined : stdout,
+      config: redactedConfig,
+      raw: redactedConfig ? undefined : stdout,
       stderr,
     });
   } catch (error) {

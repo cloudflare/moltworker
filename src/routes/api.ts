@@ -3,6 +3,7 @@ import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, mountR2Storage, syncToR2, waitForProcess } from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
+import { adminRateLimit } from '../middleware';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -22,6 +23,20 @@ const adminApi = new Hono<AppEnv>();
 
 // Middleware: Verify Cloudflare Access JWT for all admin routes
 adminApi.use('*', createAccessMiddleware({ type: 'json' }));
+
+// Middleware: Apply rate limiting to admin routes
+adminApi.use('*', adminRateLimit);
+
+/**
+ * Sanitize requestId to prevent command injection
+ * Only allows alphanumeric characters, hyphens, and underscores
+ */
+function sanitizeRequestId(requestId: string): string | null {
+  if (!/^[a-zA-Z0-9_-]+$/.test(requestId)) {
+    return null;
+  }
+  return requestId;
+}
 
 // GET /api/admin/devices - List pending and paired devices
 adminApi.get('/devices', async (c) => {
@@ -75,9 +90,24 @@ adminApi.get('/devices', async (c) => {
 adminApi.post('/devices/:requestId/approve', async (c) => {
   const sandbox = c.get('sandbox');
   const requestId = c.req.param('requestId');
+  const accessUser = c.get('accessUser');
+  const clientIP = c.req.header('CF-Connecting-IP') || 'unknown';
 
   if (!requestId) {
     return c.json({ error: 'requestId is required' }, 400);
+  }
+
+  // Security: Validate requestId to prevent command injection
+  const sanitizedRequestId = sanitizeRequestId(requestId);
+  if (!sanitizedRequestId) {
+    console.log(JSON.stringify({
+      event: 'device_approval_rejected',
+      reason: 'invalid_request_id',
+      requestId,
+      ip: clientIP,
+      timestamp: new Date().toISOString(),
+    }));
+    return c.json({ error: 'Invalid requestId format. Only alphanumeric characters, hyphens, and underscores are allowed.' }, 400);
   }
 
   try {
@@ -85,7 +115,7 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     await ensureMoltbotGateway(sandbox, c.env);
 
     // Run moltbot CLI to approve the device (CLI is still named clawdbot)
-    const proc = await sandbox.startProcess(`clawdbot devices approve ${requestId} --url ws://localhost:18789`);
+    const proc = await sandbox.startProcess(`clawdbot devices approve ${sanitizedRequestId} --url ws://localhost:18789`);
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -95,9 +125,20 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
     const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
 
+    // Audit log for device approval
+    console.log(JSON.stringify({
+      event: 'device_approved',
+      requestId: sanitizedRequestId,
+      approvedBy: accessUser?.email || 'unknown',
+      ip: clientIP,
+      success,
+      bulk: false,
+      timestamp: new Date().toISOString(),
+    }));
+
     return c.json({
       success,
-      requestId,
+      requestId: sanitizedRequestId,
       message: success ? 'Device approved' : 'Approval may have failed',
       stdout,
       stderr,
@@ -111,6 +152,8 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
 // POST /api/admin/devices/approve-all - Approve all pending devices
 adminApi.post('/devices/approve-all', async (c) => {
   const sandbox = c.get('sandbox');
+  const accessUser = c.get('accessUser');
+  const clientIP = c.req.header('CF-Connecting-IP') || 'unknown';
 
   try {
     // Ensure moltbot is running first
@@ -143,17 +186,47 @@ adminApi.post('/devices/approve-all', async (c) => {
     const results: Array<{ requestId: string; success: boolean; error?: string }> = [];
 
     for (const device of pending) {
+      // Security: Validate each requestId to prevent command injection
+      const sanitizedRequestId = sanitizeRequestId(device.requestId);
+      if (!sanitizedRequestId) {
+        console.log(JSON.stringify({
+          event: 'device_approval_rejected',
+          reason: 'invalid_request_id',
+          requestId: device.requestId,
+          ip: clientIP,
+          bulk: true,
+          timestamp: new Date().toISOString(),
+        }));
+        results.push({
+          requestId: device.requestId,
+          success: false,
+          error: 'Invalid requestId format',
+        });
+        continue;
+      }
+
       try {
-        const approveProc = await sandbox.startProcess(`clawdbot devices approve ${device.requestId} --url ws://localhost:18789`);
+        const approveProc = await sandbox.startProcess(`clawdbot devices approve ${sanitizedRequestId} --url ws://localhost:18789`);
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
         const approveLogs = await approveProc.getLogs();
         const success = approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
 
-        results.push({ requestId: device.requestId, success });
+        // Audit log for each device approval
+        console.log(JSON.stringify({
+          event: 'device_approved',
+          requestId: sanitizedRequestId,
+          approvedBy: accessUser?.email || 'unknown',
+          ip: clientIP,
+          success,
+          bulk: true,
+          timestamp: new Date().toISOString(),
+        }));
+
+        results.push({ requestId: sanitizedRequestId, success });
       } catch (err) {
         results.push({
-          requestId: device.requestId,
+          requestId: sanitizedRequestId,
           success: false,
           error: err instanceof Error ? err.message : 'Unknown error',
         });

@@ -7,8 +7,37 @@ import { waitForProcess } from './utils';
 export interface SyncResult {
   success: boolean;
   lastSync?: string;
+  checksum?: string;
   error?: string;
   details?: string;
+}
+
+/**
+ * Lock to prevent race conditions during sync operations
+ */
+let syncLock: Promise<void> | null = null;
+
+/**
+ * Execute a function with a lock to prevent concurrent sync operations
+ */
+async function withSyncLock<T>(fn: () => Promise<T>): Promise<T> {
+  // Wait for any existing lock to complete
+  while (syncLock) {
+    await syncLock;
+  }
+  
+  // Create our lock
+  let releaseLock: () => void;
+  syncLock = new Promise((resolve) => {
+    releaseLock = resolve;
+  });
+  
+  try {
+    return await fn();
+  } finally {
+    syncLock = null;
+    releaseLock!();
+  }
 }
 
 /**
@@ -25,10 +54,11 @@ export interface SyncResult {
  * @returns SyncResult with success status and optional error details
  */
 export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
-  // Check if R2 is configured
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
-    return { success: false, error: 'R2 storage is not configured' };
-  }
+  return withSyncLock(async () => {
+    // Check if R2 is configured
+    if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
+      return { success: false, error: 'R2 storage is not configured' };
+    }
 
   // Mount R2 if not already mounted
   const mounted = await mountR2Storage(sandbox, env);
@@ -59,7 +89,8 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Run rsync to backup config to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Security: Also generate SHA-256 checksum for integrity verification
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync && sha256sum /root/.clawdbot/clawdbot.json 2>/dev/null | cut -d' ' -f1 > ${R2_MOUNT_PATH}/.checksum`;
   
   try {
     const proc = await sandbox.startProcess(syncCmd);
@@ -73,8 +104,14 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     const timestampLogs = await timestampProc.getLogs();
     const lastSync = timestampLogs.stdout?.trim();
     
+    // Read checksum for integrity verification
+    const checksumProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.checksum 2>/dev/null || echo ""`);
+    await waitForProcess(checksumProc, 5000);
+    const checksumLogs = await checksumProc.getLogs();
+    const checksum = checksumLogs.stdout?.trim() || undefined;
+    
     if (lastSync && lastSync.match(/^\d{4}-\d{2}-\d{2}/)) {
-      return { success: true, lastSync };
+      return { success: true, lastSync, checksum };
     } else {
       const logs = await proc.getLogs();
       return {
@@ -90,4 +127,5 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
       details: err instanceof Error ? err.message : 'Unknown error',
     };
   }
+  });
 }

@@ -55,10 +55,26 @@ publicRoutes.get('/api/status', async (c) => {
 
 // GET /_admin/assets/* - Admin UI static assets (CSS, JS need to load for login redirect)
 // Assets are built to dist/client with base "/_admin/"
+// Security: Prevent path traversal attacks
 publicRoutes.get('/_admin/assets/*', async (c) => {
   const url = new URL(c.req.url);
   // Rewrite /_admin/assets/* to /assets/* for the ASSETS binding
-  const assetPath = url.pathname.replace('/_admin/assets/', '/assets/');
+  let assetPath = url.pathname.replace('/_admin/assets/', '/assets/');
+  
+  // Security: Normalize and validate path to prevent traversal
+  assetPath = assetPath.replace(/\/+/g, '/');
+  
+  // Block path traversal attempts (both encoded and decoded)
+  if (assetPath.includes('..') || !assetPath.startsWith('/assets/')) {
+    return c.json({ error: 'Invalid asset path' }, 400);
+  }
+  
+  // Also check decoded path for double-encoded traversal attempts
+  const decodedPath = decodeURIComponent(assetPath);
+  if (decodedPath.includes('..') || !decodedPath.startsWith('/assets/')) {
+    return c.json({ error: 'Invalid asset path' }, 400);
+  }
+  
   const assetUrl = new URL(assetPath, url.origin);
   return c.env.ASSETS.fetch(new Request(assetUrl.toString(), c.req.raw));
 });

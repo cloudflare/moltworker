@@ -279,10 +279,38 @@ if (isOpenAI) {
     config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
 }
 
+// Security: Redact sensitive values before logging
+function redactSecrets(obj, path = '') {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') {
+    // Redact if path suggests sensitive data
+    if (/key|token|secret|password|credential|auth/i.test(path)) {
+      return '[REDACTED]';
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item, i) => redactSecrets(item, path + '[' + i + ']'));
+  }
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const newPath = path ? path + '.' + key : key;
+      if (/key|token|secret|password|credential|auth/i.test(key)) {
+        result[key] = typeof value === 'string' ? '[REDACTED]' : redactSecrets(value, newPath);
+      } else {
+        result[key] = redactSecrets(value, newPath);
+      }
+    }
+    return result;
+  }
+  return obj;
+}
+
 // Write updated config
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration updated successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
+console.log('Config (redacted):', JSON.stringify(redactSecrets(config), null, 2));
 EOFNODE
 
 # ============================================================
