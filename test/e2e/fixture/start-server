@@ -1,0 +1,17 @@
+#!/bin/bash
+# Start the moltworker for E2E testing (cloud deployment)
+#
+# Required environment variables:
+# - CLOUDFLARE_API_TOKEN: API token with Workers, Access, R2 permissions
+# - CF_ACCOUNT_ID: Cloudflare account ID
+# - WORKERS_SUBDOMAIN: Your workers.dev subdomain
+# - CF_ACCESS_TEAM_DOMAIN: Cloudflare Access team domain
+# - R2_ACCESS_KEY_ID: R2 access key for bucket mounting
+# - R2_SECRET_ACCESS_KEY: R2 secret key for bucket mounting
+#
+# Optional:
+# - E2E_TEST_RUN_ID: Unique ID for this test run (default: "local")
+# - AI_GATEWAY_API_KEY, AI_GATEWAY_BASE_URL: For AI provider
+# - ANTHROPIC_API_KEY: Direct Anthropic access
+
+exec "$(dirname "$0")/server/start" "$@"

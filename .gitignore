@@ -36,3 +36,25 @@ Thumbs.db
 
 # Docker build artifacts
 *.tar
+
+# Veta agent memory
+.veta/
+
+# greger.el conversation
+*.greger
+
+# playwright-cli
+.playwright-cli/
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+
+# E2E test credentials
+test/e2e/.dev.vars
+
+# Temporary e2e wrangler configs
+.wrangler-e2e-*.jsonc

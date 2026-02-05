@@ -1,0 +1,82 @@
+===
+navigate to admin page to approve device
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+./pw --session=moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN"
+---
+
+===
+wait for pending devices section to load
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.waitForSelector('text=Pending Pairing Requests', { timeout: 120000 });
+}"
+---
+
+===
+wait for Approve All button and click it
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  const btn = await page.waitForSelector('button:has-text(\"Approve All\")', { timeout: 120000 });
+  await btn.click();
+}"
+---
+
+===
+wait for approval to complete
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.waitForSelector('text=No pending pairing requests', { timeout: 120000 });
+}"
+---
+
+===
+navigate back to main chat page
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+./pw --session=moltworker-e2e open "$WORKER_URL/?token=$TOKEN"
+---
+
+===
+wait for chat interface to load
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.waitForSelector('textarea', { timeout: 120000 });
+}"
+---
+
+===
+type math question into chat
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  const textarea = await page.waitForSelector('textarea');
+  await textarea.fill('What is 847293 + 651824? Reply with just the number.');
+}"
+---
+
+===
+click send button
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  const btn = await page.waitForSelector('button:has-text(\"Send\")');
+  await btn.click();
+}"
+---
+
+===
+wait for response containing the correct answer
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.waitForSelector('text=1499117', { timeout: 120000 });
+}"
+---

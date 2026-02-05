@@ -1,0 +1,44 @@
+===
+start moltworker server
+===
+./start-server -v
+---
+{{ s }}
+---
+where
+* strip(s) endswith "ready"
+
+===
+start playwright browser
+===
+./start-browser
+---
+ready
+
+===
+start video recording
+===
+./pw --session=moltworker-e2e video-start
+---
+{{ output }}
+---
+where
+* output contains "Video recording started"
+
+===
+navigate to main page and wait for worker to be ready
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+./pw --session=moltworker-e2e open "$WORKER_URL/?token=$TOKEN"
+# Wait for pairing required message (worker shows loading screen first, then UI loads)
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.waitForSelector('text=Pairing required', { timeout: 300000 });
+}"
+echo "Worker is ready"
+---
+{{ output }}
+---
+where
+* output contains "Worker is ready"

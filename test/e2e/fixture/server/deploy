@@ -1,0 +1,83 @@
+#!/bin/bash
+# Deploy the worker to Cloudflare with e2e configuration
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Find project directory - use CCTR_TEST_PATH if available (cctr copies fixture to temp dir)
+if [ -n "$CCTR_TEST_PATH" ]; then
+    PROJECT_DIR="$(cd "$CCTR_TEST_PATH/../.." && pwd)"
+else
+    FIXTURE_DIR="$(dirname "$SCRIPT_DIR")"
+    PROJECT_DIR="$(cd "$FIXTURE_DIR/../.." && pwd)"
+fi
+
+# Required environment variables
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is required}"
+: "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is required}"
+: "${MOLTBOT_GATEWAY_TOKEN:?MOLTBOT_GATEWAY_TOKEN is required}"
+
+# Read terraform outputs
+TERRAFORM_OUTPUT="$1"
+if [ -z "$TERRAFORM_OUTPUT" ]; then
+    echo "Usage: $0 <terraform-output-json>" >&2
+    exit 1
+fi
+
+WORKER_NAME=$(echo "$TERRAFORM_OUTPUT" | jq -r '.worker_name.value')
+R2_BUCKET=$(echo "$TERRAFORM_OUTPUT" | jq -r '.r2_bucket_name.value')
+
+# Get CF_ACCESS_TEAM_DOMAIN from environment
+: "${CF_ACCESS_TEAM_DOMAIN:?CF_ACCESS_TEAM_DOMAIN is required}"
+
+cd "$PROJECT_DIR"
+
+# Build first
+echo "Building project..." >&2
+npm run build >&2
+
+# Export account ID for all wrangler commands (and unset deprecated name)
+export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
+
+# Generate a temporary wrangler config with unique worker name
+# This ensures the container name is also unique (container name = worker-name + class-name)
+E2E_CONFIG="$PROJECT_DIR/.wrangler-e2e-$WORKER_NAME.jsonc"
+echo "Generating e2e config: $E2E_CONFIG" >&2
+
+# Copy config and replace the name field (sed handles JSONC comments fine)
+sed 's/"name": "moltbot-sandbox"/"name": "'"$WORKER_NAME"'"/' "$PROJECT_DIR/wrangler.jsonc" > "$E2E_CONFIG"
+
+# Deploy using the e2e-specific config
+echo "Deploying worker: $WORKER_NAME to account $CLOUDFLARE_ACCOUNT_ID" >&2
+npx wrangler deploy \
+    --config "$E2E_CONFIG" \
+    --var "DEBUG_ROUTES:true" \
+    --var "E2E_TEST_MODE:true" \
+    >&2
+
+# Clean up temp config
+rm -f "$E2E_CONFIG"
+
+# Set secrets for the deployed worker
+echo "Setting worker secrets..." >&2
+echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN --name "$WORKER_NAME" >&2
+echo "$CF_ACCESS_TEAM_DOMAIN" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --name "$WORKER_NAME" >&2
+echo "$R2_ACCESS_KEY_ID" | npx wrangler secret put R2_ACCESS_KEY_ID --name "$WORKER_NAME" >&2
+echo "$R2_SECRET_ACCESS_KEY" | npx wrangler secret put R2_SECRET_ACCESS_KEY --name "$WORKER_NAME" >&2
+echo "$R2_BUCKET" | npx wrangler secret put R2_BUCKET_NAME --name "$WORKER_NAME" >&2
+echo "$CLOUDFLARE_ACCOUNT_ID" | npx wrangler secret put CF_ACCOUNT_ID --name "$WORKER_NAME" >&2
+
+# Set AI provider keys if available
+if [ -n "$AI_GATEWAY_API_KEY" ]; then
+    echo "$AI_GATEWAY_API_KEY" | npx wrangler secret put AI_GATEWAY_API_KEY --name "$WORKER_NAME" >&2
+fi
+if [ -n "$AI_GATEWAY_BASE_URL" ]; then
+    echo "$AI_GATEWAY_BASE_URL" | npx wrangler secret put AI_GATEWAY_BASE_URL --name "$WORKER_NAME" >&2
+fi
+if [ -n "$ANTHROPIC_API_KEY" ]; then
+    echo "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY --name "$WORKER_NAME" >&2
+fi
+
+echo "Worker deployed: $WORKER_NAME" >&2

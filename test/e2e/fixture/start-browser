@@ -1,0 +1,43 @@
+#!/bin/bash
+# Start playwright-cli browser session for E2E testing with Access headers
+
+set -e
+
+SESSION_NAME="moltworker-e2e"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Support running directly (not via cctr)
+if [ -z "$CCTR_FIXTURE_DIR" ]; then
+    CCTR_FIXTURE_DIR="/tmp/e2e-cloud-manual"
+fi
+
+# Stop and delete any existing session
+playwright-cli session-stop "$SESSION_NAME" >/dev/null 2>&1 || true
+playwright-cli session-delete "$SESSION_NAME" >/dev/null 2>&1 || true
+
+# Build the args
+GLOBAL_ARGS=("--session=$SESSION_NAME")
+
+if [ "${PLAYWRIGHT_HEADED:-}" = "1" ] || [ "${PLAYWRIGHT_HEADED:-}" = "true" ]; then
+    GLOBAL_ARGS+=("--headed")
+fi
+
+# Open the browser to a blank page first
+playwright-cli "${GLOBAL_ARGS[@]}" open "about:blank" >/dev/null 2>&1 &
+sleep 2
+
+# Read Access credentials
+CF_ACCESS_CLIENT_ID=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-id.txt" 2>/dev/null || echo "")
+CF_ACCESS_CLIENT_SECRET=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt" 2>/dev/null || echo "")
+
+if [ -n "$CF_ACCESS_CLIENT_ID" ] && [ -n "$CF_ACCESS_CLIENT_SECRET" ]; then
+    # Set extra HTTP headers for Access authentication
+    playwright-cli "${GLOBAL_ARGS[@]}" run-code "async page => {
+        await page.context().setExtraHTTPHeaders({
+            'CF-Access-Client-Id': '$CF_ACCESS_CLIENT_ID',
+            'CF-Access-Client-Secret': '$CF_ACCESS_CLIENT_SECRET'
+        });
+    }" >/dev/null 2>&1
+fi
+
+echo "ready"
