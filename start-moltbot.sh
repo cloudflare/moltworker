@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v46 - With persistent storage
-# Cache bust: 2026-02-05-v46-persistent
+# OpenClaw Startup Script v48 - Fixed R2 sync hanging
+# Cache bust: 2026-02-05-v48-cp-timeout
 
 echo "============================================"
 echo "Starting OpenClaw v46 (with persistence)"
@@ -14,17 +14,19 @@ sync_to_r2() {
   if [ -d "/data/moltbot" ]; then
     echo "Syncing OpenClaw data to R2..."
     mkdir -p "$R2_BACKUP_DIR"
-    rsync -av --delete "$CONFIG_DIR/" "$R2_BACKUP_DIR/" 2>/dev/null || true
+    # Use cp with timeout to avoid hanging on S3FS
+    timeout 60 cp -rf "$CONFIG_DIR"/* "$R2_BACKUP_DIR/" 2>/dev/null || true
     echo "Sync to R2 complete"
   fi
 }
 
 # Function to restore OpenClaw data from R2
 restore_from_r2() {
-  if [ -d "$R2_BACKUP_DIR" ] && [ "$(ls -A $R2_BACKUP_DIR 2>/dev/null)" ]; then
+  if [ -d "$R2_BACKUP_DIR" ] && [ -f "$R2_BACKUP_DIR/openclaw.json" ]; then
     echo "Restoring OpenClaw data from R2..."
     mkdir -p "$CONFIG_DIR"
-    rsync -av "$R2_BACKUP_DIR/" "$CONFIG_DIR/" 2>/dev/null || true
+    # Use cp with timeout to avoid hanging on S3FS
+    timeout 30 cp -rf "$R2_BACKUP_DIR"/* "$CONFIG_DIR/" 2>/dev/null || true
     echo "Restore from R2 complete"
     return 0
   else
