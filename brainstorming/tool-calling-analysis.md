@@ -1,7 +1,7 @@
-# Tool Calling Landscape & steipete/OpenClaw Integration Analysis
+# Tool Calling Landscape, steipete/OpenClaw & Acontext Integration Analysis
 
 **Date:** February 2026
-**Context:** Analysis of how Peter Steinberger's (steipete) ecosystem and the current OpenRouter tool-calling model landscape can improve the Moltworker application.
+**Context:** Analysis of how Peter Steinberger's (steipete) ecosystem, the Acontext context data platform, and the current OpenRouter tool-calling model landscape can improve the Moltworker application.
 
 ---
 
@@ -10,20 +10,22 @@
 1. [Executive Summary](#executive-summary)
 2. [Current Moltworker Tool-Calling Architecture](#current-architecture)
 3. [steipete Ecosystem Analysis](#steipete-ecosystem)
-4. [OpenRouter Tool-Calling Model Landscape](#model-landscape)
-5. [Gap Analysis & Improvement Opportunities](#gap-analysis)
-6. [Actionable Recommendations](#recommendations)
-7. [Implementation Priority Matrix](#priority-matrix)
+4. [Acontext Context Data Platform Analysis](#acontext-analysis)
+5. [OpenRouter Tool-Calling Model Landscape](#model-landscape)
+6. [Gap Analysis & Improvement Opportunities](#gap-analysis)
+7. [Actionable Recommendations](#recommendations)
+8. [Implementation Priority Matrix](#priority-matrix)
 
 ---
 
 ## 1. Executive Summary <a name="executive-summary"></a>
 
-Moltworker is a production-grade AI assistant gateway running on Cloudflare Workers with 26+ models via OpenRouter, 5 tools, Durable Objects for long-running tasks, and multi-platform chat integrations. This analysis identifies **three categories of improvement**:
+Moltworker is a production-grade AI assistant gateway running on Cloudflare Workers with 26+ models via OpenRouter, 5 tools, Durable Objects for long-running tasks, and multi-platform chat integrations. This analysis identifies **four categories of improvement**:
 
 1. **Tool-calling sophistication** — Current implementation uses sequential single-model tool loops. Modern models (DeepSeek V3.2, Grok 4.1, Claude Sonnet 4.5) support parallel tool calls and speculative execution that Moltworker doesn't exploit.
 2. **Tooling breadth** — steipete's ecosystem provides ready-made capabilities (MCP servers, browser automation, GUI capture, token monitoring) that map directly to Moltworker's roadmap gaps.
-3. **Model selection intelligence** — The tool-calling model landscape shows significant capability variance. Moltworker treats all tool-capable models identically, missing optimization opportunities.
+3. **Context management** — Acontext (memodb-io/Acontext) provides purpose-built context engineering that directly replaces Moltworker's crude `compressContext()` with token-aware session management, plus adds observability, code execution, and persistent file storage.
+4. **Model selection intelligence** — The tool-calling model landscape shows significant capability variance. Moltworker treats all tool-capable models identically, missing optimization opportunities.
 
 ---
 
@@ -134,7 +136,153 @@ steipete's philosophy of "Ship beats perfect" and running multiple Claude instan
 
 ---
 
-## 4. OpenRouter Tool-Calling Model Landscape <a name="model-landscape"></a>
+## 4. Acontext Context Data Platform Analysis <a name="acontext-analysis"></a>
+
+**Repository:** github.com/memodb-io/Acontext (2.8k stars, Apache 2.0)
+**What it is:** A purpose-built context management platform for AI agents that provides unified storage, context engineering, observability, and sandboxed execution.
+
+### 4.1 Why This Matters for Moltworker
+
+Acontext solves **three of Moltworker's most pressing architectural pain points**:
+
+| Moltworker Pain Point | Current Solution | Acontext Solution |
+|----------------------|-----------------|-------------------|
+| Context explosion in long tasks | Basic `compressContext()` in task-processor.ts: removes middle messages, keeps recent 6 | **Smart context editing**: Token-limited retrieval, tool result filtering, session summaries — all without modifying originals |
+| Multi-provider message format | Manual format handling per provider (OpenRouter normalizes, but direct APIs don't) | **Automatic format conversion**: Store messages in OpenAI format, retrieve in Anthropic format, transparently |
+| No observability | `console.log` statements, Telegram progress messages | **Full dashboard**: Session replays, agent success rates, real-time state tracking |
+
+### 4.2 Feature-by-Feature Relevance
+
+#### Context Storage & Sessions — **CRITICAL RELEVANCE**
+
+Moltworker's `TaskProcessor` (task-processor.ts) maintains conversation state in Durable Object storage and R2 checkpoints. This is fragile:
+- Checkpoints are raw JSON blobs in R2 (`checkpoints/{userId}/latest.json`)
+- Only the latest checkpoint is kept (no history)
+- Context compression (`compressContext()`) is lossy and destroys audit trail
+- No cross-session memory (each task starts fresh)
+
+Acontext's sessions provide:
+- **Immutable message history** — Original messages never modified, edits are views
+- **Token-budgeted retrieval** — `get_messages(max_tokens=60000)` automatically compresses to fit, far superior to Moltworker's character-count heuristic (`estimateTokens` using chars/4)
+- **Tool result filtering** — Selectively remove old tool outputs while keeping recent ones. This directly addresses the `COMPRESS_AFTER_TOOLS = 6` problem where Moltworker blindly compresses every 6 tool calls
+- **Cross-session continuity** — Sessions persist, so a user can resume a complex coding task days later with full context
+
+#### Context Engineering — **HIGH RELEVANCE**
+
+The `compressContext()` method in task-processor.ts (L281-335) is Moltworker's biggest context management weakness:
+
+```
+Current approach:
+1. Keep system message + user message + last 6 messages
+2. Summarize everything in the middle into a single text block
+3. Lose all tool call/result pairing (can't reconstruct the interaction)
+```
+
+Acontext's approach:
+1. **Asynchronous summaries** generated by a separate LLM call (prevents prompt injection)
+2. **Selective compression** — can compress by age, by type (tool results vs. assistant text), or by relevance
+3. **Original preservation** — compressed view is separate from stored data; can always go back
+4. **Token-aware** — uses actual tokenizer, not chars/4 heuristic
+
+**Concrete improvement:** Replace `compressContext()` and `estimateTokens()` with Acontext session API calls. The task processor would store messages via Acontext and retrieve token-budgeted context per iteration.
+
+#### Disk (Virtual Filesystem) — **MEDIUM RELEVANCE**
+
+Moltworker's tools produce ephemeral results. If a model reads a GitHub file, that content exists only in the conversation. If the task crashes and resumes, the file must be re-fetched.
+
+Acontext's Disk provides persistent agent storage with read, write, grep, and glob operations. This maps to Moltworker's planned File Management Tools (roadmap Priority 3.3):
+
+```typescript
+// Current roadmap plan (future-integrations.md):
+save_file({ name: string, content: string })
+read_file({ name: string })
+list_files({ prefix?: string })
+
+// Acontext Disk already provides this via API + tool schemas
+```
+
+Instead of building custom R2-based file tools, Moltworker could use Acontext Disk as the storage backend and expose its tool schemas directly to models.
+
+#### Sandbox (Code Execution) — **HIGH RELEVANCE**
+
+Moltworker's roadmap lists Code Execution (Priority 3.2) as high-value, high-effort. Acontext provides sandboxed Python and bash execution out of the box, with:
+- Isolated environment per session
+- Access to Disk files (read artifacts, write results)
+- Skill mounting at `/skills/{name}/`
+- OpenAI-compatible tool schemas ready to plug into the tool-calling loop
+
+This could reduce the code execution feature from "high effort" to "medium effort" by leveraging Acontext's sandbox rather than building custom Piston/Judge0 integration.
+
+#### Skills System — **MEDIUM RELEVANCE**
+
+Moltworker already has a skills system (via OpenClaw's R2-based skills loading). Acontext's skills management adds:
+- ZIP-based skill packaging
+- Automatic inclusion in LLM context
+- Server-side skill management dashboard
+
+This is complementary but not critical — Moltworker's existing approach works.
+
+#### Observability Dashboard — **HIGH RELEVANCE**
+
+Moltworker currently has zero observability beyond Telegram progress messages and `console.log`. For a system running 100-iteration tasks with 10 auto-resumes across multiple models and providers, this is a significant blind spot.
+
+Acontext provides:
+- **Session replay** — See exactly what the agent did, step by step
+- **Success rate tracking** — Which models/tool combinations work best
+- **Real-time state** — Monitor long-running Durable Object tasks without relying on Telegram
+- **Cost attribution** — Track token usage per session (complements the CodexBar-inspired cost tracking from R4)
+
+### 4.3 Integration Architecture
+
+```
+                          ┌─────────────────────┐
+                          │   Acontext Platform  │
+                          │  (Cloud or Self-Host)│
+                          │                      │
+                          │  ┌────────────────┐  │
+Moltworker                │  │ Sessions API   │  │
+TaskProcessor ───────────►│  │ (context store) │  │
+                          │  ├────────────────┤  │
+Tool Results ────────────►│  │ Disk API       │  │
+                          │  │ (file storage)  │  │
+OpenRouter Responses ────►│  ├────────────────┤  │
+                          │  │ Sandbox API    │  │
+                          │  │ (code exec)    │  │
+Admin Dashboard ◄─────────│  ├────────────────┤  │
+                          │  │ Observability  │  │
+                          │  │ (dashboard)    │  │
+                          │  └────────────────┘  │
+                          └─────────────────────┘
+```
+
+**Integration points:**
+1. **TaskProcessor** stores messages via Acontext Sessions instead of raw R2 checkpoints
+2. **Context retrieval** uses token-budgeted API instead of `compressContext()`
+3. **New tools** (`run_code`, `save_file`, `read_file`) backed by Acontext Sandbox/Disk
+4. **Admin dashboard** links to Acontext's observability dashboard for deep debugging
+
+### 4.4 Trade-offs & Considerations
+
+| Pro | Con |
+|-----|-----|
+| Solves context compression properly | Adds external dependency (API calls to Acontext) |
+| Provides code execution for free | Latency: Acontext API call adds ~50-200ms per operation |
+| Full observability dashboard | Self-hosting requires PostgreSQL + Redis + RabbitMQ + S3 |
+| TypeScript SDK available (`@acontext/acontext`) | Cloud version requires API key and has usage limits |
+| Apache 2.0 license | 2.8k stars = still relatively early-stage project |
+| Handles multi-provider format conversion | Moltworker already routes through OpenRouter which normalizes formats |
+
+### 4.5 Recommendation
+
+**Phase 1 (Low risk):** Use Acontext Sessions API as a **secondary** context store alongside existing R2 checkpoints. Store messages in Acontext for observability and smart retrieval, but keep R2 as the primary checkpoint for crash recovery.
+
+**Phase 2 (Medium risk):** Replace `compressContext()` with Acontext's token-budgeted retrieval. This removes the crude compression logic and provides proper context management.
+
+**Phase 3 (Full adoption):** Use Acontext Disk + Sandbox for file management and code execution tools, reducing custom development effort.
+
+---
+
+## 5. OpenRouter Tool-Calling Model Landscape <a name="model-landscape"></a>
 
 ### 4.1 Current Model Capabilities (February 2026)
 
@@ -173,7 +321,7 @@ Models in the OpenRouter tool-calling collection that Moltworker should consider
 
 ---
 
-## 5. Gap Analysis & Improvement Opportunities <a name="gap-analysis"></a>
+## 6. Gap Analysis & Improvement Opportunities <a name="gap-analysis"></a>
 
 ### Gap 1: Parallel Tool Execution
 
@@ -271,7 +419,7 @@ MCP Server Registry (R2 config)
 
 ---
 
-## 6. Actionable Recommendations <a name="recommendations"></a>
+## 7. Actionable Recommendations <a name="recommendations"></a>
 
 ### R1: Implement Parallel Tool Execution (Effort: Low)
 
@@ -327,9 +475,30 @@ MCP Server Registry (R2 config)
 **Files to modify:**
 - `src/openrouter/client.ts` — Merge `chatCompletionWithVision` and `chatCompletionWithTools` into a unified method
 
+### R9: Integrate Acontext for Context Management (Effort: Medium-High)
+
+**Files to create/modify:**
+- New: `src/acontext/client.ts` — Acontext TypeScript SDK wrapper
+- Modify: `src/durable-objects/task-processor.ts` — Replace `compressContext()` and R2 checkpoints with Acontext Sessions
+- Modify: `src/openrouter/tools.ts` — Add `run_code`, `save_file`, `read_file` tools backed by Acontext Sandbox/Disk
+
+**Phase 1 (Low risk):** Add Acontext as observability layer — store all task processor messages for replay and debugging. Keep existing R2 checkpoints as primary.
+
+**Phase 2:** Replace `compressContext()` (L281-335 in task-processor.ts) and `estimateTokens()` (L204-215) with Acontext's token-budgeted session retrieval. This eliminates the crude chars/4 heuristic and the lossy middle-message compression.
+
+**Phase 3:** Use Acontext Sandbox for code execution tool and Disk for file management tools — replaces two roadmap items (Priority 3.2 and 3.3 in future-integrations.md) with a single integration.
+
+### R10: Acontext Observability Dashboard (Effort: Low)
+
+**Files to modify:**
+- `src/routes/admin-ui.ts` — Add link/iframe to Acontext dashboard
+- `wrangler.jsonc` — Add `ACONTEXT_API_KEY` secret
+
+**Change:** Connect the admin UI to Acontext's observability dashboard for session replay, success rate tracking, and real-time task monitoring. This is the lowest-risk Acontext integration since it's read-only.
+
 ---
 
-## 7. Implementation Priority Matrix <a name="priority-matrix"></a>
+## 8. Implementation Priority Matrix <a name="priority-matrix"></a>
 
 | Priority | Recommendation | Effort | Impact | Dependencies |
 |----------|---------------|--------|--------|-------------|
@@ -337,10 +506,14 @@ MCP Server Registry (R2 config)
 | **P0** | R7: Add missing models | Trivial | Low | None |
 | **P1** | R1: Parallel tool execution | Low | High | None |
 | **P1** | R2: Model capability metadata | Low | Medium | None |
+| **P1** | R10: Acontext observability | Low | High | Acontext API key |
 | **P2** | R4: Token/cost tracking | Medium | High | R2 |
 | **P2** | R5: Configurable reasoning | Medium | Medium | R2 |
 | **P2** | R8: Vision + tools combined | Medium | Medium | None |
+| **P2** | R9 Phase 1: Acontext sessions (observability) | Medium | High | Acontext setup |
 | **P3** | R6: MCP integration | High | Very High | Research phase needed |
+| **P3** | R9 Phase 2: Acontext context engineering | Medium-High | Very High | R9 Phase 1 |
+| **P3** | R9 Phase 3: Acontext Sandbox/Disk tools | Medium | High | R9 Phase 1 |
 
 ### Quick Wins (Can ship today)
 1. Add `supportsTools: true` to Gemini 3 Flash
@@ -351,19 +524,31 @@ MCP Server Registry (R2 config)
 1. Enrich model metadata with parallel/reasoning/structured capabilities
 2. Add cost tracking and `/costs` command
 3. Add reasoning control for compatible models
+4. Connect Acontext observability dashboard for task monitoring
+5. Store task processor messages in Acontext Sessions for replay
 
 ### Strategic (Requires design)
 1. MCP integration via mcporter patterns
-2. Multi-agent orchestration leveraging Claude Sonnet 4.5's capabilities
-3. Dynamic tool selection based on model capabilities and task type
+2. Replace `compressContext()` with Acontext token-budgeted retrieval
+3. Acontext Sandbox for code execution + Disk for file management (replaces two roadmap items)
+4. Multi-agent orchestration leveraging Claude Sonnet 4.5's capabilities
+5. Dynamic tool selection based on model capabilities and task type
 
 ---
 
-## Appendix: steipete Project Links
+## Appendix: Project Links
 
+### steipete Ecosystem
 - OpenClaw: github.com/steipete (main project)
 - mcporter: github.com/steipete/mcporter
 - Peekaboo: github.com/steipete/Peekaboo
 - CodexBar: github.com/steipete/CodexBar
 - oracle: github.com/steipete/oracle
 - VibeTunnel: vt.sh
+
+### Acontext Platform
+- Repository: github.com/memodb-io/Acontext (2.8k stars, Apache 2.0)
+- Website: acontext.io
+- Documentation: docs.acontext.io
+- TypeScript SDK: `npm install @acontext/acontext`
+- Python SDK: `pip install acontext`
