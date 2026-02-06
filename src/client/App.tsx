@@ -1,5 +1,5 @@
-import AdminPage from './pages/AdminPage'
-import './App.css'
+import AdminPage from './pages/AdminPage';
+import './App.css';
 
 export default function App() {
   return (
@@ -12,5 +12,5 @@ export default function App() {
         <AdminPage />
       </main>
     </div>
-  )
+  );
 }

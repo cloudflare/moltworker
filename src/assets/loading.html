@@ -1,192 +1,212 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Loading - Moltworker</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      color: #e0e0e0;
-      padding: 20px;
-    }
-    
-    .container {
-      text-align: center;
-      max-width: 500px;
-    }
-    
-    .logo {
-      width: 200px;
-      height: auto;
-      margin-bottom: 40px;
-      animation: pulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.9; transform: scale(0.95); }
-    }
-    
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 500;
-      margin-bottom: 16px;
-      color: #ffffff;
-    }
-    
-    .status {
-      font-size: 0.9rem;
-      color: #a0a0a0;
-      margin-bottom: 30px;
-    }
-    
-    .spinner-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    
-    .spinner-container h1 {
-      margin: 0;
-    }
-    
-    .spinner {
-      width: 24px;
-      height: 24px;
-      border: 3px solid rgba(255, 255, 255, 0.1);
-      border-top-color: #60a5fa;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-    }
-    
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    .dots {
-      display: inline-block;
-    }
-    
-    .dots::after {
-      content: '';
-      animation: dots 1.5s steps(4, end) infinite;
-    }
-    
-    @keyframes dots {
-      0%, 20% { content: ''; }
-      40% { content: '.'; }
-      60% { content: '..'; }
-      80%, 100% { content: '...'; }
-    }
-    
-    .info {
-      font-size: 0.8rem;
-      color: #707070;
-      margin-top: 40px;
-    }
-    
-    .error {
-      color: #f87171;
-      margin-top: 20px;
-      padding: 12px 20px;
-      background: rgba(248, 113, 113, 0.1);
-      border-radius: 8px;
-      display: none;
-    }
-    
-    .ready {
-      color: #4ade80;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <img src="/logo.png" alt="Moltworker" class="logo">
-    
-    <div class="spinner-container">
-      <div class="spinner"></div>
-      <h1 id="title">Waiting for Moltworker to load</h1>
-    </div>
-    
-    <p class="status" id="status">Starting container...</p>
-    
-    <p class="error" id="error"></p>
-    
-    <p class="info">This usually takes 1-2 minutes on cold start</p>
-  </div>
-  
-  <script>
-    const statusEl = document.getElementById('status');
-    const titleEl = document.getElementById('title');
-    const errorEl = document.getElementById('error');
-    let pollCount = 0;
-    let consecutiveErrors = 0;
-    const maxConsecutiveErrors = 5;
-    
-    async function checkStatus() {
-      pollCount++;
-      
-      try {
-        const response = await fetch('/api/status');
-        const data = await response.json();
-        consecutiveErrors = 0;
-        
-        if (data.ok && data.status === 'running') {
-          // Container is ready! Reload the page
-          titleEl.innerHTML = '<span class="ready">Moltworker is ready!</span>';
-          statusEl.textContent = 'Redirecting...';
-          document.querySelector('.spinner').style.display = 'none';
-          
-          // Small delay so user sees the "ready" message
-          setTimeout(() => {
-            window.location.reload();
-          }, 500);
-          return;
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Loading - Moltworker</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        color: #e0e0e0;
+        padding: 20px;
+      }
+
+      .container {
+        text-align: center;
+        max-width: 500px;
+      }
+
+      .logo {
+        width: 200px;
+        height: auto;
+        margin-bottom: 40px;
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
         }
-        
-        // Update status message based on state
-        if (data.status === 'not_running') {
-          statusEl.textContent = 'Container is starting up...';
-        } else if (data.status === 'not_responding') {
-          statusEl.textContent = 'Container started, waiting for gateway...';
-        } else {
-          statusEl.textContent = 'Checking status... (poll #' + pollCount + ')';
-        }
-        
-        // Continue polling
-        setTimeout(checkStatus, 2000);
-        
-      } catch (err) {
-        consecutiveErrors++;
-        
-        if (consecutiveErrors >= maxConsecutiveErrors) {
-          errorEl.textContent = 'Unable to reach server. Please refresh the page.';
-          errorEl.style.display = 'block';
-          statusEl.textContent = 'Connection lost';
-        } else {
-          statusEl.textContent = 'Retrying... (' + consecutiveErrors + '/' + maxConsecutiveErrors + ')';
-          setTimeout(checkStatus, 3000);
+        50% {
+          opacity: 0.9;
+          transform: scale(0.95);
         }
       }
-    }
-    
-    // Start polling after a brief delay
-    setTimeout(checkStatus, 1000);
-  </script>
-</body>
+
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 500;
+        margin-bottom: 16px;
+        color: #ffffff;
+      }
+
+      .status {
+        font-size: 0.9rem;
+        color: #a0a0a0;
+        margin-bottom: 30px;
+      }
+
+      .spinner-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+
+      .spinner-container h1 {
+        margin: 0;
+      }
+
+      .spinner {
+        width: 24px;
+        height: 24px;
+        border: 3px solid rgba(255, 255, 255, 0.1);
+        border-top-color: #60a5fa;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .dots {
+        display: inline-block;
+      }
+
+      .dots::after {
+        content: '';
+        animation: dots 1.5s steps(4, end) infinite;
+      }
+
+      @keyframes dots {
+        0%,
+        20% {
+          content: '';
+        }
+        40% {
+          content: '.';
+        }
+        60% {
+          content: '..';
+        }
+        80%,
+        100% {
+          content: '...';
+        }
+      }
+
+      .info {
+        font-size: 0.8rem;
+        color: #707070;
+        margin-top: 40px;
+      }
+
+      .error {
+        color: #f87171;
+        margin-top: 20px;
+        padding: 12px 20px;
+        background: rgba(248, 113, 113, 0.1);
+        border-radius: 8px;
+        display: none;
+      }
+
+      .ready {
+        color: #4ade80;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <img src="/logo.png" alt="Moltworker" class="logo" />
+
+      <div class="spinner-container">
+        <div class="spinner"></div>
+        <h1 id="title">Waiting for Moltworker to load</h1>
+      </div>
+
+      <p class="status" id="status">Starting container...</p>
+
+      <p class="error" id="error"></p>
+
+      <p class="info">This usually takes 1-2 minutes on cold start</p>
+    </div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const titleEl = document.getElementById('title');
+      const errorEl = document.getElementById('error');
+      let pollCount = 0;
+      let consecutiveErrors = 0;
+      const maxConsecutiveErrors = 5;
+
+      async function checkStatus() {
+        pollCount++;
+
+        try {
+          const response = await fetch('/api/status');
+          const data = await response.json();
+          consecutiveErrors = 0;
+
+          if (data.ok && data.status === 'running') {
+            // Container is ready! Reload the page
+            titleEl.innerHTML = '<span class="ready">Moltworker is ready!</span>';
+            statusEl.textContent = 'Redirecting...';
+            document.querySelector('.spinner').style.display = 'none';
+
+            // Small delay so user sees the "ready" message
+            setTimeout(() => {
+              window.location.reload();
+            }, 500);
+            return;
+          }
+
+          // Update status message based on state
+          if (data.status === 'not_running') {
+            statusEl.textContent = 'Container is starting up...';
+          } else if (data.status === 'not_responding') {
+            statusEl.textContent = 'Container started, waiting for gateway...';
+          } else {
+            statusEl.textContent = 'Checking status... (poll #' + pollCount + ')';
+          }
+
+          // Continue polling
+          setTimeout(checkStatus, 2000);
+        } catch (err) {
+          consecutiveErrors++;
+
+          if (consecutiveErrors >= maxConsecutiveErrors) {
+            errorEl.textContent = 'Unable to reach server. Please refresh the page.';
+            errorEl.style.display = 'block';
+            statusEl.textContent = 'Connection lost';
+          } else {
+            statusEl.textContent =
+              'Retrying... (' + consecutiveErrors + '/' + maxConsecutiveErrors + ')';
+            setTimeout(checkStatus, 3000);
+          }
+        }
+      }
+
+      // Start polling after a brief delay
+      setTimeout(checkStatus, 1000);
+    </script>
+  </body>
 </html>

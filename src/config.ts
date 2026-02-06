@@ -11,7 +11,7 @@ export const STARTUP_TIMEOUT_MS = 180_000;
 /** Mount path for R2 persistent storage inside the container */
 export const R2_MOUNT_PATH = '/data/moltbot';
 
-/** 
+/**
  * R2 bucket name for persistent storage.
  * Can be overridden via R2_BUCKET_NAME env var for test isolation.
  */

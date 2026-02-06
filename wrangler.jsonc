@@ -48,10 +48,19 @@
     {
       "name": "Sandbox",
       "class_name": "Sandbox",
-      "container": "moltbot-sandbox-sandbox"
-    }
-  ]
-},
+      "image": "./Dockerfile",
+      "instance_type": "standard-1",
+      "max_instances": 1,
+    },
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox",
+      },
+    ],
+  },
   "migrations": [
     {
       "new_sqlite_classes": ["Sandbox"],
@@ -75,17 +84,31 @@
   },
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
-  // - ANTHROPIC_API_KEY: Your Anthropic API key
+  //
+  // AI Provider (at least one set required):
+  // - ANTHROPIC_API_KEY: Direct Anthropic API key
+  // - OPENAI_API_KEY: Direct OpenAI API key
+  // - Cloudflare AI Gateway (alternative to direct keys):
+  //   - CLOUDFLARE_AI_GATEWAY_API_KEY: API key for requests through the gateway
+  //   - CF_AI_GATEWAY_ACCOUNT_ID: Your Cloudflare account ID
+  //   - CF_AI_GATEWAY_GATEWAY_ID: Your AI Gateway ID
+  // - Legacy AI Gateway (still supported):
+  //   - AI_GATEWAY_API_KEY: API key
+  //   - AI_GATEWAY_BASE_URL: Gateway endpoint URL
+  //
+  // Authentication:
+  // - MOLTBOT_GATEWAY_TOKEN: Token to protect gateway access
   // - CF_ACCESS_TEAM_DOMAIN: Cloudflare Access team domain
   // - CF_ACCESS_AUD: Cloudflare Access application audience
-  // - TELEGRAM_BOT_TOKEN: (optional) Telegram bot token
-  // - DISCORD_BOT_TOKEN: (optional) Discord bot token
-  // - SLACK_BOT_TOKEN: (optional) Slack bot token
-  // - SLACK_APP_TOKEN: (optional) Slack app token
-  // - MOLTBOT_GATEWAY_TOKEN: (optional) Token to protect gateway access, if unset device pairing will be used
-  // - CDP_SECRET: (optional) Shared secret for /cdp endpoint authentication
   //
-  // R2 persistent storage secrets (required for data persistence across sessions):
+  // Chat channels (optional):
+  // - TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN
+  //
+  // Browser automation (optional):
+  // - CDP_SECRET: Shared secret for /cdp endpoint authentication
+  // - WORKER_URL: Public URL of the worker
+  //
+  // R2 persistent storage (optional, for data persistence across sessions):
   // - R2_ACCESS_KEY_ID: R2 access key ID (from R2 API tokens)
   // - R2_SECRET_ACCESS_KEY: R2 secret access key (from R2 API tokens)
   // - CF_ACCOUNT_ID: Your Cloudflare account ID (for R2 endpoint URL)

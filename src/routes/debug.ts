@@ -13,15 +13,15 @@ const debug = new Hono<AppEnv>();
 debug.get('/version', async (c) => {
   const sandbox = c.get('sandbox');
   try {
-    // Get moltbot version (CLI is still named clawdbot until upstream renames)
-    const versionProcess = await sandbox.startProcess('clawdbot --version');
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Get OpenClaw version
+    const versionProcess = await sandbox.startProcess('openclaw --version');
+    await new Promise((resolve) => setTimeout(resolve, 500));
     const versionLogs = await versionProcess.getLogs();
     const moltbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
 
     // Get node version
     const nodeProcess = await sandbox.startProcess('node --version');
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
     const nodeLogs = await nodeProcess.getLogs();
     const nodeVersion = (nodeLogs.stdout || '').trim();
 
@@ -42,38 +42,40 @@ debug.get('/processes', async (c) => {
     const processes = await sandbox.listProcesses();
     const includeLogs = c.req.query('logs') === 'true';
 
-    const processData = await Promise.all(processes.map(async p => {
-      const data: Record<string, unknown> = {
-        id: p.id,
-        command: p.command,
-        status: p.status,
-        startTime: p.startTime?.toISOString(),
-        endTime: p.endTime?.toISOString(),
-        exitCode: p.exitCode,
-      };
+    const processData = await Promise.all(
+      processes.map(async (p) => {
+        const data: Record<string, unknown> = {
+          id: p.id,
+          command: p.command,
+          status: p.status,
+          startTime: p.startTime?.toISOString(),
+          endTime: p.endTime?.toISOString(),
+          exitCode: p.exitCode,
+        };
 
-      if (includeLogs) {
-        try {
-          const logs = await p.getLogs();
-          data.stdout = logs.stdout || '';
-          data.stderr = logs.stderr || '';
-        } catch {
-          data.logs_error = 'Failed to retrieve logs';
+        if (includeLogs) {
+          try {
+            const logs = await p.getLogs();
+            data.stdout = logs.stdout || '';
+            data.stderr = logs.stderr || '';
+          } catch {
+            data.logs_error = 'Failed to retrieve logs';
+          }
         }
-      }
 
-      return data;
-    }));
+        return data;
+      }),
+    );
 
     // Sort by status (running first, then starting, completed, failed)
     // Within each status, sort by startTime descending (newest first)
     const statusOrder: Record<string, number> = {
-      'running': 0,
-      'starting': 1,
-      'completed': 2,
-      'failed': 3,
+      running: 0,
+      starting: 1,
+      completed: 2,
+      failed: 3,
     };
-    
+
     processData.sort((a, b) => {
       const statusA = statusOrder[a.status as string] ?? 99;
       const statusB = statusOrder[b.status as string] ?? 99;
@@ -81,8 +83,8 @@ debug.get('/processes', async (c) => {
         return statusA - statusB;
       }
       // Within same status, sort by startTime descending
-      const timeA = a.startTime as string || '';
-      const timeB = b.startTime as string || '';
+      const timeA = (a.startTime as string) || '';
+      const timeB = (b.startTime as string) || '';
       return timeB.localeCompare(timeA);
     });
 
@@ -98,19 +100,19 @@ debug.get('/gateway-api', async (c) => {
   const sandbox = c.get('sandbox');
   const path = c.req.query('path') || '/';
   const MOLTBOT_PORT = 18789;
-  
+
   try {
     const url = `http://localhost:${MOLTBOT_PORT}${path}`;
     const response = await sandbox.containerFetch(new Request(url), MOLTBOT_PORT);
     const contentType = response.headers.get('content-type') || '';
-    
+
     let body: string | object;
     if (contentType.includes('application/json')) {
       body = await response.json();
     } else {
       body = await response.text();
     }
-    
+
     return c.json({
       path,
       status: response.status,
@@ -123,18 +125,19 @@ debug.get('/gateway-api', async (c) => {
   }
 });
 
-// GET /debug/cli - Test moltbot CLI commands (CLI is still named clawdbot)
+// GET /debug/cli - Test OpenClaw CLI commands
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
-  const cmd = c.req.query('cmd') || 'clawdbot --help';
-  
+  const cmd = c.req.query('cmd') || 'openclaw --help';
+
   try {
     const proc = await sandbox.startProcess(cmd);
-    
+
     // Wait longer for command to complete
     let attempts = 0;
     while (attempts < 30) {
-      await new Promise(r => setTimeout(r, 500));
+      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
+      await new Promise((r) => setTimeout(r, 500));
       if (proc.status !== 'running') break;
       attempts++;
     }
@@ -163,14 +166,17 @@ debug.get('/logs', async (c) => {
 
     if (processId) {
       const processes = await sandbox.listProcesses();
-      process = processes.find(p => p.id === processId);
+      process = processes.find((p) => p.id === processId);
       if (!process) {
-        return c.json({
-          status: 'not_found',
-          message: `Process ${processId} not found`,
-          stdout: '',
-          stderr: '',
-        }, 404);
+        return c.json(
+          {
+            status: 'not_found',
+            message: `Process ${processId} not found`,
+            stdout: '',
+            stderr: '',
+          },
+          404,
+        );
       }
     } else {
       process = await findExistingMoltbotProcess(sandbox);
@@ -194,12 +200,15 @@ debug.get('/logs', async (c) => {
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({
-      status: 'error',
-      message: `Failed to get logs: ${errorMessage}`,
-      stdout: '',
-      stderr: '',
-    }, 500);
+    return c.json(
+      {
+        status: 'error',
+        message: `Failed to get logs: ${errorMessage}`,
+        stdout: '',
+        stderr: '',
+      },
+      500,
+    );
   }
 });
 
@@ -208,7 +217,7 @@ debug.get('/ws-test', async (c) => {
   const host = c.req.header('host') || 'localhost';
   const protocol = c.req.header('x-forwarded-proto') || 'https';
   const wsProtocol = protocol === 'https' ? 'wss' : 'ws';
-  
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -332,7 +341,7 @@ debug.get('/ws-test', async (c) => {
   </script>
 </body>
 </html>`;
-  
+
   return c.html(html);
 });
 
@@ -347,7 +356,7 @@ debug.get('/env', async (c) => {
     has_cf_account_id: !!c.env.CF_ACCOUNT_ID,
     dev_mode: c.env.DEV_MODE,
     debug_routes: c.env.DEBUG_ROUTES,
-    bind_mode: c.env.CLAWDBOT_BIND_MODE,
+    bind_mode: 'lan',
     cf_access_team_domain: c.env.CF_ACCESS_TEAM_DOMAIN,
     has_cf_access_aud: !!c.env.CF_ACCESS_AUD,
   });
@@ -356,13 +365,14 @@ debug.get('/env', async (c) => {
 // GET /debug/container-config - Read the moltbot config from inside the container
 debug.get('/container-config', async (c) => {
   const sandbox = c.get('sandbox');
-  
+
   try {
-    const proc = await sandbox.startProcess('cat /root/.clawdbot/clawdbot.json');
-    
+    const proc = await sandbox.startProcess('cat /root/.openclaw/openclaw.json');
+
     let attempts = 0;
     while (attempts < 10) {
-      await new Promise(r => setTimeout(r, 200));
+      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
+      await new Promise((r) => setTimeout(r, 200));
       if (proc.status !== 'running') break;
       attempts++;
     }
@@ -370,14 +380,14 @@ debug.get('/container-config', async (c) => {
     const logs = await proc.getLogs();
     const stdout = logs.stdout || '';
     const stderr = logs.stderr || '';
-    
+
     let config = null;
     try {
       config = JSON.parse(stdout);
     } catch {
       // Not valid JSON
     }
-    
+
     return c.json({
       status: proc.status,
       exitCode: proc.exitCode,

@@ -1,11 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { mountR2Storage } from './r2';
-import { 
-  createMockEnv, 
-  createMockEnvWithR2, 
-  createMockProcess, 
-  createMockSandbox, 
-  suppressConsole 
+import {
+  createMockEnv,
+  createMockEnvWithR2,
+  createMockProcess,
+  createMockSandbox,
+  suppressConsole,
 } from '../test-utils';
 
 describe('mountR2Storage', () => {
@@ -58,7 +58,7 @@ describe('mountR2Storage', () => {
 
       expect(result).toBe(false);
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('R2 storage not configured')
+        expect.stringContaining('R2 storage not configured'),
       );
     });
   });
@@ -75,17 +75,13 @@ describe('mountR2Storage', () => {
       const result = await mountR2Storage(sandbox, env);
 
       expect(result).toBe(true);
-      expect(mountBucketMock).toHaveBeenCalledWith(
-        'moltbot-data',
-        '/data/moltbot',
-        {
-          endpoint: 'https://account123.r2.cloudflarestorage.com',
-          credentials: {
-            accessKeyId: 'key123',
-            secretAccessKey: 'secret',
-          },
-        }
-      );
+      expect(mountBucketMock).toHaveBeenCalledWith('moltbot-data', '/data/moltbot', {
+        endpoint: 'https://account123.r2.cloudflarestorage.com',
+        credentials: {
+          accessKeyId: 'key123',
+          secretAccessKey: 'secret',
+        },
+      });
     });
 
     it('uses custom bucket name from R2_BUCKET_NAME env var', async () => {
@@ -103,7 +99,7 @@ describe('mountR2Storage', () => {
       expect(mountBucketMock).toHaveBeenCalledWith(
         'moltbot-e2e-test123',
         '/data/moltbot',
-        expect.any(Object)
+        expect.any(Object),
       );
     });
 
@@ -115,10 +111,7 @@ describe('mountR2Storage', () => {
 
       expect(result).toBe(true);
       expect(mountBucketMock).not.toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith(
-        'R2 bucket already mounted at',
-        '/data/moltbot'
-      );
+      expect(console.log).toHaveBeenCalledWith('R2 bucket already mounted at', '/data/moltbot');
     });
 
     it('logs success message when mounted successfully', async () => {
@@ -128,7 +121,7 @@ describe('mountR2Storage', () => {
       await mountR2Storage(sandbox, env);
 
       expect(console.log).toHaveBeenCalledWith(
-        'R2 bucket mounted successfully - moltbot data will persist across sessions'
+        'R2 bucket mounted successfully - moltbot data will persist across sessions',
       );
     });
   });
@@ -140,16 +133,13 @@ describe('mountR2Storage', () => {
       startProcessMock
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(''));
-      
+
       const env = createMockEnvWithR2();
 
       const result = await mountR2Storage(sandbox, env);
 
       expect(result).toBe(false);
-      expect(console.error).toHaveBeenCalledWith(
-        'Failed to mount R2 bucket:',
-        expect.any(Error)
-      );
+      expect(console.error).toHaveBeenCalledWith('Failed to mount R2 bucket:', expect.any(Error));
     });
 
     it('returns true if mount fails but check shows it is actually mounted', async () => {
@@ -157,9 +147,9 @@ describe('mountR2Storage', () => {
       startProcessMock
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'));
-      
+
       mountBucketMock.mockRejectedValue(new Error('Transient error'));
-      
+
       const env = createMockEnvWithR2();
 
       const result = await mountR2Storage(sandbox, env);

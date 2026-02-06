@@ -62,10 +62,7 @@ export class AuthError extends Error {
   }
 }
 
-async function apiRequest<T>(
-  path: string,
-  options: globalThis.RequestInit = {}
-): Promise<T> {
+async function apiRequest<T>(path: string, options: globalThis.RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
     credentials: 'include',
@@ -79,7 +76,7 @@ async function apiRequest<T>(
     throw new AuthError('Unauthorized - please log in via Cloudflare Access');
   }
 
-  const data = await response.json() as T & { error?: string };
+  const data = (await response.json()) as T & { error?: string };
 
   if (!response.ok) {
     throw new Error(data.error || `API error: ${response.status}`);

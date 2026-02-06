@@ -1,7 +1,18 @@
 # Copy this to .dev.vars and fill in your values
 # .dev.vars is gitignored and used by wrangler dev
 
+# AI Provider (at least one required)
 ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+
+# Cloudflare AI Gateway (alternative to direct provider keys)
+# CLOUDFLARE_AI_GATEWAY_API_KEY=your-gateway-api-key
+# CF_AI_GATEWAY_ACCOUNT_ID=your-account-id
+# CF_AI_GATEWAY_GATEWAY_ID=your-gateway-id
+
+# Legacy AI Gateway (still supported)
+# AI_GATEWAY_API_KEY=your-key
+# AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true

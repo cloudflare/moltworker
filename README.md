@@ -19,6 +19,25 @@ The following Cloudflare features used by this project have free tiers:
 - AI Gateway (optional, for API routing/analytics)
 - R2 Storage (optional, for persistence)
 
+## Container Cost Estimate
+
+This project uses a `standard-1` Cloudflare Container instance (1/2 vCPU, 4 GiB memory, 8 GB disk). Below are approximate monthly costs assuming the container runs 24/7, based on [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/pricing/):
+
+| Resource | Provisioned | Monthly Usage | Included Free | Overage | Approx. Cost |
+|----------|-------------|---------------|---------------|---------|--------------|
+| Memory | 4 GiB | 2,920 GiB-hrs | 25 GiB-hrs | 2,895 GiB-hrs | ~$26/mo |
+| CPU (at ~10% utilization) | 1/2 vCPU | ~2,190 vCPU-min | 375 vCPU-min | ~1,815 vCPU-min | ~$2/mo |
+| Disk | 8 GB | 5,840 GB-hrs | 200 GB-hrs | 5,640 GB-hrs | ~$1.50/mo |
+| Workers Paid plan | | | | | $5/mo |
+| **Total** | | | | | **~$34.50/mo** |
+
+Notes:
+- CPU is billed on **active usage only**, not provisioned capacity. The 10% utilization estimate is a rough baseline for a lightly-used personal assistant; your actual cost will vary with usage.
+- Memory and disk are billed on **provisioned capacity** for the full time the container is running.
+- To reduce costs, configure `SANDBOX_SLEEP_AFTER` (e.g., `10m`) so the container sleeps when idle. A container that only runs 4 hours/day would cost roughly ~$5-6/mo in compute on top of the $5 plan fee.
+- Network egress, Workers/Durable Objects requests, and logs are additional but typically minimal for personal use.
+- See the [instance types table](https://developers.cloudflare.com/containers/pricing/) for other options (e.g., `lite` at 256 MiB/$0.50/mo memory or `standard-4` at 12 GiB for heavier workloads).
+
 ## What is OpenClaw?
 
 [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) is a personal AI assistant with a gateway architecture that connects to multiple chat platforms. Key features:
@@ -90,10 +109,11 @@ The easiest way to protect your worker is using the built-in Cloudflare Access i
 2. Select your Worker (e.g., `moltbot-sandbox`)
 3. In **Settings**, under **Domains & Routes**, in the `workers.dev` row, click the meatballs menu (`...`)
 4. Click **Enable Cloudflare Access**
-5. Click **Manage Cloudflare Access** to configure who can access:
+5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 — ignore it.
+6. To configure who can access, go to **Zero Trust** in the Cloudflare dashboard sidebar → **Access** → **Applications**, and find your worker's application:
    - Add your email address to the allow list
    - Or configure other identity providers (Google, GitHub, etc.)
-6. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
+7. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
 
 ### 2. Set Access Secrets
 
@@ -300,7 +320,7 @@ npm run deploy
 | `GET /cdp/json/new` | Create a new browser target |
 | `WS /cdp/devtools/browser/{id}` | WebSocket connection for CDP commands |
 
-All endpoints require the `CDP_SECRET` header for authentication.
+All endpoints require authentication via the `?secret=<CDP_SECRET>` query parameter.
 
 ## Built-in Skills
 
@@ -411,6 +431,12 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 **Devices not appearing in admin UI:** Device list commands take 10-15 seconds due to WebSocket connection overhead. Wait and refresh.
 
 **WebSocket issues in local development:** `wrangler dev` has known limitations with WebSocket proxying through the sandbox. HTTP requests work but WebSocket connections may fail. Deploy to Cloudflare for full functionality.
+
+## Known Issues
+
+### Windows: Gateway fails to start with exit code 126 (permission denied)
+
+On Windows, Git may check out shell scripts with CRLF line endings instead of LF. This causes `start-openclaw.sh` to fail with exit code 126 inside the Linux container. Ensure your repository uses LF line endings — configure Git with `git config --global core.autocrlf input` or add a `.gitattributes` file with `* text=auto eol=lf`. See [#64](https://github.com/cloudflare/moltworker/issues/64) for details.
 
 ## Links
 

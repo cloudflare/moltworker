@@ -33,8 +33,8 @@ export function createMockEnvWithR2(overrides: Partial<MoltbotEnv> = {}): Moltbo
  * Create a mock process object
  */
 export function createMockProcess(
-  stdout: string = '', 
-  options: { exitCode?: number; stderr?: string; status?: string } = {}
+  stdout: string = '',
+  options: { exitCode?: number; stderr?: string; status?: string } = {},
 ): Partial<Process> {
   const { exitCode = 0, stderr = '', status = 'completed' } = options;
   return {
@@ -55,21 +55,27 @@ export interface MockSandbox {
 /**
  * Create a mock sandbox with configurable behavior
  */
-export function createMockSandbox(options: { 
-  mounted?: boolean;
-  processes?: Partial<Process>[];
-} = {}): MockSandbox {
+export function createMockSandbox(
+  options: {
+    mounted?: boolean;
+    processes?: Partial<Process>[];
+  } = {},
+): MockSandbox {
   const mountBucketMock = vi.fn().mockResolvedValue(undefined);
   const listProcessesMock = vi.fn().mockResolvedValue(options.processes || []);
   const containerFetchMock = vi.fn();
-  
+
   // Default: return empty stdout (not mounted), unless mounted: true
-  const startProcessMock = vi.fn().mockResolvedValue(
-    options.mounted 
-      ? createMockProcess('s3fs on /data/moltbot type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=0,group_id=0)\n')
-      : createMockProcess('')
-  );
-  
+  const startProcessMock = vi
+    .fn()
+    .mockResolvedValue(
+      options.mounted
+        ? createMockProcess(
+            's3fs on /data/moltbot type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=0,group_id=0)\n',
+          )
+        : createMockProcess(''),
+    );
+
   const sandbox = {
     mountBucket: mountBucketMock,
     listProcesses: listProcessesMock,

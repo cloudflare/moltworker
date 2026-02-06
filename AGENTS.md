@@ -4,13 +4,13 @@ Guidelines for AI agents working on this codebase.
 
 ## Project Overview
 
-This is a Cloudflare Worker that runs [Moltbot](https://molt.bot/) in a Cloudflare Sandbox container. It provides:
-- Proxying to the Moltbot gateway (web UI + WebSocket)
+This is a Cloudflare Worker that runs [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot/Clawdbot) in a Cloudflare Sandbox container. It provides:
+- Proxying to the OpenClaw gateway (web UI + WebSocket)
 - Admin UI at `/_admin/` for device management
 - API endpoints at `/api/*` for device pairing
 - Debug endpoints at `/debug/*` for troubleshooting
 
-**Note:** The CLI tool is still named `clawdbot` (upstream hasn't renamed yet), so CLI commands and internal config paths still use that name.
+**Note:** The CLI tool and npm package are now named `openclaw`. Config files use `.openclaw/openclaw.json`. Legacy `.clawdbot` paths are supported for backward compatibility during transition.
 
 ## Project Structure
 
@@ -23,7 +23,7 @@ src/
 │   ├── jwt.ts        # JWT verification
 │   ├── jwks.ts       # JWKS fetching and caching
 │   └── middleware.ts # Hono middleware for auth
-├── gateway/          # Moltbot gateway management
+├── gateway/          # OpenClaw gateway management
 │   ├── process.ts    # Process lifecycle (find, start)
 │   ├── env.ts        # Environment variable building
 │   ├── r2.ts         # R2 bucket mounting
@@ -43,16 +43,15 @@ src/
 
 ### Environment Variables
 
-- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `CLAWDBOT_DEV_MODE` for container)
+- `DEV_MODE` - Skips CF Access auth AND bypasses device pairing (maps to `OPENCLAW_DEV_MODE` for container)
 - `DEBUG_ROUTES` - Enables `/debug/*` routes (disabled by default)
 - See `src/types.ts` for full `MoltbotEnv` interface
 
 ### CLI Commands
 
-When calling the moltbot CLI from the worker, always include `--url ws://localhost:18789`.
-Note: The CLI is still named `clawdbot` until upstream renames it:
+When calling the OpenClaw CLI from the worker, always include `--url ws://localhost:18789`:
 ```typescript
-sandbox.startProcess('clawdbot devices list --json --url ws://localhost:18789')
+sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789')
 ```
 
 CLI commands take 10-15 seconds due to WebSocket connection overhead. Use `waitForProcess()` helper in `src/routes/api.ts`.
@@ -87,6 +86,7 @@ Current test coverage:
 - `gateway/env.test.ts` - Environment variable building
 - `gateway/process.test.ts` - Process finding logic
 - `gateway/r2.test.ts` - R2 mounting logic
+- `gateway/sync.test.ts` - R2 backup sync logic
 
 When adding new functionality, add corresponding tests.
 
@@ -114,7 +114,7 @@ Browser
    ▼
 ┌─────────────────────────────────────┐
 │     Cloudflare Worker (index.ts)    │
-│  - Starts Moltbot in sandbox        │
+│  - Starts OpenClaw in sandbox       │
 │  - Proxies HTTP/WebSocket requests  │
 │  - Passes secrets as env vars       │
 └──────────────┬──────────────────────┘
@@ -123,7 +123,7 @@ Browser
 ┌─────────────────────────────────────┐
 │     Cloudflare Sandbox Container    │
 │  ┌───────────────────────────────┐  │
-│  │     Moltbot Gateway           │  │
+│  │     OpenClaw Gateway          │  │
 │  │  - Control UI on port 18789   │  │
 │  │  - WebSocket RPC protocol     │  │
 │  │  - Agent runtime              │  │
@@ -136,9 +136,8 @@ Browser
 | File | Purpose |
 |------|---------|
 | `src/index.ts` | Worker that manages sandbox lifecycle and proxies requests |
-| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + Moltbot |
-| `start-moltbot.sh` | Startup script that configures moltbot from env vars and launches gateway |
-| `moltbot.json.template` | Default Moltbot configuration template |
+| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + OpenClaw |
+| `start-openclaw.sh` | Startup script: R2 restore → onboard → config patch → launch gateway |
 | `wrangler.jsonc` | Cloudflare Worker + Container configuration |
 
 ## Local Development
@@ -166,19 +165,29 @@ Local development with `wrangler dev` has issues proxying WebSocket connections 
 
 ## Docker Image Caching
 
-The Dockerfile includes a cache bust comment. When changing `moltbot.json.template` or `start-moltbot.sh`, bump the version:
+The Dockerfile includes a cache bust comment. When changing `start-openclaw.sh`, bump the version:
 
 ```dockerfile
-# Build cache bust: 2026-01-26-v10
+# Build cache bust: 2026-02-06-v28-openclaw-upgrade
 ```
 
 ## Gateway Configuration
 
-Moltbot configuration is built at container startup:
+OpenClaw configuration is built at container startup:
 
-1. `moltbot.json.template` is copied to `~/.clawdbot/clawdbot.json` (internal path unchanged)
-2. `start-moltbot.sh` updates the config with values from environment variables
-3. Gateway starts with `--allow-unconfigured` flag (skips onboarding wizard)
+1. R2 backup is restored if available (with migration from legacy `.clawdbot` paths)
+2. If no config exists, `openclaw onboard --non-interactive` creates one based on env vars
+3. `start-openclaw.sh` patches the config for channels, gateway auth, and trusted proxies
+4. Gateway starts with `openclaw gateway --allow-unconfigured --bind lan`
+
+### AI Provider Priority
+
+The startup script selects the auth choice based on which env vars are set:
+
+1. **Cloudflare AI Gateway** (native): `CLOUDFLARE_AI_GATEWAY_API_KEY` + `CF_AI_GATEWAY_ACCOUNT_ID` + `CF_AI_GATEWAY_GATEWAY_ID`
+2. **Direct Anthropic**: `ANTHROPIC_API_KEY` (optionally with `ANTHROPIC_BASE_URL`)
+3. **Direct OpenAI**: `OPENAI_API_KEY`
+4. **Legacy AI Gateway**: `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` (routes through Anthropic base URL)
 
 ### Container Environment Variables
 
@@ -186,24 +195,28 @@ These are the env vars passed TO the container (internal names):
 
 | Variable | Config Path | Notes |
 |----------|-------------|-------|
-| `ANTHROPIC_API_KEY` | (env var) | Moltbot reads directly from env |
-| `CLAWDBOT_GATEWAY_TOKEN` | `--token` flag | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
-| `CLAWDBOT_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
+| `ANTHROPIC_API_KEY` | (env var) | OpenClaw reads directly from env |
+| `OPENAI_API_KEY` | (env var) | OpenClaw reads directly from env |
+| `CLOUDFLARE_AI_GATEWAY_API_KEY` | (env var) | Native AI Gateway key |
+| `CF_AI_GATEWAY_ACCOUNT_ID` | (env var) | Account ID for AI Gateway |
+| `CF_AI_GATEWAY_GATEWAY_ID` | (env var) | Gateway ID for AI Gateway |
+| `OPENCLAW_GATEWAY_TOKEN` | `--token` flag | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
+| `OPENCLAW_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
 | `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
 
-## Moltbot Config Schema
+## OpenClaw Config Schema
 
-Moltbot has strict config validation. Common gotchas:
+OpenClaw has strict config validation. Common gotchas:
 
 - `agents.defaults.model` must be `{ "primary": "model/name" }` not a string
 - `gateway.mode` must be `"local"` for headless operation
 - No `webchat` channel - the Control UI is served automatically
 - `gateway.bind` is not a config option - use `--bind` CLI flag
 
-See [Moltbot docs](https://docs.molt.bot/gateway/configuration) for full schema.
+See [OpenClaw docs](https://docs.openclaw.ai/) for full schema.
 
 ## Common Tasks
 
@@ -244,3 +257,5 @@ R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
 - **Never delete R2 data**: The mount directory `/data/moltbot` IS the R2 bucket. Running `rm -rf /data/moltbot/*` will DELETE your backup data. Always check mount status before any destructive operations.
 
 - **Process status**: The sandbox API's `proc.status` may not update immediately after a process completes. Instead of checking `proc.status === 'completed'`, verify success by checking for expected output (e.g., timestamp file exists after sync).
+
+- **R2 prefix migration**: Backups are now stored under `openclaw/` prefix in R2 (was `clawdbot/`). The startup script handles restoring from both old and new prefixes with automatic migration.
