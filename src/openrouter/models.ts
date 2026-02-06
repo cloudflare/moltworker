@@ -365,13 +365,23 @@ export const MODELS: Record<string, ModelInfo> = {
   },
 
   // === DIRECT API MODELS (bypass OpenRouter) ===
+  dcode: {
+    id: 'deepseek-coder',
+    alias: 'dcode',
+    name: 'DeepSeek Coder (Direct)',
+    specialty: 'Direct DeepSeek API - Coding',
+    score: 'Excellent coding, very cheap',
+    cost: '$0.14/$0.28',
+    supportsTools: true,
+    provider: 'deepseek',
+  },
   q25: {
     id: 'qwen-plus',
     alias: 'q25',
     name: 'Qwen 2.5 Plus (Direct)',
     specialty: 'Direct Qwen API - Fast Coding',
     score: 'Great for coding, cheap',
-    cost: '~$0.002/1K tokens',
+    cost: '$0.80/$2.00',
     supportsTools: true,
     provider: 'dashscope',
   },
@@ -381,19 +391,9 @@ export const MODELS: Record<string, ModelInfo> = {
     name: 'Kimi 128K (Direct)',
     specialty: 'Direct Moonshot API - Long Context',
     score: '128K context, good reasoning',
-    cost: '~$0.012/1K tokens',
+    cost: '$8/$8',
     supportsTools: true,
     provider: 'moonshot',
-  },
-  dcode: {
-    id: 'deepseek-coder',
-    alias: 'dcode',
-    name: 'DeepSeek Coder (Direct)',
-    specialty: 'Direct DeepSeek API - Coding',
-    score: 'Excellent coding, very cheap',
-    cost: '~$0.001/1K tokens',
-    supportsTools: true,
-    provider: 'deepseek',
   },
 };
 
@@ -453,10 +453,30 @@ export function isImageGenModel(alias: string): boolean {
 }
 
 /**
+ * Parse cost string to get input cost for sorting
+ * Formats: "$X/$Y" (per million), "FREE", "$X/megapixel"
+ */
+function parseCostForSort(cost: string): number {
+  if (cost === 'FREE' || cost.includes('FREE')) return 0;
+  if (cost.includes('/megapixel')) {
+    const match = cost.match(/\$([0-9.]+)/);
+    return match ? parseFloat(match[1]) : 999;
+  }
+  // Format: $input/$output per million tokens
+  const match = cost.match(/\$([0-9.]+)\/\$([0-9.]+)/);
+  if (match) {
+    // Use average of input and output for sorting
+    return (parseFloat(match[1]) + parseFloat(match[2])) / 2;
+  }
+  return 999; // Unknown format, sort last
+}
+
+/**
  * Format models list for /models command
+ * Sorted by cost efficiency within each category
  */
 export function formatModelsList(): string {
-  const lines: string[] = ['Available Models:\n'];
+  const lines: string[] = ['📋 Available Models (sorted by cost):\n'];
 
   // Group by category
   const free = Object.values(MODELS).filter(m => m.isFree && !m.isImageGen && !m.provider);
@@ -464,32 +484,41 @@ export function formatModelsList(): string {
   const paid = Object.values(MODELS).filter(m => !m.isFree && !m.isImageGen && !m.provider);
   const direct = Object.values(MODELS).filter(m => m.provider && m.provider !== 'openrouter');
 
-  lines.push('FREE (OpenRouter):');
+  // Sort by cost (cheapest first)
+  const sortByCost = (a: ModelInfo, b: ModelInfo) => parseCostForSort(a.cost) - parseCostForSort(b.cost);
+  paid.sort(sortByCost);
+  direct.sort(sortByCost);
+  imageGen.sort(sortByCost);
+
+  lines.push('🆓 FREE (OpenRouter):');
   for (const m of free) {
-    lines.push(`  /${m.alias} - ${m.name}`);
+    const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
+    lines.push(`  /${m.alias} - ${m.name} ${features}`);
     lines.push(`    ${m.specialty} | ${m.score}`);
   }
 
-  lines.push('\nDIRECT API (no OpenRouter):');
+  lines.push('\n⚡ DIRECT API (cheapest, no OpenRouter):');
   for (const m of direct) {
+    const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
+    lines.push(`  /${m.alias} - ${m.name} ${features}`);
+    lines.push(`    ${m.specialty} | ${m.score} | ${m.cost}`);
+  }
+
+  lines.push('\n🎨 IMAGE GEN:');
+  for (const m of imageGen) {
     lines.push(`  /${m.alias} - ${m.name}`);
     lines.push(`    ${m.specialty} | ${m.cost}`);
   }
 
-  lines.push('\nIMAGE GEN:');
-  for (const m of imageGen) {
-    lines.push(`  /${m.alias} - ${m.name}`);
-    lines.push(`    ${m.specialty}`);
-  }
-
-  lines.push('\nPAID (OpenRouter):');
+  lines.push('\n💰 PAID (OpenRouter, $/M in/out):');
   for (const m of paid) {
-    lines.push(`  /${m.alias} - ${m.name}`);
+    const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
+    lines.push(`  /${m.alias} - ${m.name} ${features}`);
     lines.push(`    ${m.specialty} | ${m.score} | ${m.cost}`);
   }
 
-  lines.push('\nUsage: /use <alias> to set your default model');
-  lines.push('Current default: auto (best value routing)');
+  lines.push('\n👁️=vision 🔧=tools | Cost: $input/$output per million tokens');
+  lines.push('Usage: /use <alias> or /<alias> to set model');
 
   return lines.join('\n');
 }

@@ -596,7 +596,8 @@ export class TelegramHandler {
         break;
 
       case '/automode':
-      case '/auto':
+      case '/autoresume':
+      case '/ar':
         // Toggle auto-resume mode
         const currentAutoResume = await this.storage.getUserAutoResume(userId);
         const newAutoResume = !currentAutoResume;
@@ -1397,7 +1398,7 @@ export class TelegramHandler {
 /saveas <name> - Backup current to slot
 /load <name> - Restore from slot
 /delsave <name> - Delete a checkpoint
-/automode - Toggle auto-resume
+/ar - Toggle auto-resume (/automode)
 
 🎨 Image Generation:
 /img <prompt> - Generate image
