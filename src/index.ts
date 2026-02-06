@@ -47,6 +47,21 @@ function transformErrorMessage(message: string, host: string): string {
   return message;
 }
 
+/**
+ * Build a request for the internal Moltbot gateway.
+ * If a gateway token is configured, always inject it server-side so users
+ * don't need to carry `?token=` in browser URLs.
+ */
+function buildGatewayRequest(request: Request, env: MoltbotEnv): Request {
+  if (!env.MOLTBOT_GATEWAY_TOKEN) {
+    return request;
+  }
+
+  const url = new URL(request.url);
+  url.searchParams.set('token', env.MOLTBOT_GATEWAY_TOKEN);
+  return new Request(url.toString(), request);
+}
+
 export { Sandbox };
 
 /**
@@ -214,6 +229,11 @@ app.use('/debug/*', async (c, next) => {
 });
 app.route('/debug', debug);
 
+// Convenience entrypoint for authenticated users: redirects to the gateway UI.
+// Token is injected server-side by buildGatewayRequest() in the proxy handler.
+app.get('/gateway', (c) => c.redirect('/', 302));
+app.get('/gateway/', (c) => c.redirect('/', 302));
+
 // =============================================================================
 // CATCH-ALL: Proxy to Moltbot gateway
 // =============================================================================
@@ -222,6 +242,8 @@ app.all('*', async (c) => {
   const sandbox = c.get('sandbox');
   const request = c.req.raw;
   const url = new URL(request.url);
+  const gatewayRequest = buildGatewayRequest(request, c.env);
+  const gatewayUrl = new URL(gatewayRequest.url);
 
   console.log('[PROXY] Handling request:', url.pathname);
 
@@ -271,15 +293,15 @@ app.all('*', async (c) => {
   // Proxy to Moltbot with WebSocket message interception
   if (isWebSocketRequest) {
     const debugLogs = c.env.DEBUG_ROUTES === 'true';
-    const redactedSearch = redactSensitiveParams(url);
+    const redactedSearch = redactSensitiveParams(gatewayUrl);
 
     console.log('[WS] Proxying WebSocket connection to Moltbot');
     if (debugLogs) {
-      console.log('[WS] URL:', url.pathname + redactedSearch);
+      console.log('[WS] URL:', gatewayUrl.pathname + redactedSearch);
     }
 
     // Get WebSocket connection to the container
-    const containerResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+    const containerResponse = await sandbox.wsConnect(gatewayRequest, MOLTBOT_PORT);
     console.log('[WS] wsConnect response status:', containerResponse.status);
 
     // Get the container-side WebSocket
@@ -399,8 +421,9 @@ app.all('*', async (c) => {
     });
   }
 
-  console.log('[HTTP] Proxying:', url.pathname + url.search);
-  const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
+  const redactedSearch = redactSensitiveParams(gatewayUrl);
+  console.log('[HTTP] Proxying:', gatewayUrl.pathname + redactedSearch);
+  const httpResponse = await sandbox.containerFetch(gatewayRequest, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
 
   // Add debug header to verify worker handled the request

@@ -58,3 +58,6 @@ test/e2e/.dev.vars
 
 # Temporary e2e wrangler configs
 .wrangler-e2e-*.jsonc
+
+# Local gateway token helper file
+.gateway-token.txt
