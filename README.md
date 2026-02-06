@@ -52,9 +52,9 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 # Generate and set a gateway token (required for remote access)
 # Save this token - you'll need it to access the Control UI
-export MOLTBOT_GATEWAY_TOKEN=$(openssl rand -hex 32)
-echo "Your gateway token: $MOLTBOT_GATEWAY_TOKEN"
-echo "$MOLTBOT_GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN
+export OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 32)
+echo "Your gateway token: $OPENCLAW_GATEWAY_TOKEN"
+echo "$OPENCLAW_GATEWAY_TOKEN" | npx wrangler secret put OPENCLAW_GATEWAY_TOKEN
 
 # Deploy
 npm run deploy
@@ -161,6 +161,7 @@ wss://your-worker.workers.dev/ws?token=YOUR_TOKEN
 ```
 
 **Note:** Even with a valid token, new devices still require approval via the admin UI at `/_admin/` (see Device Pairing above).
+Legacy `MOLTBOT_GATEWAY_TOKEN` / `CLAWDBOT_GATEWAY_TOKEN` is still accepted for compatibility, but `OPENCLAW_GATEWAY_TOKEN` is preferred.
 
 For local development only, set `DEV_MODE=true` in `.dev.vars` to skip Cloudflare Access authentication and enable `allowInsecureAuth` (bypasses device pairing entirely).
 
@@ -393,7 +394,7 @@ npx wrangler secret put BRAVE_API_KEY
 | `BRAVE_API_KEY` | No | Brave Search API key for web_search tooling |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
-| `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
+| `OPENCLAW_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param). Legacy `MOLTBOT_`/`CLAWDBOT_` also accepted. |
 | `DEV_MODE` | No | Set to `true` to skip CF Access auth + device pairing (local dev only) |
 | `DEBUG_ROUTES` | No | Set to `true` to enable `/debug/*` routes |
 | `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |

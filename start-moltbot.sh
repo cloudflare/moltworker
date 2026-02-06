@@ -220,10 +220,11 @@ config.gateway.port = 18789;
 config.gateway.mode = 'local';
 config.gateway.trustedProxies = ['10.1.0.0'];
 
-// Set gateway token if provided
-if (process.env.CLAWDBOT_GATEWAY_TOKEN) {
+// Set gateway token if provided (prefer OPENCLAW_, fallback to legacy CLAWDBOT_)
+const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN || process.env.CLAWDBOT_GATEWAY_TOKEN;
+if (gatewayToken) {
     config.gateway.auth = config.gateway.auth || {};
-    config.gateway.auth.token = process.env.CLAWDBOT_GATEWAY_TOKEN;
+    config.gateway.auth.token = gatewayToken;
 }
 
 // Allow insecure auth for dev mode
@@ -366,11 +367,12 @@ rm -f /tmp/clawdbot-gateway.lock 2>/dev/null || true
 rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
 
 BIND_MODE="lan"
+GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-${CLAWDBOT_GATEWAY_TOKEN:-}}"
 echo "Dev mode: ${CLAWDBOT_DEV_MODE:-false}, Bind mode: $BIND_MODE"
 
-if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+if [ -n "$GATEWAY_TOKEN" ]; then
     echo "Starting gateway with token auth..."
-    exec "$CLI_BIN" gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$CLAWDBOT_GATEWAY_TOKEN"
+    exec "$CLI_BIN" gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE" --token "$GATEWAY_TOKEN"
 else
     echo "Starting gateway with device pairing (no token)..."
     exec "$CLI_BIN" gateway --port 18789 --verbose --allow-unconfigured --bind "$BIND_MODE"

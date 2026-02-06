@@ -187,7 +187,7 @@ These are the env vars passed TO the container (internal names):
 | Variable | Config Path | Notes |
 |----------|-------------|-------|
 | `ANTHROPIC_API_KEY` | (env var) | Moltbot reads directly from env |
-| `CLAWDBOT_GATEWAY_TOKEN` | `--token` flag | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
+| `OPENCLAW_GATEWAY_TOKEN` | `--token` flag | Preferred. Legacy `MOLTBOT_`/`CLAWDBOT_` also accepted. |
 | `CLAWDBOT_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |

@@ -22,7 +22,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 # DEBUG_ROUTES=true
 
 # Optional - set a fixed token instead of auto-generated
-MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
+OPENCLAW_GATEWAY_TOKEN=dev-token-change-in-prod
+# Legacy (still accepted)
+# MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
 # Cloudflare Access configuration for /_admin and /api routes
 # Required for admin UI and device pairing API in production

@@ -52,8 +52,13 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   } else if (env.ANTHROPIC_BASE_URL) {
     envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
   }
-  // Map MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN (container expects this name)
-  if (env.MOLTBOT_GATEWAY_TOKEN) envVars.CLAWDBOT_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;
+  // Map gateway token for container (prefer OPENCLAW_, fallback to legacy MOLTBOT_/CLAWDBOT_)
+  const gatewayToken =
+    env.OPENCLAW_GATEWAY_TOKEN ?? env.MOLTBOT_GATEWAY_TOKEN ?? env.CLAWDBOT_GATEWAY_TOKEN;
+  if (gatewayToken) {
+    envVars.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
+    envVars.CLAWDBOT_GATEWAY_TOKEN = gatewayToken;
+  }
   if (env.DEV_MODE) envVars.CLAWDBOT_DEV_MODE = env.DEV_MODE; // Pass DEV_MODE as CLAWDBOT_DEV_MODE to container
   if (env.CLAWDBOT_BIND_MODE) envVars.CLAWDBOT_BIND_MODE = env.CLAWDBOT_BIND_MODE;
   if (env.TELEGRAM_BOT_TOKEN) envVars.TELEGRAM_BOT_TOKEN = env.TELEGRAM_BOT_TOKEN;
