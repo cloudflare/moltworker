@@ -87,6 +87,10 @@ log "Access AUD: $ACCESS_AUD"
 log "Service token client ID: $SERVICE_TOKEN_CLIENT_ID"
 log "R2 bucket: $R2_BUCKET"
 
+# Parse service token ID (needed for cleanup)
+SERVICE_TOKEN_ID=$(echo "$TERRAFORM_OUTPUT" | jq -r '.service_token_id.value')
+log "Service token ID: $SERVICE_TOKEN_ID"
+
 # Save outputs for other scripts
 echo "$TERRAFORM_OUTPUT" > "$CCTR_FIXTURE_DIR/terraform-output.json"
 echo "$WORKER_URL" > "$CCTR_FIXTURE_DIR/worker-url.txt"
@@ -94,6 +98,7 @@ echo "$WORKER_NAME" > "$CCTR_FIXTURE_DIR/worker-name.txt"
 echo "$GATEWAY_TOKEN" > "$CCTR_FIXTURE_DIR/gateway-token.txt"
 echo "$SERVICE_TOKEN_CLIENT_ID" > "$CCTR_FIXTURE_DIR/cf-access-client-id.txt"
 echo "$SERVICE_TOKEN_CLIENT_SECRET" > "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt"
+echo "$SERVICE_TOKEN_ID" > "$CCTR_FIXTURE_DIR/service-token-id.txt"
 echo "$E2E_TEST_RUN_ID" > "$CCTR_FIXTURE_DIR/test-run-id.txt"
 echo "$R2_BUCKET" > "$CCTR_FIXTURE_DIR/r2-bucket-name.txt"
 echo "${WORKER_NAME}-sandbox" > "$CCTR_FIXTURE_DIR/container-name.txt"
