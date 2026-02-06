@@ -92,10 +92,29 @@ describe('buildEnvVars', () => {
     expect(result.BRAVE_API_KEY).toBe('brave-test-key');
   });
 
-  it('maps MOLTBOT_GATEWAY_TOKEN to CLAWDBOT_GATEWAY_TOKEN for container', () => {
-    const env = createMockEnv({ MOLTBOT_GATEWAY_TOKEN: 'my-token' });
+  it('maps OPENCLAW_GATEWAY_TOKEN to container env', () => {
+    const env = createMockEnv({ OPENCLAW_GATEWAY_TOKEN: 'my-token' });
     const result = buildEnvVars(env);
+    expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('my-token');
     expect(result.CLAWDBOT_GATEWAY_TOKEN).toBe('my-token');
+  });
+
+  it('maps legacy MOLTBOT_GATEWAY_TOKEN to container env', () => {
+    const env = createMockEnv({ MOLTBOT_GATEWAY_TOKEN: 'legacy-token' });
+    const result = buildEnvVars(env);
+    expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('legacy-token');
+    expect(result.CLAWDBOT_GATEWAY_TOKEN).toBe('legacy-token');
+  });
+
+  it('prefers OPENCLAW_GATEWAY_TOKEN over legacy tokens', () => {
+    const env = createMockEnv({
+      OPENCLAW_GATEWAY_TOKEN: 'openclaw-token',
+      MOLTBOT_GATEWAY_TOKEN: 'moltbot-token',
+      CLAWDBOT_GATEWAY_TOKEN: 'clawdbot-token',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENCLAW_GATEWAY_TOKEN).toBe('openclaw-token');
+    expect(result.CLAWDBOT_GATEWAY_TOKEN).toBe('openclaw-token');
   });
 
   it('includes all channel tokens when set', () => {
@@ -131,7 +150,7 @@ describe('buildEnvVars', () => {
   it('combines all env vars correctly', () => {
     const env = createMockEnv({
       ANTHROPIC_API_KEY: 'sk-key',
-      MOLTBOT_GATEWAY_TOKEN: 'token',
+      OPENCLAW_GATEWAY_TOKEN: 'token',
       TELEGRAM_BOT_TOKEN: 'tg',
       BRAVE_API_KEY: 'brave-key',
     });
@@ -139,6 +158,7 @@ describe('buildEnvVars', () => {
     
     expect(result).toEqual({
       ANTHROPIC_API_KEY: 'sk-key',
+      OPENCLAW_GATEWAY_TOKEN: 'token',
       CLAWDBOT_GATEWAY_TOKEN: 'token',
       TELEGRAM_BOT_TOKEN: 'tg',
       BRAVE_API_KEY: 'brave-key',

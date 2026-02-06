@@ -15,7 +15,9 @@ export interface MoltbotEnv {
   ANTHROPIC_BASE_URL?: string;
   OPENAI_API_KEY?: string;
   BRAVE_API_KEY?: string; // Brave Search API key for web_search tool
-  MOLTBOT_GATEWAY_TOKEN?: string; // Gateway token (mapped to CLAWDBOT_GATEWAY_TOKEN for container)
+  OPENCLAW_GATEWAY_TOKEN?: string; // Preferred gateway token for OpenClaw
+  MOLTBOT_GATEWAY_TOKEN?: string; // Legacy gateway token (mapped to OPENCLAW/CLAWDBOT for container)
+  CLAWDBOT_GATEWAY_TOKEN?: string; // Legacy gateway token (fallback)
 
   CLAWDBOT_BIND_MODE?: string;
   DEV_MODE?: string; // Set to 'true' for local dev (skips CF Access auth + moltbot device pairing)
