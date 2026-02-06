@@ -27,6 +27,17 @@ export interface UserConversation {
 }
 
 /**
+ * Checkpoint info returned from listing/getting checkpoints
+ */
+export interface CheckpointInfo {
+  slotName: string;
+  iterations: number;
+  toolsUsed: number;
+  savedAt: number;
+  taskPrompt?: string;
+}
+
+/**
  * User preferences storage using R2
  */
 export class UserStorage {
@@ -202,6 +213,85 @@ export class UserStorage {
     }
 
     return Array.from(userIds);
+  }
+
+  // === CHECKPOINT MANAGEMENT ===
+
+  /**
+   * List all checkpoints for a user
+   */
+  async listCheckpoints(userId: string): Promise<CheckpointInfo[]> {
+    const prefix = `checkpoints/${userId}/`;
+    const listed = await this.bucket.list({ prefix });
+
+    const checkpoints: CheckpointInfo[] = [];
+    for (const obj of listed.objects) {
+      // Extract slot name from key: checkpoints/{userId}/{slotName}.json
+      const slotName = obj.key.replace(prefix, '').replace('.json', '');
+
+      // Get checkpoint details
+      const info = await this.getCheckpointInfo(userId, slotName);
+      if (info) {
+        checkpoints.push(info);
+      }
+    }
+
+    // Sort by savedAt descending (newest first)
+    return checkpoints.sort((a, b) => b.savedAt - a.savedAt);
+  }
+
+  /**
+   * Get checkpoint info without loading full messages
+   */
+  async getCheckpointInfo(userId: string, slotName: string = 'latest'): Promise<CheckpointInfo | null> {
+    const key = `checkpoints/${userId}/${slotName}.json`;
+    const obj = await this.bucket.get(key);
+    if (!obj) return null;
+
+    try {
+      const data = await obj.json() as {
+        iterations: number;
+        toolsUsed: string[];
+        savedAt: number;
+        taskPrompt?: string;
+      };
+      return {
+        slotName,
+        iterations: data.iterations,
+        toolsUsed: data.toolsUsed?.length ?? 0,
+        savedAt: data.savedAt,
+        taskPrompt: data.taskPrompt,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Delete a checkpoint
+   */
+  async deleteCheckpoint(userId: string, slotName: string = 'latest'): Promise<boolean> {
+    const key = `checkpoints/${userId}/${slotName}.json`;
+    const exists = await this.bucket.head(key);
+    if (!exists) return false;
+
+    await this.bucket.delete(key);
+    return true;
+  }
+
+  /**
+   * Copy checkpoint to a named slot (backup/restore)
+   */
+  async copyCheckpoint(userId: string, fromSlot: string, toSlot: string): Promise<boolean> {
+    const fromKey = `checkpoints/${userId}/${fromSlot}.json`;
+    const toKey = `checkpoints/${userId}/${toSlot}.json`;
+
+    const obj = await this.bucket.get(fromKey);
+    if (!obj) return false;
+
+    const data = await obj.text();
+    await this.bucket.put(toKey, data);
+    return true;
   }
 }
 

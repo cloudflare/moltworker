@@ -216,6 +216,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
   /**
    * Save checkpoint to R2
+   * @param slotName - Optional slot name (default: 'latest')
    */
   private async saveCheckpoint(
     r2: R2Bucket,
@@ -223,7 +224,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     taskId: string,
     messages: ChatMessage[],
     toolsUsed: string[],
-    iterations: number
+    iterations: number,
+    taskPrompt?: string,
+    slotName: string = 'latest'
   ): Promise<void> {
     const checkpoint = {
       taskId,
@@ -231,34 +234,37 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       toolsUsed,
       iterations,
       savedAt: Date.now(),
+      taskPrompt: taskPrompt?.substring(0, 200), // Store first 200 chars for display
     };
-    const key = `checkpoints/${userId}/latest.json`;
+    const key = `checkpoints/${userId}/${slotName}.json`;
     await r2.put(key, JSON.stringify(checkpoint));
-    console.log(`[TaskProcessor] Saved checkpoint: ${iterations} iterations, ${messages.length} messages`);
+    console.log(`[TaskProcessor] Saved checkpoint '${slotName}': ${iterations} iterations, ${messages.length} messages`);
   }
 
   /**
    * Load checkpoint from R2
+   * @param slotName - Optional slot name (default: 'latest')
    */
   private async loadCheckpoint(
     r2: R2Bucket,
-    userId: string
-  ): Promise<{ messages: ChatMessage[]; toolsUsed: string[]; iterations: number } | null> {
-    const key = `checkpoints/${userId}/latest.json`;
+    userId: string,
+    slotName: string = 'latest'
+  ): Promise<{ messages: ChatMessage[]; toolsUsed: string[]; iterations: number; savedAt: number; taskPrompt?: string } | null> {
+    const key = `checkpoints/${userId}/${slotName}.json`;
     const obj = await r2.get(key);
     if (!obj) return null;
 
     try {
       const checkpoint = JSON.parse(await obj.text());
-      // Only use checkpoint if it's less than 1 hour old
-      if (Date.now() - checkpoint.savedAt < 3600000) {
-        console.log(`[TaskProcessor] Loaded checkpoint: ${checkpoint.iterations} iterations`);
-        return {
-          messages: checkpoint.messages,
-          toolsUsed: checkpoint.toolsUsed,
-          iterations: checkpoint.iterations,
-        };
-      }
+      // No expiry - checkpoints are persistent until manually deleted
+      console.log(`[TaskProcessor] Loaded checkpoint '${slotName}': ${checkpoint.iterations} iterations`);
+      return {
+        messages: checkpoint.messages,
+        toolsUsed: checkpoint.toolsUsed,
+        iterations: checkpoint.iterations,
+        savedAt: checkpoint.savedAt,
+        taskPrompt: checkpoint.taskPrompt,
+      };
     } catch {
       // Ignore parse errors
     }
@@ -267,9 +273,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
   /**
    * Clear checkpoint from R2
+   * @param slotName - Optional slot name (default: 'latest')
    */
-  private async clearCheckpoint(r2: R2Bucket, userId: string): Promise<void> {
-    const key = `checkpoints/${userId}/latest.json`;
+  private async clearCheckpoint(r2: R2Bucket, userId: string, slotName: string = 'latest'): Promise<void> {
+    const key = `checkpoints/${userId}/${slotName}.json`;
     await r2.delete(key);
   }
 
@@ -784,7 +791,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               request.taskId,
               conversationMessages,
               task.toolsUsed,
-              task.iterations
+              task.iterations,
+              request.prompt
             );
           }
 
@@ -867,7 +875,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           request.taskId,
           conversationMessages,
           task.toolsUsed,
-          task.iterations
+          task.iterations,
+          request.prompt
         );
       }
 

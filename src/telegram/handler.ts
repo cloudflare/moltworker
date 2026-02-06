@@ -635,6 +635,117 @@ export class TelegramHandler {
         }
         break;
 
+      case '/saves':
+      case '/checkpoints': {
+        // List all saved checkpoints
+        const checkpoints = await this.storage.listCheckpoints(userId);
+        if (checkpoints.length === 0) {
+          await this.bot.sendMessage(chatId, '📭 No saved checkpoints found.\n\nCheckpoints are automatically created during long-running tasks.');
+          break;
+        }
+
+        let msg = '💾 *Saved Checkpoints:*\n\n';
+        for (const cp of checkpoints) {
+          const age = this.formatAge(cp.savedAt);
+          const prompt = cp.taskPrompt ? `\n   _${this.escapeMarkdown(cp.taskPrompt.substring(0, 50))}${cp.taskPrompt.length > 50 ? '...' : ''}_` : '';
+          msg += `• \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools (${age})${prompt}\n`;
+        }
+        msg += '\n_Use /delsave <name> to delete, /saveas <name> to backup current_';
+        await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+        break;
+      }
+
+      case '/saveinfo':
+      case '/save': {
+        // Show current save state
+        const slotName = args[0] || 'latest';
+        const info = await this.storage.getCheckpointInfo(userId, slotName);
+        if (!info) {
+          await this.bot.sendMessage(chatId, `📭 No checkpoint found for slot: \`${slotName}\``, { parse_mode: 'Markdown' });
+          break;
+        }
+
+        const age = this.formatAge(info.savedAt);
+        const savedDate = new Date(info.savedAt).toLocaleString();
+        let msg = `💾 *Checkpoint: ${info.slotName}*\n\n`;
+        msg += `📊 Iterations: ${info.iterations}\n`;
+        msg += `🔧 Tools used: ${info.toolsUsed}\n`;
+        msg += `⏰ Saved: ${savedDate} (${age})\n`;
+        if (info.taskPrompt) {
+          msg += `\n📝 Task:\n_${this.escapeMarkdown(info.taskPrompt)}_`;
+        }
+        await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+        break;
+      }
+
+      case '/delsave':
+      case '/delcheckpoint': {
+        // Delete a checkpoint
+        const slotToDelete = args[0];
+        if (!slotToDelete) {
+          await this.bot.sendMessage(chatId, '⚠️ Please specify a slot name.\nUsage: `/delsave <name>`\n\nUse `/saves` to see available checkpoints.', { parse_mode: 'Markdown' });
+          break;
+        }
+
+        const deleted = await this.storage.deleteCheckpoint(userId, slotToDelete);
+        if (deleted) {
+          await this.bot.sendMessage(chatId, `✅ Deleted checkpoint: \`${slotToDelete}\``, { parse_mode: 'Markdown' });
+        } else {
+          await this.bot.sendMessage(chatId, `❌ Checkpoint not found: \`${slotToDelete}\``, { parse_mode: 'Markdown' });
+        }
+        break;
+      }
+
+      case '/saveas': {
+        // Copy current checkpoint to a named slot (backup)
+        const newSlotName = args[0];
+        if (!newSlotName) {
+          await this.bot.sendMessage(chatId, '⚠️ Please specify a name for the backup.\nUsage: `/saveas <name>`\n\nExample: `/saveas myproject`', { parse_mode: 'Markdown' });
+          break;
+        }
+
+        // Validate slot name (alphanumeric + dash/underscore only)
+        if (!/^[a-zA-Z0-9_-]+$/.test(newSlotName)) {
+          await this.bot.sendMessage(chatId, '❌ Invalid slot name. Use only letters, numbers, dash, and underscore.');
+          break;
+        }
+
+        const copied = await this.storage.copyCheckpoint(userId, 'latest', newSlotName);
+        if (copied) {
+          await this.bot.sendMessage(chatId, `✅ Current progress backed up to: \`${newSlotName}\`\n\nUse \`/load ${newSlotName}\` to restore later.`, { parse_mode: 'Markdown' });
+        } else {
+          await this.bot.sendMessage(chatId, '❌ No current checkpoint to backup. Start a long-running task first.');
+        }
+        break;
+      }
+
+      case '/load': {
+        // Copy a named slot back to latest (restore)
+        const slotToLoad = args[0];
+        if (!slotToLoad) {
+          await this.bot.sendMessage(chatId, '⚠️ Please specify a slot name to load.\nUsage: `/load <name>`\n\nUse `/saves` to see available checkpoints.', { parse_mode: 'Markdown' });
+          break;
+        }
+
+        const info = await this.storage.getCheckpointInfo(userId, slotToLoad);
+        if (!info) {
+          await this.bot.sendMessage(chatId, `❌ Checkpoint not found: \`${slotToLoad}\``, { parse_mode: 'Markdown' });
+          break;
+        }
+
+        const loaded = await this.storage.copyCheckpoint(userId, slotToLoad, 'latest');
+        if (loaded) {
+          await this.bot.sendMessage(
+            chatId,
+            `✅ Loaded checkpoint: \`${slotToLoad}\`\n\n📊 ${info.iterations} iterations, ${info.toolsUsed} tools\n\nUse Resume button or start a new task to continue.`,
+            { parse_mode: 'Markdown' }
+          );
+        } else {
+          await this.bot.sendMessage(chatId, '❌ Failed to load checkpoint.');
+        }
+        break;
+      }
+
       default:
         // Check if it's a model alias command (e.g., /deep, /gpt)
         const modelAlias = cmd.slice(1); // Remove leading /
@@ -1075,6 +1186,28 @@ export class TelegramHandler {
   }
 
   /**
+   * Format a timestamp as relative age (e.g., "2 hours ago")
+   */
+  private formatAge(timestamp: number): string {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return new Date(timestamp).toLocaleDateString();
+  }
+
+  /**
+   * Escape special characters for Telegram Markdown
+   */
+  private escapeMarkdown(text: string): string {
+    return text.replace(/[_*[\]()~`>#+\-=|{}.!]/g, '\\$&');
+  }
+
+  /**
    * Handle callback queries (from inline keyboards)
    */
   private async handleCallback(query: TelegramCallbackQuery): Promise<void> {
@@ -1258,6 +1391,14 @@ export class TelegramHandler {
 /credits - Check OpenRouter credits
 /ping - Test bot response
 
+💾 Checkpoint Management:
+/saves - List all saved checkpoints
+/save [name] - Show checkpoint info
+/saveas <name> - Backup current to slot
+/load <name> - Restore from slot
+/delsave <name> - Delete a checkpoint
+/automode - Toggle auto-resume
+
 🎨 Image Generation:
 /img <prompt> - Generate image
 /img fluxmax <prompt> - Use specific model
@@ -1274,9 +1415,10 @@ Models: fluxklein, fluxpro, fluxflex, fluxmax
 
 🆓 Free Models:
 /trinity - Premium reasoning
-/deepchimera - Deep reasoning
-/mimo - Coding
-/llama405free - Llama 3.1 405B
+/deepfree - DeepSeek R1
+/qwencoderfree - Qwen3 Coder
+/llama70free - Llama 3.3 70B
+/devstral - Devstral Small
 
 🛠️ Tools:
 Models with tools can use GitHub, browse URLs, and more.
