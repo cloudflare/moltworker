@@ -1,11 +1,11 @@
 FROM docker.io/cloudflare/sandbox:0.7.0
 
-# Build cache bust: 2026-02-06-v26-config-order
+# Build cache bust: 2026-02-06-v27-git-clone-fix
 # Install Node.js 22 (required by openclaw) and rsync (for R2 backup sync)
 # The base image has Node 20, we need to replace it with Node 22
 # Using direct binary download for reliability
 ENV NODE_VERSION=22.13.1
-RUN apt-get update && apt-get install -y xz-utils ca-certificates rsync \
+RUN apt-get update && apt-get install -y xz-utils ca-certificates rsync git \
     && curl -fsSLk https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz -o /tmp/node.tar.xz \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && rm /tmp/node.tar.xz \

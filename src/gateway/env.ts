@@ -67,5 +67,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   }
   if (env.CLAUDE_REFRESH_TOKEN) envVars.CLAUDE_REFRESH_TOKEN = env.CLAUDE_REFRESH_TOKEN;
 
+  // GitHub repo auto-clone on startup
+  if (env.GITHUB_REPO_URL) envVars.GITHUB_REPO_URL = env.GITHUB_REPO_URL;
+  if (env.GITHUB_TOKEN) envVars.GITHUB_TOKEN = env.GITHUB_TOKEN;
+
   return envVars;
 }

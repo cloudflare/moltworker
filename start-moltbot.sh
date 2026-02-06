@@ -55,6 +55,42 @@ mkdir -p "$CONFIG_DIR"
 restore_from_r2
 log_timing "R2 restore completed"
 
+# Clone GitHub repository if configured
+if [ -n "$GITHUB_REPO_URL" ]; then
+  REPO_NAME=$(basename "$GITHUB_REPO_URL" .git)
+  CLONE_DIR="/root/clawd/$REPO_NAME"
+
+  # Support private repos via GITHUB_TOKEN
+  if [ -n "$GITHUB_TOKEN" ]; then
+    CLONE_URL=$(echo "$GITHUB_REPO_URL" | sed "s|https://github.com/|https://${GITHUB_TOKEN}@github.com/|")
+  else
+    CLONE_URL="$GITHUB_REPO_URL"
+  fi
+
+  if [ -d "$CLONE_DIR/.git" ]; then
+    echo "Repository already exists at $CLONE_DIR, pulling latest..."
+    git -C "$CLONE_DIR" pull --ff-only || echo "[WARN] git pull failed, continuing with existing version"
+  else
+    echo "Cloning $GITHUB_REPO_URL into $CLONE_DIR..."
+    git clone "$CLONE_URL" "$CLONE_DIR" || echo "[WARN] git clone failed, continuing without repo"
+  fi
+  log_timing "GitHub repo clone completed"
+
+  # Symlink OpenClaw bootstrap files from cloned repo into workspace
+  # OpenClaw auto-injects: AGENTS.md, SOUL.md, TOOLS.md, IDENTITY.md, USER.md, HEARTBEAT.md, BOOTSTRAP.md
+  if [ -d "$CLONE_DIR" ]; then
+    for f in AGENTS.md SOUL.md TOOLS.md IDENTITY.md USER.md HEARTBEAT.md BOOTSTRAP.md CONSTITUTION.md MEMORY.md SECURITY.md; do
+      if [ -f "$CLONE_DIR/$f" ]; then
+        ln -sf "$CLONE_DIR/$f" "/root/clawd/$f"
+        echo "Symlinked $f -> $CLONE_DIR/$f"
+      fi
+    done
+    echo "Bootstrap files symlinked from repo"
+  fi
+else
+  echo "No GITHUB_REPO_URL set, skipping repo clone"
+fi
+
 # Write config AFTER restore (overwrite any restored config with correct format)
 cat > "$CONFIG_DIR/openclaw.json" << 'EOFCONFIG'
 {

@@ -40,6 +40,8 @@ export interface MoltbotEnv {
   BRAVE_API_KEY?: string; // Brave Search API key for web search
   CLAUDE_ACCESS_TOKEN?: string; // Claude Max OAuth access token
   CLAUDE_REFRESH_TOKEN?: string; // Claude Max OAuth refresh token
+  GITHUB_REPO_URL?: string; // GitHub repo URL to clone on startup
+  GITHUB_TOKEN?: string; // GitHub personal access token for private repos
 }
 
 /**
