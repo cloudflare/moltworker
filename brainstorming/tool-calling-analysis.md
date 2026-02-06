@@ -20,12 +20,13 @@
 
 ## 1. Executive Summary <a name="executive-summary"></a>
 
-Moltworker is a production-grade AI assistant gateway running on Cloudflare Workers with 26+ models via OpenRouter, 5 tools, Durable Objects for long-running tasks, and multi-platform chat integrations. This analysis identifies **four categories of improvement**:
+Moltworker is a production-grade AI assistant gateway running on Cloudflare Workers with 26+ models via OpenRouter, 5 tools, Durable Objects for long-running tasks, and multi-platform chat integrations. This analysis identifies **five categories of improvement**:
 
 1. **Tool-calling sophistication** — Current implementation uses sequential single-model tool loops. Modern models (DeepSeek V3.2, Grok 4.1, Claude Sonnet 4.5) support parallel tool calls and speculative execution that Moltworker doesn't exploit.
 2. **Tooling breadth** — steipete's ecosystem provides ready-made capabilities (MCP servers, browser automation, GUI capture, token monitoring) that map directly to Moltworker's roadmap gaps.
 3. **Context management** — Acontext (memodb-io/Acontext) provides purpose-built context engineering that directly replaces Moltworker's crude `compressContext()` with token-aware session management, plus adds observability, code execution, and persistent file storage.
-4. **Model selection intelligence** — The tool-calling model landscape shows significant capability variance. Moltworker treats all tool-capable models identically, missing optimization opportunities.
+4. **Compound engineering** — The Compound Engineering Plugin (EveryInc/compound-engineering-plugin) introduces a learning loop where each completed task makes subsequent tasks easier. Moltworker currently starts every task from zero with no memory of past patterns.
+5. **Model selection intelligence** — The tool-calling model landscape shows significant capability variance. Moltworker treats all tool-capable models identically, missing optimization opportunities.
 
 ---
 
@@ -411,6 +412,42 @@ MCP Server Registry (R2 config)
 | Complex research | Enabled (High) | 0.5 | Claude Sonnet, Gemini Pro |
 | Creative writing | Disabled | 0.9 | Claude Opus, GPT-4o |
 
+### Gap 8: No Compound Learning Loop
+
+**Current:** Every task starts from zero. The task processor has no mechanism to learn from past tasks — which tool sequences worked, which models performed best for which task types, what patterns recurred.
+
+**Opportunity:** The Compound Engineering Plugin (EveryInc/compound-engineering-plugin, 7.3k stars) introduces a **Plan → Work → Review → Compound** cycle where the "Compound" step captures patterns, decisions, and learnings from each completed task and feeds them back into future planning.
+
+Applied to Moltworker's task processor, this means:
+- After each completed Durable Object task, automatically extract: which tools were used, in what order, how many iterations, which model was selected, and whether the task succeeded
+- Store these "compound learnings" as structured data in R2 or Acontext
+- Inject relevant past learnings into the system prompt for similar future tasks
+- Progressively build a knowledge base that makes the assistant better over time
+
+This directly maps to the **Long-Term Memory** item (Priority 4.4) in future-integrations.md, but with a structured, task-oriented approach rather than free-form memory.
+
+### Gap 9: No Multi-Agent Review
+
+**Current:** Single model handles everything — planning, execution, and validation. No second opinion.
+
+**Opportunity:** The Compound Engineering Plugin's `/workflows:review` uses multiple agents reviewing code simultaneously. For Moltworker, this could mean:
+- After a tool-heavy task completes, route the result through a second model for validation
+- Use a cheaper/faster model (Gemini Flash, Grok Fast) as a "reviewer" for expensive model output (Claude Opus)
+- For GitHub-related tasks, have one model write code and another review it before creating the PR
+
+This leverages Moltworker's existing multi-model architecture — the infrastructure to call different models is already there.
+
+### Gap 10: No Structured Workflow for Complex Tasks
+
+**Current:** User sends a message → model responds with tool calls → loop until done. No structured phases.
+
+**Opportunity:** For complex tasks (especially those routed to Durable Objects), introduce the Plan → Work → Review cycle:
+1. **Plan phase**: Model creates an explicit plan before calling any tools (reduces wasted iterations)
+2. **Work phase**: Execute the plan with tool calls, tracking progress against the plan
+3. **Review phase**: Self-review or cross-model review before sending final result
+
+The task processor already has iteration tracking — adding phase awareness would be a natural extension.
+
 ### Gap 7: Vision + Tools Combined
 
 **Current:** `chatCompletionWithVision()` and `chatCompletionWithTools()` are separate methods
@@ -488,7 +525,63 @@ MCP Server Registry (R2 config)
 
 **Phase 3:** Use Acontext Sandbox for code execution tool and Disk for file management tools — replaces two roadmap items (Priority 3.2 and 3.3 in future-integrations.md) with a single integration.
 
-### R10: Acontext Observability Dashboard (Effort: Low)
+### R10: Compound Learning Loop (Effort: Medium)
+
+**Inspired by:** EveryInc/compound-engineering-plugin's `/workflows:compound` step
+
+**Files to create/modify:**
+- New: `src/openrouter/learnings.ts` — Structured learning extraction and storage
+- Modify: `src/durable-objects/task-processor.ts` — After task completion, extract and store learnings
+- Modify: `src/telegram/handler.ts` — `/learnings` command to view past patterns
+
+**How it works:**
+1. After each completed Durable Object task, extract structured metadata:
+   - Tool sequence used (e.g., `github_read_file → github_read_file → github_api`)
+   - Model used and token count
+   - Iterations required
+   - Success/failure outcome
+   - Task category (coding, research, GitHub ops, etc.)
+2. Store in R2 as `learnings/{userId}/history.json`
+3. Before starting a new task, inject relevant learnings into the system prompt:
+   - "For similar GitHub tasks, the most effective approach used github_read_file first to understand the codebase, then github_api to make changes. Average: 4 iterations."
+4. Over time, build a per-user knowledge base that makes the assistant progressively better
+
+**Impact:** Transforms Moltworker from stateless to learning. Directly addresses Long-Term Memory (Priority 4.4 in roadmap) with a structured, task-oriented approach.
+
+### R11: Multi-Agent Review for Complex Tasks (Effort: Medium)
+
+**Inspired by:** EveryInc/compound-engineering-plugin's `/workflows:review`
+
+**Files to modify:**
+- Modify: `src/durable-objects/task-processor.ts` — Add review phase after task completion
+- Modify: `src/openrouter/models.ts` — Add reviewer model selection logic
+
+**How it works:**
+1. After the primary model completes a tool-heavy task (e.g., creating a PR via `github_api`), route the result to a second model
+2. The reviewer model checks for: correctness, completeness, security issues, missed edge cases
+3. If the reviewer flags issues, feed back to the primary model for a correction iteration
+4. Use cost-efficient reviewers: Gemini Flash or Grok Fast for reviewing expensive Opus/Sonnet output
+
+**Impact:** Quality improvement with minimal cost increase. Leverages Moltworker's existing multi-model infrastructure.
+
+### R12: Structured Task Phases (Plan → Work → Review) (Effort: Medium)
+
+**Inspired by:** EveryInc/compound-engineering-plugin's workflow structure
+
+**Files to modify:**
+- Modify: `src/durable-objects/task-processor.ts` — Add phase tracking to `TaskState`
+- Modify: `src/openrouter/tools.ts` — Phase-aware system prompts
+
+**How it works:**
+1. When a complex task is routed to Durable Objects, inject a planning prompt first:
+   - "Before executing, create a step-by-step plan. List the tools you'll need and in what order."
+2. Track which phase the task is in: `planning | executing | reviewing`
+3. Show phase in Telegram progress updates: `⏳ Planning... (step 2/5)` → `⏳ Executing... (tool 3/7)` → `⏳ Reviewing...`
+4. After execution, add a self-review step where the model validates its own output
+
+**Impact:** Reduces wasted iterations (models often thrash without a plan), improves user visibility into what's happening, and produces higher quality output.
+
+### R13: Acontext Observability Dashboard (Effort: Low)
 
 **Files to modify:**
 - `src/routes/admin-ui.ts` — Add link/iframe to Acontext dashboard
@@ -506,14 +599,17 @@ MCP Server Registry (R2 config)
 | **P0** | R7: Add missing models | Trivial | Low | None |
 | **P1** | R1: Parallel tool execution | Low | High | None |
 | **P1** | R2: Model capability metadata | Low | Medium | None |
-| **P1** | R10: Acontext observability | Low | High | Acontext API key |
+| **P1** | R13: Acontext observability | Low | High | Acontext API key |
 | **P2** | R4: Token/cost tracking | Medium | High | R2 |
 | **P2** | R5: Configurable reasoning | Medium | Medium | R2 |
 | **P2** | R8: Vision + tools combined | Medium | Medium | None |
 | **P2** | R9 Phase 1: Acontext sessions (observability) | Medium | High | Acontext setup |
+| **P2** | R10: Compound learning loop | Medium | High | R2 storage |
+| **P2** | R12: Structured task phases (Plan→Work→Review) | Medium | High | None |
 | **P3** | R6: MCP integration | High | Very High | Research phase needed |
 | **P3** | R9 Phase 2: Acontext context engineering | Medium-High | Very High | R9 Phase 1 |
 | **P3** | R9 Phase 3: Acontext Sandbox/Disk tools | Medium | High | R9 Phase 1 |
+| **P3** | R11: Multi-agent review | Medium | High | R2 (model metadata) |
 
 ### Quick Wins (Can ship today)
 1. Add `supportsTools: true` to Gemini 3 Flash
@@ -526,13 +622,16 @@ MCP Server Registry (R2 config)
 3. Add reasoning control for compatible models
 4. Connect Acontext observability dashboard for task monitoring
 5. Store task processor messages in Acontext Sessions for replay
+6. Add compound learning loop — extract and reuse patterns from completed tasks
+7. Add Plan→Work→Review phases to Durable Object task processor
 
 ### Strategic (Requires design)
 1. MCP integration via mcporter patterns
 2. Replace `compressContext()` with Acontext token-budgeted retrieval
 3. Acontext Sandbox for code execution + Disk for file management (replaces two roadmap items)
-4. Multi-agent orchestration leveraging Claude Sonnet 4.5's capabilities
-5. Dynamic tool selection based on model capabilities and task type
+4. Multi-agent review for complex tasks (cross-model validation)
+5. Multi-agent orchestration leveraging Claude Sonnet 4.5's capabilities
+6. Dynamic tool selection based on model capabilities and task type
 
 ---
 
@@ -552,3 +651,9 @@ MCP Server Registry (R2 config)
 - Documentation: docs.acontext.io
 - TypeScript SDK: `npm install @acontext/acontext`
 - Python SDK: `pip install acontext`
+
+### Compound Engineering Plugin
+- Repository: github.com/EveryInc/compound-engineering-plugin (7.3k stars, MIT)
+- Package: `@every-env/compound-plugin`
+- Methodology: Plan → Work → Review → Compound → Repeat
+- Key insight: 80% planning/review, 20% execution; each cycle informs the next
