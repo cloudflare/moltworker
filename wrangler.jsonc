@@ -1,9 +1,15 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "moltbot-sandbox",
+  "account_id": "b5ee1671e54d7c7fcf17e90b9ca7741a",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "vars": {
+    "ANTHROPIC_BASE_URL": "https://new.aicode.us.com"
+  },
   "observability": {
     "enabled": true,
   },
@@ -19,12 +25,16 @@
   "rules": [
     {
       "type": "Text",
-      "globs": ["**/*.html"],
+      "globs": [
+        "**/*.html"
+      ],
       "fallthrough": false,
     },
     {
       "type": "Data",
-      "globs": ["**/*.png"],
+      "globs": [
+        "**/*.png"
+      ],
       "fallthrough": false,
     },
   ],
@@ -35,7 +45,7 @@
   // Container configuration for the Moltbot sandbox
   "containers": [
     {
-      "class_name": "Sandbox",
+      "class_name": "MoltbotSandbox",
       "image": "./Dockerfile",
       "instance_type": "standard-4",
       "max_instances": 1,
@@ -44,15 +54,17 @@
   "durable_objects": {
     "bindings": [
       {
-        "class_name": "Sandbox",
+        "class_name": "MoltbotSandbox",
         "name": "Sandbox",
       },
     ],
   },
   "migrations": [
     {
-      "new_sqlite_classes": ["Sandbox"],
-      "tag": "v1",
+      "new_sqlite_classes": [
+        "MoltbotSandbox"
+      ],
+      "tag": "v1-rename",
     },
   ],
   // R2 bucket for persistent storage (moltbot data, conversations, etc.)
@@ -64,7 +76,9 @@
   ],
   // Cron trigger to sync moltbot data to R2 every 5 minutes
   "triggers": {
-    "crons": ["*/5 * * * *"],
+    "crons": [
+      "*/5 * * * *"
+    ],
   },
   // Browser Rendering binding for CDP shim
   "browser": {

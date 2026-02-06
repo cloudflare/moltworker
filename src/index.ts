@@ -47,7 +47,7 @@ function transformErrorMessage(message: string, host: string): string {
   return message;
 }
 
-export { Sandbox };
+export { Sandbox, Sandbox as MoltbotSandbox };
 
 /**
  * Validate required environment variables.
@@ -189,6 +189,21 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  // Allow bypassing Access if:
+  // 1. It's a WebSocket request
+  // 2. A valid MOLTBOT_GATEWAY_TOKEN is provided in the query
+  const upgradeHeader = c.req.header('Upgrade');
+  if (upgradeHeader === 'websocket') {
+    const url = new URL(c.req.url);
+    const token = url.searchParams.get('token');
+    // Using a constant time comparison would be better, but for this use case string comparison is acceptable
+    if (token && c.env.MOLTBOT_GATEWAY_TOKEN && token === c.env.MOLTBOT_GATEWAY_TOKEN) {
+      console.log('[AUTH] Bypassing Cloudflare Access for WebSocket with valid token');
+      c.set('accessUser', { email: 'cli@bot', name: 'Moltbot CLI' });
+      return next();
+    }
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
