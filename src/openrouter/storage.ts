@@ -35,6 +35,7 @@ export interface CheckpointInfo {
   toolsUsed: number;
   savedAt: number;
   taskPrompt?: string;
+  completed?: boolean; // True if this was a successfully completed task
 }
 
 /**
@@ -254,6 +255,7 @@ export class UserStorage {
         toolsUsed: string[];
         savedAt: number;
         taskPrompt?: string;
+        completed?: boolean;
       };
       return {
         slotName,
@@ -261,6 +263,7 @@ export class UserStorage {
         toolsUsed: data.toolsUsed?.length ?? 0,
         savedAt: data.savedAt,
         taskPrompt: data.taskPrompt,
+        completed: data.completed,
       };
     } catch {
       return null;

@@ -217,6 +217,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   /**
    * Save checkpoint to R2
    * @param slotName - Optional slot name (default: 'latest')
+   * @param completed - If true, marks checkpoint as completed (won't auto-resume)
    */
   private async saveCheckpoint(
     r2: R2Bucket,
@@ -226,7 +227,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     toolsUsed: string[],
     iterations: number,
     taskPrompt?: string,
-    slotName: string = 'latest'
+    slotName: string = 'latest',
+    completed: boolean = false
   ): Promise<void> {
     const checkpoint = {
       taskId,
@@ -235,35 +237,43 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       iterations,
       savedAt: Date.now(),
       taskPrompt: taskPrompt?.substring(0, 200), // Store first 200 chars for display
+      completed, // If true, this checkpoint won't be used for auto-resume
     };
     const key = `checkpoints/${userId}/${slotName}.json`;
     await r2.put(key, JSON.stringify(checkpoint));
-    console.log(`[TaskProcessor] Saved checkpoint '${slotName}': ${iterations} iterations, ${messages.length} messages`);
+    console.log(`[TaskProcessor] Saved checkpoint '${slotName}': ${iterations} iterations, ${messages.length} messages${completed ? ' (completed)' : ''}`);
   }
 
   /**
    * Load checkpoint from R2
    * @param slotName - Optional slot name (default: 'latest')
+   * @param includeCompleted - If false (default), skip completed checkpoints
    */
   private async loadCheckpoint(
     r2: R2Bucket,
     userId: string,
-    slotName: string = 'latest'
-  ): Promise<{ messages: ChatMessage[]; toolsUsed: string[]; iterations: number; savedAt: number; taskPrompt?: string } | null> {
+    slotName: string = 'latest',
+    includeCompleted: boolean = false
+  ): Promise<{ messages: ChatMessage[]; toolsUsed: string[]; iterations: number; savedAt: number; taskPrompt?: string; completed?: boolean } | null> {
     const key = `checkpoints/${userId}/${slotName}.json`;
     const obj = await r2.get(key);
     if (!obj) return null;
 
     try {
       const checkpoint = JSON.parse(await obj.text());
-      // No expiry - checkpoints are persistent until manually deleted
-      console.log(`[TaskProcessor] Loaded checkpoint '${slotName}': ${checkpoint.iterations} iterations`);
+      // Skip completed checkpoints unless explicitly requested (for /saveas)
+      if (checkpoint.completed && !includeCompleted) {
+        console.log(`[TaskProcessor] Skipping completed checkpoint '${slotName}'`);
+        return null;
+      }
+      console.log(`[TaskProcessor] Loaded checkpoint '${slotName}': ${checkpoint.iterations} iterations${checkpoint.completed ? ' (completed)' : ''}`);
       return {
         messages: checkpoint.messages,
         toolsUsed: checkpoint.toolsUsed,
         iterations: checkpoint.iterations,
         savedAt: checkpoint.savedAt,
         taskPrompt: checkpoint.taskPrompt,
+        completed: checkpoint.completed,
       };
     } catch {
       // Ignore parse errors
@@ -815,9 +825,19 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Cancel watchdog alarm - task completed successfully
         await this.doState.storage.deleteAlarm();
 
-        // Clear checkpoint on success
+        // Save final checkpoint (marked as completed) so user can /saveas it
         if (this.r2) {
-          await this.clearCheckpoint(this.r2, request.userId);
+          await this.saveCheckpoint(
+            this.r2,
+            request.userId,
+            request.taskId,
+            conversationMessages,
+            task.toolsUsed,
+            task.iterations,
+            request.prompt,
+            'latest',
+            true // completed flag
+          );
         }
 
         // Delete status message

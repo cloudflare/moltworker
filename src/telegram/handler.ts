@@ -648,10 +648,11 @@ export class TelegramHandler {
         let msg = '💾 *Saved Checkpoints:*\n\n';
         for (const cp of checkpoints) {
           const age = this.formatAge(cp.savedAt);
+          const status = cp.completed ? '✅' : '⏸️';
           const prompt = cp.taskPrompt ? `\n   _${this.escapeMarkdown(cp.taskPrompt.substring(0, 50))}${cp.taskPrompt.length > 50 ? '...' : ''}_` : '';
-          msg += `• \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools (${age})${prompt}\n`;
+          msg += `${status} \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools (${age})${prompt}\n`;
         }
-        msg += '\n_Use /delsave <name> to delete, /saveas <name> to backup current_';
+        msg += '\n✅=completed ⏸️=interrupted\n_Use /delsave <name> to delete, /saveas <name> to backup_';
         await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
         break;
       }
@@ -668,9 +669,12 @@ export class TelegramHandler {
 
         const age = this.formatAge(info.savedAt);
         const savedDate = new Date(info.savedAt).toLocaleString();
-        let msg = `💾 *Checkpoint: ${info.slotName}*\n\n`;
+        const statusEmoji = info.completed ? '✅' : '⏸️';
+        const statusText = info.completed ? 'Completed' : 'Interrupted';
+        let msg = `💾 *Checkpoint: ${info.slotName}* ${statusEmoji}\n\n`;
         msg += `📊 Iterations: ${info.iterations}\n`;
         msg += `🔧 Tools used: ${info.toolsUsed}\n`;
+        msg += `📋 Status: ${statusText}\n`;
         msg += `⏰ Saved: ${savedDate} (${age})\n`;
         if (info.taskPrompt) {
           msg += `\n📝 Task:\n_${this.escapeMarkdown(info.taskPrompt)}_`;
