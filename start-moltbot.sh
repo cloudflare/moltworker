@@ -231,7 +231,10 @@ if (isGoogle) {
             { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', contextWindow: 2097152 },
         ]
     };
-    // apiKey is NOT included - clawdbot reads GOOGLE_API_KEY env var directly
+    // Include API key in provider config if set (required for clawdbot to authenticate)
+    if (process.env.GOOGLE_API_KEY) {
+        providerConfig.apiKey = process.env.GOOGLE_API_KEY;
+    }
     config.models.providers.google = providerConfig;
     // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
