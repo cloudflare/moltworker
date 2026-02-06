@@ -3,7 +3,7 @@
     "defaults": {
       "workspace": "/root/clawd",
       "model": {
-        "primary": "anthropic/claude-3-5-sonnet-20240620"
+        "primary": "openai/moonshot-v1-8k"
       }
     }
   },
