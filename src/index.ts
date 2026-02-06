@@ -33,6 +33,26 @@ import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
 /**
+ * Add gateway auth token to a request as a query parameter.
+ * Using query param instead of Authorization header because
+ * sandbox.wsConnect() does not forward custom headers.
+ */
+function addGatewayAuthToken(request: Request, token: string | undefined): Request {
+  if (!token) return request;
+
+  const url = new URL(request.url);
+  url.searchParams.set('token', token);
+
+  return new Request(url.toString(), {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+    // @ts-expect-error - duplex is required for streaming bodies
+    duplex: request.body ? 'half' : undefined,
+  });
+}
+
+/**
  * Transform error messages from the gateway to be more user-friendly.
  */
 function transformErrorMessage(message: string, host: string): string {
@@ -56,10 +76,6 @@ export { Sandbox };
 function validateRequiredEnv(env: MoltbotEnv): string[] {
   const missing: string[] = [];
   const isTestMode = env.DEV_MODE === 'true' || env.E2E_TEST_MODE === 'true';
-
-  if (!env.MOLTBOT_GATEWAY_TOKEN) {
-    missing.push('MOLTBOT_GATEWAY_TOKEN');
-  }
 
   // CF Access vars not required in dev/test mode since auth is skipped
   if (!isTestMode) {
@@ -189,6 +205,14 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  const url = new URL(c.req.url);
+
+  // Skip auth for public routes (these are handled by publicRoutes but middleware still runs)
+  const publicPaths = ['/api/status', '/sandbox-health', '/logo.png', '/logo-small.png'];
+  if (publicPaths.includes(url.pathname) || url.pathname.startsWith('/_admin/assets/')) {
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
@@ -220,7 +244,7 @@ app.route('/debug', debug);
 
 app.all('*', async (c) => {
   const sandbox = c.get('sandbox');
-  const request = c.req.raw;
+  let request = c.req.raw;
   const url = new URL(request.url);
 
   console.log('[PROXY] Handling request:', url.pathname);
@@ -233,19 +257,16 @@ app.all('*', async (c) => {
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
   const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
 
-  if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
-    console.log('[PROXY] Gateway not ready, serving loading page');
-
-    // Start the gateway in the background (don't await)
-    c.executionCtx.waitUntil(
-      ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
-        console.error('[PROXY] Background gateway start failed:', err);
-      })
-    );
-
-    // Return the loading page immediately
-    return c.html(loadingPageHtml);
-  }
+  // Temporarily disabled loading page - always wait for gateway
+  // if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
+  //   console.log('[PROXY] Gateway not ready, serving loading page');
+  //   c.executionCtx.waitUntil(
+  //     ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
+  //       console.error('[PROXY] Background gateway start failed:', err);
+  //     })
+  //   );
+  //   return c.html(loadingPageHtml);
+  // }
 
   // Ensure moltbot is running (this will wait for startup)
   try {
