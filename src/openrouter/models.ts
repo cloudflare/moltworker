@@ -30,6 +30,8 @@ export const PROVIDERS: Record<Provider, ProviderConfig> = {
   },
 };
 
+export type ReasoningCapability = 'none' | 'fixed' | 'configurable';
+
 export interface ModelInfo {
   id: string;
   alias: string;
@@ -42,6 +44,11 @@ export interface ModelInfo {
   isImageGen?: boolean;
   isFree?: boolean;
   provider?: Provider; // Direct API provider (default: openrouter)
+  // Extended capability metadata (R2)
+  parallelCalls?: boolean;       // Can emit multiple tool_calls in one response
+  structuredOutput?: boolean;    // Supports response_format JSON schema
+  reasoning?: ReasoningCapability; // Reasoning control capability
+  maxContext?: number;           // Context window in tokens
 }
 
 /**
@@ -125,6 +132,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    parallelCalls: true,
+    maxContext: 262144,
   },
   llama70free: {
     id: 'meta-llama/llama-3.3-70b-instruct:free',
@@ -144,6 +153,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    maxContext: 131072,
   },
   pony: {
     id: 'openrouter/pony-alpha',
@@ -154,6 +164,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    maxContext: 200000,
   },
   gptoss: {
     id: 'openai/gpt-oss-120b:free',
@@ -164,6 +175,9 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    maxContext: 128000,
   },
   mimo: {
     id: 'xiaomi/mimo-v2-flash:free',
@@ -174,6 +188,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    maxContext: 262144,
   },
   phi4reason: {
     id: 'microsoft/phi-4-reasoning:free',
@@ -184,6 +199,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    reasoning: 'fixed',
+    maxContext: 32768,
   },
 
   // === IMAGE GENERATION ===
@@ -250,6 +267,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
+    parallelCalls: true,
+    maxContext: 131072,
   },
   devstral2: {
     id: 'mistralai/devstral-2512',
@@ -259,6 +278,8 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '123B dense, 256K context',
     cost: '$0.05/$0.22',
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 262144,
   },
   glm47: {
     id: 'z-ai/glm-4.7',
@@ -268,6 +289,7 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '200K context, stable multi-step execution',
     cost: '$0.07/$0.40',
     supportsTools: true,
+    maxContext: 200000,
   },
   mini: {
     id: 'openai/gpt-4o-mini',
@@ -278,6 +300,9 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.15/$0.60',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    maxContext: 128000,
   },
   qwenthink: {
     id: 'qwen/qwen3-next-80b-a3b-thinking',
@@ -287,6 +312,8 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '80B MoE, auto <think> traces',
     cost: '$0.15/$1.20',
     supportsTools: true,
+    reasoning: 'fixed',
+    maxContext: 131072,
   },
   grok: {
     id: 'x-ai/grok-4.1-fast',
@@ -296,6 +323,9 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '#1 agentic, 2M context',
     cost: '$0.20/$0.50',
     supportsTools: true,
+    parallelCalls: true,
+    reasoning: 'configurable',
+    maxContext: 2000000,
   },
   grokcode: {
     id: 'x-ai/grok-code-fast-1',
@@ -305,6 +335,9 @@ export const MODELS: Record<string, ModelInfo> = {
     score: 'Agentic coding with reasoning traces',
     cost: '$0.20/$1.50',
     supportsTools: true,
+    parallelCalls: true,
+    reasoning: 'fixed',
+    maxContext: 131072,
   },
   qwennext: {
     id: 'qwen/qwen3-coder-next',
@@ -314,6 +347,8 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '70.6% SWE-Bench, 80B MoE',
     cost: '$0.20/$1.50',
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 131072,
   },
   qwencoder: {
     id: 'qwen/qwen3-coder',
@@ -323,6 +358,8 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '54-55% SWE-Bench, 480B MoE',
     cost: '$0.22/$0.95',
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 262144,
   },
   deep: {
     id: 'deepseek/deepseek-v3.2',
@@ -332,6 +369,10 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '68-75% SWE, GPT-5 class reasoning',
     cost: '$0.25/$0.38',
     supportsTools: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    reasoning: 'configurable',
+    maxContext: 65536,
   },
   deepreason: {
     id: 'deepseek/deepseek-r1',
@@ -349,6 +390,9 @@ export const MODELS: Record<string, ModelInfo> = {
     score: '675B MoE (41B active), Apache 2.0',
     cost: '$0.50/$1.50',
     supportsTools: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    maxContext: 131072,
   },
   kimi: {
     id: 'moonshotai/kimi-k2.5',
@@ -359,6 +403,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.50/$2.80',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 131072,
   },
   flash: {
     id: 'google/gemini-3-flash-preview',
@@ -369,6 +415,10 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.50/$3.00',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    reasoning: 'configurable',
+    maxContext: 1048576,
   },
   haiku: {
     id: 'anthropic/claude-haiku-4.5',
@@ -379,6 +429,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$1/$5',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 200000,
   },
   geminipro: {
     id: 'google/gemini-3-pro-preview',
@@ -389,6 +441,10 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$2/$12',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    reasoning: 'configurable',
+    maxContext: 1048576,
   },
   gpt: {
     id: 'openai/gpt-4o',
@@ -399,6 +455,9 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$2.50/$10',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    structuredOutput: true,
+    maxContext: 128000,
   },
   sonnet: {
     id: 'anthropic/claude-sonnet-4.5',
@@ -409,6 +468,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$3/$15',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 200000,
   },
   opus: {
     id: 'anthropic/claude-opus-4.5',
@@ -419,6 +480,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$15/$75',
     supportsVision: true,
     supportsTools: true,
+    parallelCalls: true,
+    maxContext: 200000,
   },
 
   // === DIRECT API MODELS (bypass OpenRouter) ===
@@ -431,6 +494,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.14/$0.28',
     supportsTools: true,
     provider: 'deepseek',
+    parallelCalls: true,
+    maxContext: 65536,
   },
   q25: {
     id: 'qwen-plus',
@@ -441,6 +506,8 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.80/$2.00',
     supportsTools: true,
     provider: 'dashscope',
+    parallelCalls: true,
+    maxContext: 131072,
   },
   k21: {
     id: 'moonshot-v1-128k',
@@ -451,6 +518,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$8/$8',
     supportsTools: true,
     provider: 'moonshot',
+    maxContext: 131072,
   },
 };
 

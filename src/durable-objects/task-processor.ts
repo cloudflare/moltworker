@@ -741,34 +741,40 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             tool_calls: choice.message.tool_calls,
           });
 
-          // Execute each tool
-          for (const toolCall of choice.message.tool_calls) {
-            const toolStartTime = Date.now();
-            const toolName = toolCall.function.name;
-            task.toolsUsed.push(toolName);
+          // Execute all tools in parallel for faster execution
+          const toolNames = choice.message.tool_calls.map(tc => tc.function.name);
+          task.toolsUsed.push(...toolNames);
 
-            // Execute tool with timeout
-            let toolResult;
-            try {
-              const toolPromise = executeTool(toolCall, toolContext);
-              const toolTimeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
-              });
-              toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
-            } catch (toolError) {
-              // Tool failed - add error as result and continue
-              toolResult = {
-                tool_call_id: toolCall.id,
-                content: `Error: ${toolError instanceof Error ? toolError.message : String(toolError)}`,
-              };
-            }
+          const parallelStart = Date.now();
+          const toolResults = await Promise.all(
+            choice.message.tool_calls.map(async (toolCall) => {
+              const toolStartTime = Date.now();
+              const toolName = toolCall.function.name;
 
-            console.log(`[TaskProcessor] Tool ${toolName} completed in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
+              let toolResult;
+              try {
+                const toolPromise = executeTool(toolCall, toolContext);
+                const toolTimeoutPromise = new Promise<never>((_, reject) => {
+                  setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
+                });
+                toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
+              } catch (toolError) {
+                toolResult = {
+                  tool_call_id: toolCall.id,
+                  content: `Error: ${toolError instanceof Error ? toolError.message : String(toolError)}`,
+                };
+              }
 
-            // Truncate large tool results to prevent context explosion
+              console.log(`[TaskProcessor] Tool ${toolName} completed in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
+              return { toolName, toolResult };
+            })
+          );
+
+          console.log(`[TaskProcessor] ${toolResults.length} tools executed in parallel in ${Date.now() - parallelStart}ms`);
+
+          // Add all tool results to conversation (preserving order, with truncation)
+          for (const { toolName, toolResult } of toolResults) {
             const truncatedContent = this.truncateToolResult(toolResult.content, toolName);
-
-            // Add tool result to conversation
             conversationMessages.push({
               role: 'tool',
               content: truncatedContent,

@@ -217,20 +217,21 @@ export class OpenRouterClient {
           tool_calls: choice.message.tool_calls,
         });
 
-        // Execute each tool call
+        // Collect tool names and notify caller
         for (const toolCall of choice.message.tool_calls) {
-          const toolName = toolCall.function.name;
-          toolsUsed.push(toolName);
-
-          // Notify caller about tool call
+          toolsUsed.push(toolCall.function.name);
           if (options?.onToolCall) {
-            options.onToolCall(toolName, toolCall.function.arguments);
+            options.onToolCall(toolCall.function.name, toolCall.function.arguments);
           }
+        }
 
-          // Execute tool and get result (pass context with secrets)
-          const result = await executeTool(toolCall, options?.toolContext);
+        // Execute all tool calls in parallel
+        const results = await Promise.all(
+          choice.message.tool_calls.map(tc => executeTool(tc, options?.toolContext))
+        );
 
-          // Add tool result to conversation
+        // Add tool results to conversation (preserving order)
+        for (const result of results) {
           conversationMessages.push({
             role: 'tool',
             content: result.content,
