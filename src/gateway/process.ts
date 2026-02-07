@@ -39,7 +39,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
 const GATEWAY_VERSION_FILE = '/tmp/.moltbot-gateway-version';
 
 /** Current gateway version - increment this to force restart on deploy */
-const GATEWAY_VERSION = '16'; // v16: token required for LAN + allowInsecureAuth to skip pairing
+const GATEWAY_VERSION = '17'; // v17: security hardening — tighten trustedProxies, SHA-256 token fingerprint
 
 /**
  * Build a fingerprint that includes the gateway version and a SHA-256 hash of the token.
