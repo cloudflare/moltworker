@@ -165,6 +165,26 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     isFree: true,
   },
+  mimo: {
+    id: 'xiaomi/mimo-v2-flash:free',
+    alias: 'mimo',
+    name: 'MiMo V2 Flash',
+    specialty: 'Free Top-Tier Coding/Reasoning',
+    score: '#1 OSS SWE-Bench, 309B MoE (15B active), 256K ctx',
+    cost: 'FREE',
+    supportsTools: true,
+    isFree: true,
+  },
+  phi4reason: {
+    id: 'microsoft/phi-4-reasoning:free',
+    alias: 'phi4reason',
+    name: 'Phi-4 Reasoning',
+    specialty: 'Free Math/Code Reasoning',
+    score: '14B dense, strong AIME/LiveCodeBench',
+    cost: 'FREE',
+    supportsTools: true,
+    isFree: true,
+  },
 
   // === IMAGE GENERATION ===
   fluxklein: {
@@ -212,6 +232,14 @@ export const MODELS: Record<string, ModelInfo> = {
     specialty: 'Cheap Paid General',
     score: 'High usage equiv. quality',
     cost: '$0.02/$0.04',
+  },
+  qwencoder7b: {
+    id: 'qwen/qwen2.5-coder-7b-instruct',
+    alias: 'qwencoder7b',
+    name: 'Qwen 2.5 Coder 7B',
+    specialty: 'Ultra-Cheap Coding (Apache 2.0)',
+    score: '7B, 128K context, 92 lang support',
+    cost: '$0.03/$0.09',
   },
   devstral: {
     id: 'mistralai/devstral-small:free',
