@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v54 - Auto-recovery + GitHub token fallback
-# Cache bust: 2026-02-07-v54-restart-loop
+# OpenClaw Startup Script v55 - Fix git remote URL update on pull
+# Cache bust: 2026-02-07-v55-fix-git-remote
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -77,7 +77,8 @@ if [ -n "$GITHUB_REPO_URL" ]; then
   fi
 
   if [ -d "$CLONE_DIR/.git" ]; then
-    echo "Repository already exists at $CLONE_DIR, pulling latest..."
+    echo "Repository already exists at $CLONE_DIR, updating remote and pulling latest..."
+    git -C "$CLONE_DIR" remote set-url origin "$CLONE_URL"
     git -C "$CLONE_DIR" pull --ff-only || echo "[WARN] git pull failed, continuing with existing version"
   else
     echo "Cloning $GITHUB_REPO_URL into $CLONE_DIR..."
