@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v53 - Auto-allowlist Telegram owner
-# Cache bust: 2026-02-07-v53-telegram-allowlist
+# OpenClaw Startup Script v54 - Auto-recovery + GitHub token fallback
+# Cache bust: 2026-02-07-v54-restart-loop
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -60,10 +60,19 @@ if [ -n "$GITHUB_REPO_URL" ]; then
   REPO_NAME=$(basename "$GITHUB_REPO_URL" .git)
   CLONE_DIR="/root/clawd/$REPO_NAME"
 
-  # Support private repos via GITHUB_TOKEN
+  # Support private repos via GITHUB_TOKEN (fallback to GITHUB_PAT)
+  EFFECTIVE_GITHUB_TOKEN=""
   if [ -n "$GITHUB_TOKEN" ]; then
-    CLONE_URL=$(echo "$GITHUB_REPO_URL" | sed "s|https://github.com/|https://${GITHUB_TOKEN}@github.com/|")
+    EFFECTIVE_GITHUB_TOKEN="$GITHUB_TOKEN"
+  elif [ -n "$GITHUB_PAT" ]; then
+    echo "Using GITHUB_PAT as fallback (GITHUB_TOKEN not set)"
+    EFFECTIVE_GITHUB_TOKEN="$GITHUB_PAT"
+  fi
+
+  if [ -n "$EFFECTIVE_GITHUB_TOKEN" ]; then
+    CLONE_URL=$(echo "$GITHUB_REPO_URL" | sed "s|https://github.com/|https://${EFFECTIVE_GITHUB_TOKEN}@github.com/|")
   else
+    echo "[WARN] Neither GITHUB_TOKEN nor GITHUB_PAT is set. Private repos will fail to clone."
     CLONE_URL="$GITHUB_REPO_URL"
   fi
 
@@ -158,4 +167,50 @@ echo "Background sync started (PID: $SYNC_PID)"
 trap 'echo "Shutting down, syncing to R2..."; sync_to_r2; kill $SYNC_PID 2>/dev/null' EXIT INT TERM
 
 log_timing "Starting gateway"
-exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+
+# Disable exit-on-error for the restart loop (we handle exit codes explicitly)
+set +e
+
+# Restart loop: keeps the gateway running even if it crashes
+MAX_RETRIES=10
+RETRY_COUNT=0
+BACKOFF=5
+MAX_BACKOFF=120
+SUCCESS_THRESHOLD=60  # seconds - if gateway ran longer than this, reset retry counter
+
+while true; do
+  GATEWAY_START=$(date +%s)
+  echo "[GATEWAY] Starting openclaw gateway (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+
+  openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+  EXIT_CODE=$?
+
+  GATEWAY_END=$(date +%s)
+  RUNTIME=$((GATEWAY_END - GATEWAY_START))
+
+  echo "[GATEWAY] Gateway exited with code $EXIT_CODE after ${RUNTIME}s"
+
+  # If it ran long enough, consider it a successful run and reset counters
+  if [ "$RUNTIME" -ge "$SUCCESS_THRESHOLD" ]; then
+    echo "[GATEWAY] Gateway ran for ${RUNTIME}s (>= ${SUCCESS_THRESHOLD}s threshold), resetting retry counter"
+    RETRY_COUNT=0
+    BACKOFF=5
+  else
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+      echo "[GATEWAY] Max retries ($MAX_RETRIES) reached. Giving up."
+      break
+    fi
+  fi
+
+  echo "[GATEWAY] Restarting in ${BACKOFF}s... (retry $RETRY_COUNT/$MAX_RETRIES)"
+  sleep "$BACKOFF"
+
+  # Exponential backoff, capped
+  BACKOFF=$((BACKOFF * 2))
+  if [ "$BACKOFF" -gt "$MAX_BACKOFF" ]; then
+    BACKOFF=$MAX_BACKOFF
+  fi
+done
+
+echo "[GATEWAY] Gateway restart loop ended. Container will exit."
