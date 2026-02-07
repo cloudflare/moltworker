@@ -3,6 +3,8 @@ import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, mountR2Storage, syncToR2, waitForProcess } from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
+import { validateShellArg } from '../utils/shell';
+import { auditLog } from '../utils/audit';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -81,6 +83,9 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
   }
 
   try {
+    // Validate requestId to prevent shell injection
+    validateShellArg(requestId, 'requestId');
+
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
@@ -94,6 +99,8 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
 
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
     const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
+
+    auditLog('device.approve', { requestId, success });
 
     return c.json({
       success,
@@ -144,6 +151,8 @@ adminApi.post('/devices/approve-all', async (c) => {
 
     for (const device of pending) {
       try {
+        // Validate requestId to prevent shell injection
+        validateShellArg(device.requestId, 'requestId');
         const approveProc = await sandbox.startProcess(`clawdbot devices approve ${device.requestId} --url ws://localhost:18789`);
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
@@ -161,6 +170,7 @@ adminApi.post('/devices/approve-all', async (c) => {
     }
 
     const approvedCount = results.filter(r => r.success).length;
+    auditLog('device.approve_all', { total: pending.length, approved: approvedCount });
     return c.json({
       approved: results.filter(r => r.success).map(r => r.requestId),
       failed: results.filter(r => !r.success),
@@ -223,7 +233,9 @@ adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
   
   const result = await syncToR2(sandbox, c.env);
-  
+
+  auditLog('storage.sync', { success: result.success });
+
   if (result.success) {
     return c.json({
       success: true,
@@ -265,9 +277,11 @@ adminApi.post('/gateway/restart', async (c) => {
     });
     c.executionCtx.waitUntil(bootPromise);
 
+    auditLog('gateway.restart', { previousProcessId: existingProcess?.id });
+
     return c.json({
       success: true,
-      message: existingProcess 
+      message: existingProcess
         ? 'Gateway process killed, new instance starting...'
         : 'No existing process found, starting new instance...',
       previousProcessId: existingProcess?.id,

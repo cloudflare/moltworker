@@ -1,6 +1,30 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { findExistingMoltbotProcess } from '../gateway';
+import { auditLog } from '../utils/audit';
+
+/**
+ * Allowlist of command prefixes for the debug CLI endpoint.
+ * Only commands starting with one of these prefixes are allowed.
+ */
+const CLI_COMMAND_ALLOWLIST = [
+  'clawdbot ',
+  'clawdbot\0', // exact match for bare "clawdbot" with args
+  'node --version',
+  'ls ',
+  'ps ',
+  'cat /root/.clawdbot/',
+  'whoami',
+  'uname ',
+  'df ',
+  'free ',
+];
+
+function isAllowedCommand(cmd: string): boolean {
+  // Allow exact match for "clawdbot --help" (default)
+  if (cmd === 'clawdbot --help') return true;
+  return CLI_COMMAND_ALLOWLIST.some(prefix => cmd.startsWith(prefix));
+}
 
 /**
  * Debug routes for inspecting container state
@@ -98,7 +122,14 @@ debug.get('/gateway-api', async (c) => {
   const sandbox = c.get('sandbox');
   const path = c.req.query('path') || '/';
   const MOLTBOT_PORT = 18789;
-  
+
+  // Validate path: must start with / and must not contain path traversal
+  if (!path.startsWith('/') || path.includes('..')) {
+    return c.json({ error: 'Invalid path: must start with / and not contain ..' }, 400);
+  }
+
+  auditLog('debug.gateway_api', { path });
+
   try {
     const url = `http://localhost:${MOLTBOT_PORT}${path}`;
     const response = await sandbox.containerFetch(new Request(url), MOLTBOT_PORT);
@@ -127,7 +158,17 @@ debug.get('/gateway-api', async (c) => {
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
   const cmd = c.req.query('cmd') || 'clawdbot --help';
-  
+
+  if (!isAllowedCommand(cmd)) {
+    auditLog('debug.cli_blocked', { cmd });
+    return c.json({
+      error: 'Command not allowed',
+      hint: 'Only clawdbot, node --version, ls, ps, cat /root/.clawdbot/*, whoami, uname, df, and free are permitted',
+    }, 403);
+  }
+
+  auditLog('debug.cli', { cmd });
+
   try {
     const proc = await sandbox.startProcess(cmd);
     

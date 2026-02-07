@@ -8,7 +8,8 @@ import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
  * Implements a subset of the CDP protocol over WebSocket, translating commands
  * to Cloudflare Browser Rendering binding calls (Puppeteer interface).
  * 
- * Authentication: Pass secret as query param `?secret=<secret>` on WebSocket connect.
+ * Authentication: Pass secret via `Authorization: Bearer <secret>` header (preferred)
+ * or as query param `?secret=<secret>` (fallback for WebSocket clients).
  * This route is intentionally NOT protected by Cloudflare Access.
  * 
  * Supported CDP domains:
@@ -22,6 +23,47 @@ import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
  * - Emulation: setDeviceMetricsOverride, setUserAgentOverride
  */
 const cdp = new Hono<AppEnv>();
+
+/**
+ * Extract CDP secret from request — checks Authorization header first, then query param.
+ */
+function extractCDPSecret(c: { req: { header: (name: string) => string | undefined; url: string } }): string | null {
+  // Prefer Authorization: Bearer header
+  const authHeader = c.req.header('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+  // Fall back to query param for WebSocket compatibility
+  const url = new URL(c.req.url);
+  return url.searchParams.get('secret');
+}
+
+/**
+ * Verify CDP auth and browser binding. Returns an error Response or null if OK.
+ */
+function verifyCDPAuth(c: { req: { header: (name: string) => string | undefined; url: string }; json: (data: unknown, status?: number) => Response; env: MoltbotEnv }): Response | null {
+  const expectedSecret = c.env.CDP_SECRET;
+  if (!expectedSecret) {
+    return c.json({
+      error: 'CDP endpoint not configured',
+      hint: 'Set CDP_SECRET via: wrangler secret put CDP_SECRET',
+    }, 503);
+  }
+
+  const providedSecret = extractCDPSecret(c);
+  if (!providedSecret || !timingSafeEqual(providedSecret, expectedSecret)) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  if (!c.env.BROWSER) {
+    return c.json({
+      error: 'Browser Rendering not configured',
+      hint: 'Add browser binding to wrangler.jsonc',
+    }, 503);
+  }
+
+  return null;
+}
 
 /**
  * CDP Message types
@@ -71,7 +113,7 @@ cdp.get('/', async (c) => {
   if (upgradeHeader?.toLowerCase() !== 'websocket') {
     return c.json({
       error: 'WebSocket upgrade required',
-      hint: 'Connect via WebSocket: ws://host/cdp?secret=<CDP_SECRET>',
+      hint: 'Connect via WebSocket with Authorization: Bearer <CDP_SECRET> header or ws://host/cdp?secret=<CDP_SECRET>',
       supported_methods: [
         // Browser
         'Browser.getVersion',
@@ -152,28 +194,8 @@ cdp.get('/', async (c) => {
     });
   }
 
-  // Verify secret from query param
-  const url = new URL(c.req.url);
-  const providedSecret = url.searchParams.get('secret');
-  const expectedSecret = c.env.CDP_SECRET;
-
-  if (!expectedSecret) {
-    return c.json({
-      error: 'CDP endpoint not configured',
-      hint: 'Set CDP_SECRET via: wrangler secret put CDP_SECRET',
-    }, 503);
-  }
-
-  if (!providedSecret || !timingSafeEqual(providedSecret, expectedSecret)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (!c.env.BROWSER) {
-    return c.json({
-      error: 'Browser Rendering not configured',
-      hint: 'Add browser binding to wrangler.jsonc',
-    }, 503);
-  }
+  const authError = verifyCDPAuth(c);
+  if (authError) return authError;
 
   // Create WebSocket pair
   const webSocketPair = new WebSocketPair();
@@ -201,28 +223,11 @@ cdp.get('/', async (c) => {
  * Authentication: Pass secret as query param `?secret=<CDP_SECRET>`
  */
 cdp.get('/json/version', async (c) => {
-  // Verify secret from query param
+  const authError = verifyCDPAuth(c);
+  if (authError) return authError;
+
   const url = new URL(c.req.url);
-  const providedSecret = url.searchParams.get('secret');
-  const expectedSecret = c.env.CDP_SECRET;
-
-  if (!expectedSecret) {
-    return c.json({
-      error: 'CDP endpoint not configured',
-      hint: 'Set CDP_SECRET via: wrangler secret put CDP_SECRET',
-    }, 503);
-  }
-
-  if (!providedSecret || !timingSafeEqual(providedSecret, expectedSecret)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (!c.env.BROWSER) {
-    return c.json({
-      error: 'Browser Rendering not configured',
-      hint: 'Add browser binding to wrangler.jsonc',
-    }, 503);
-  }
+  const providedSecret = extractCDPSecret(c)!;
 
   // Build the WebSocket URL - preserve the secret in the WS URL
   const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -247,28 +252,11 @@ cdp.get('/json/version', async (c) => {
  * Authentication: Pass secret as query param `?secret=<CDP_SECRET>`
  */
 cdp.get('/json/list', async (c) => {
-  // Verify secret from query param
+  const authError = verifyCDPAuth(c);
+  if (authError) return authError;
+
   const url = new URL(c.req.url);
-  const providedSecret = url.searchParams.get('secret');
-  const expectedSecret = c.env.CDP_SECRET;
-
-  if (!expectedSecret) {
-    return c.json({
-      error: 'CDP endpoint not configured',
-      hint: 'Set CDP_SECRET via: wrangler secret put CDP_SECRET',
-    }, 503);
-  }
-
-  if (!providedSecret || !timingSafeEqual(providedSecret, expectedSecret)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (!c.env.BROWSER) {
-    return c.json({
-      error: 'Browser Rendering not configured',
-      hint: 'Add browser binding to wrangler.jsonc',
-    }, 503);
-  }
+  const providedSecret = extractCDPSecret(c)!;
 
   // Build the WebSocket URL
   const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -292,31 +280,11 @@ cdp.get('/json/list', async (c) => {
  * GET /json - Alias for /json/list (some clients use this)
  */
 cdp.get('/json', async (c) => {
-  // Redirect internally to /json/list handler
+  const authError = verifyCDPAuth(c);
+  if (authError) return authError;
+
   const url = new URL(c.req.url);
-  url.pathname = url.pathname.replace(/\/json\/?$/, '/json/list');
-  
-  // Verify secret from query param
-  const providedSecret = url.searchParams.get('secret');
-  const expectedSecret = c.env.CDP_SECRET;
-
-  if (!expectedSecret) {
-    return c.json({
-      error: 'CDP endpoint not configured',
-      hint: 'Set CDP_SECRET via: wrangler secret put CDP_SECRET',
-    }, 503);
-  }
-
-  if (!providedSecret || !timingSafeEqual(providedSecret, expectedSecret)) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-
-  if (!c.env.BROWSER) {
-    return c.json({
-      error: 'Browser Rendering not configured',
-      hint: 'Add browser binding to wrangler.jsonc',
-    }, 503);
-  }
+  const providedSecret = extractCDPSecret(c)!;
 
   // Build the WebSocket URL
   const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1837,16 +1805,15 @@ function sendEvent(ws: WebSocket, method: string, params?: Record<string, unknow
 }
 
 /**
- * Constant-time string comparison to prevent timing attacks
+ * Constant-time string comparison to prevent timing attacks.
+ * Always iterates over the longer string and XORs lengths into the result
+ * to avoid leaking the secret's length via early return.
  */
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  const len = Math.max(a.length, b.length);
+  let result = a.length ^ b.length;
+  for (let i = 0; i < len; i++) {
+    result |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   }
   return result === 0;
 }

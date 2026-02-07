@@ -1,6 +1,7 @@
 import type { Context, Next } from 'hono';
 import type { AppEnv, MoltbotEnv } from '../types';
 import { verifyAccessJWT } from './jwt';
+import { auditLog } from '../utils/audit';
 
 /**
  * Options for creating an access middleware
@@ -51,6 +52,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
   return async (c: Context<AppEnv>, next: Next) => {
     // Skip auth in dev mode or E2E test mode
     if (isDevMode(c.env) || isE2ETestMode(c.env)) {
+      auditLog('auth.bypass', { reason: isDevMode(c.env) ? 'DEV_MODE' : 'E2E_TEST_MODE', path: c.req.path });
       c.set('accessUser', { email: 'dev@localhost', name: 'Dev User' });
       return next();
     }
@@ -106,9 +108,11 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
     // Verify JWT
     try {
       const payload = await verifyAccessJWT(jwt, teamDomain, expectedAud);
+      auditLog('auth.success', { email: payload.email, path: c.req.path });
       c.set('accessUser', { email: payload.email, name: payload.name });
       await next();
     } catch (err) {
+      auditLog('auth.failure', { error: err instanceof Error ? err.message : 'unknown', path: c.req.path });
       console.error('Access JWT verification failed:', err);
       
       if (type === 'json') {

@@ -42,22 +42,24 @@ const GATEWAY_VERSION_FILE = '/tmp/.moltbot-gateway-version';
 const GATEWAY_VERSION = '16'; // v16: token required for LAN + allowInsecureAuth to skip pairing
 
 /**
- * Build a fingerprint that includes the gateway version and a hash of the token.
+ * Build a fingerprint that includes the gateway version and a SHA-256 hash of the token.
  * When either the version or token changes, the gateway will be restarted.
  */
-function buildConfigFingerprint(token?: string): string {
+async function buildConfigFingerprint(token?: string): Promise<string> {
   if (!token) return GATEWAY_VERSION;
-  // Use first 16 chars of token as a change-detection fingerprint.
-  // This is stored inside the container filesystem (not exposed externally)
-  // and only needs to detect changes, not protect the token value.
-  return `${GATEWAY_VERSION}:${token.substring(0, 16)}`;
+  const data = new TextEncoder().encode(token);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashHex = Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  return `${GATEWAY_VERSION}:${hashHex}`;
 }
 
 /**
  * Check if the gateway needs to be restarted due to version/config change
  */
 async function shouldRestartGateway(sandbox: Sandbox, token?: string): Promise<boolean> {
-  const currentFingerprint = buildConfigFingerprint(token);
+  const currentFingerprint = await buildConfigFingerprint(token);
   try {
     const result = await sandbox.readFile(GATEWAY_VERSION_FILE);
     if (result.success && result.content) {
@@ -80,7 +82,7 @@ async function shouldRestartGateway(sandbox: Sandbox, token?: string): Promise<b
  */
 async function storeGatewayVersion(sandbox: Sandbox, token?: string): Promise<void> {
   try {
-    const fingerprint = buildConfigFingerprint(token);
+    const fingerprint = await buildConfigFingerprint(token);
     await sandbox.writeFile(GATEWAY_VERSION_FILE, fingerprint);
     console.log('[Gateway] Stored config fingerprint');
   } catch (e) {

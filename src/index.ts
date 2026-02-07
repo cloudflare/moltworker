@@ -137,9 +137,6 @@ app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const redactedSearch = redactSensitiveParams(url);
   console.log(`[REQ] ${c.req.method} ${url.pathname}${redactedSearch}`);
-  console.log(`[REQ] Has ANTHROPIC_API_KEY: ${!!c.env.ANTHROPIC_API_KEY}`);
-  console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
-  console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
   await next();
 });
 
@@ -207,6 +204,11 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
 
+  // Warn loudly if DEV_MODE bypasses auth while CF Access is configured
+  if (c.env.DEV_MODE === 'true' && (c.env.CF_ACCESS_TEAM_DOMAIN || c.env.CF_ACCESS_AUD)) {
+    console.warn('[SECURITY WARNING] DEV_MODE is enabled alongside CF Access config — all authentication is bypassed!');
+  }
+
   // Skip auth for public routes (these are handled by publicRoutes but middleware still runs)
   const publicPaths = ['/api/status', '/sandbox-health', '/logo.png', '/logo-small.png'];
   if (publicPaths.includes(url.pathname) || url.pathname.startsWith('/_admin/assets/')) {
@@ -234,6 +236,7 @@ app.use('/debug/*', async (c, next) => {
   if (c.env.DEBUG_ROUTES !== 'true') {
     return c.json({ error: 'Debug routes are disabled' }, 404);
   }
+  console.warn('[SECURITY] DEBUG_ROUTES is enabled — debug endpoints are accessible to authenticated users');
   return next();
 });
 app.route('/debug', debug);
@@ -327,8 +330,35 @@ app.all('*', async (c) => {
       console.log('[WS] serverWs.readyState:', serverWs.readyState);
     }
 
+    // Rate limiting state for client -> container messages
+    const WS_MAX_MESSAGES_PER_SEC = 100;
+    const WS_MAX_MESSAGE_SIZE = 1024 * 1024; // 1MB
+    let wsMessageCount = 0;
+    let wsWindowStart = Date.now();
+
     // Relay messages from client to container
     serverWs.addEventListener('message', (event) => {
+      // Enforce message size limit
+      const size = typeof event.data === 'string' ? event.data.length : (event.data as ArrayBuffer).byteLength;
+      if (size > WS_MAX_MESSAGE_SIZE) {
+        console.warn(`[WS] Message too large (${size} bytes), closing connection`);
+        serverWs.close(1009, 'Message too large');
+        return;
+      }
+
+      // Enforce rate limit
+      const now = Date.now();
+      if (now - wsWindowStart > 1000) {
+        wsMessageCount = 0;
+        wsWindowStart = now;
+      }
+      wsMessageCount++;
+      if (wsMessageCount > WS_MAX_MESSAGES_PER_SEC) {
+        console.warn('[WS] Rate limit exceeded, closing connection');
+        serverWs.close(1008, 'Rate limit exceeded');
+        return;
+      }
+
       if (debugLogs) {
         console.log('[WS] Client -> Container:', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)');
       }

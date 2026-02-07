@@ -20,7 +20,7 @@ cat > /root/.clawdbot/clawdbot.json << 'EOF'
       "enabled": true,
       "allowInsecureAuth": true
     },
-    "trustedProxies": ["0.0.0.0/0"]
+    "trustedProxies": ["127.0.0.0/8", "::1/128"]
   }
 }
 EOF
