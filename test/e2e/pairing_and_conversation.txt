@@ -4,7 +4,9 @@ navigate to admin page to approve device
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-./pw --session=moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN"
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.goto('$WORKER_URL/_admin/?token=$TOKEN');
+}"
 ---
 
 ===
@@ -41,7 +43,9 @@ navigate back to main chat page
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-./pw --session=moltworker-e2e open "$WORKER_URL/?token=$TOKEN"
+./pw --session=moltworker-e2e run-code "async page => {
+  await page.goto('$WORKER_URL/?token=$TOKEN');
+}"
 ---
 
 ===
@@ -50,6 +54,18 @@ wait for chat interface to load
 ===
 ./pw --session=moltworker-e2e run-code "async page => {
   await page.waitForSelector('textarea', { timeout: 120000 });
+}"
+---
+
+===
+send /models command
+%require
+===
+./pw --session=moltworker-e2e run-code "async page => {
+  const textarea = await page.waitForSelector('textarea');
+  await textarea.fill('/models');
+  const btn = await page.waitForSelector('button:has-text(\"Send\")');
+  await btn.click();
 }"
 ---
 

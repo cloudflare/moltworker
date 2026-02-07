@@ -129,6 +129,21 @@ describe('buildEnvVars', () => {
     expect(result.OPENCLAW_DEV_MODE).toBe('true');
   });
 
+  // AI Gateway model override
+  it('passes CF_AI_GATEWAY_MODEL to container', () => {
+    const env = createMockEnv({
+      CF_AI_GATEWAY_MODEL: 'workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    });
+    const result = buildEnvVars(env);
+    expect(result.CF_AI_GATEWAY_MODEL).toBe('workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+  });
+
+  it('passes CF_ACCOUNT_ID to container', () => {
+    const env = createMockEnv({ CF_ACCOUNT_ID: 'acct-123' });
+    const result = buildEnvVars(env);
+    expect(result.CF_ACCOUNT_ID).toBe('acct-123');
+  });
+
   it('combines all env vars correctly', () => {
     const env = createMockEnv({
       ANTHROPIC_API_KEY: 'sk-key',

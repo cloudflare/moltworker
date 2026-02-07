@@ -43,8 +43,8 @@ describe('syncToR2', () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('')) // No openclaw.json
-        .mockResolvedValueOnce(createMockProcess('')); // No clawdbot.json either
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })) // No openclaw.json
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })); // No clawdbot.json either
 
       const env = createMockEnvWithR2();
 

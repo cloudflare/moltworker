@@ -189,16 +189,54 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
-// Legacy AI Gateway base URL override — patch into provider config
-// (only needed when using AI_GATEWAY_BASE_URL, not native cloudflare-ai-gateway)
-if (process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_API_KEY) {
-    const baseUrl = process.env.ANTHROPIC_BASE_URL.replace(/\/+$/, '');
-    config.models = config.models || {};
-    config.models.providers = config.models.providers || {};
-    config.models.providers.anthropic = config.models.providers.anthropic || {};
-    config.models.providers.anthropic.baseUrl = baseUrl;
-    config.models.providers.anthropic.apiKey = process.env.ANTHROPIC_API_KEY;
-    console.log('Patched Anthropic provider with base URL:', baseUrl);
+// Legacy AI Gateway base URL override:
+// ANTHROPIC_BASE_URL is picked up natively by the Anthropic SDK,
+// so we don't need to patch the provider config. Writing a provider
+// entry without a models array breaks OpenClaw's config validation.
+
+// AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
+// Adds a provider entry for any AI Gateway provider and sets it as default model.
+// Examples:
+//   workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+//   openai/gpt-4o
+//   anthropic/claude-sonnet-4-5
+if (process.env.CF_AI_GATEWAY_MODEL) {
+    const raw = process.env.CF_AI_GATEWAY_MODEL;
+    const slashIdx = raw.indexOf('/');
+    const gwProvider = raw.substring(0, slashIdx);
+    const modelId = raw.substring(slashIdx + 1);
+
+    const accountId = process.env.CF_AI_GATEWAY_ACCOUNT_ID;
+    const gatewayId = process.env.CF_AI_GATEWAY_GATEWAY_ID;
+    const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
+
+    let baseUrl;
+    if (accountId && gatewayId) {
+        baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
+        if (gwProvider === 'workers-ai') baseUrl += '/v1';
+    } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
+        baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
+    }
+
+    if (baseUrl && apiKey) {
+        const api = gwProvider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
+        const providerName = 'cf-ai-gw-' + gwProvider;
+
+        config.models = config.models || {};
+        config.models.providers = config.models.providers || {};
+        config.models.providers[providerName] = {
+            baseUrl: baseUrl,
+            apiKey: apiKey,
+            api: api,
+            models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
+        };
+        config.agents = config.agents || {};
+        config.agents.defaults = config.agents.defaults || {};
+        config.agents.defaults.model = { primary: providerName + '/' + modelId };
+        console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
+    } else {
+        console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
+    }
 }
 
 // Telegram configuration
@@ -244,7 +282,6 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
-console.log('Config:', JSON.stringify(config, null, 2));
 EOFPATCH
 
 # ============================================================

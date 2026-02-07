@@ -43,21 +43,15 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Determine which config directory exists
   // Check new path first, fall back to legacy
+  // Use exit code (0 = exists) rather than stdout parsing to avoid log-flush races
   let configDir = '/root/.openclaw';
   try {
-    const checkNew = await sandbox.startProcess(
-      'test -f /root/.openclaw/openclaw.json && echo "ok"',
-    );
+    const checkNew = await sandbox.startProcess('test -f /root/.openclaw/openclaw.json');
     await waitForProcess(checkNew, 5000);
-    const newLogs = await checkNew.getLogs();
-    if (!newLogs.stdout?.includes('ok')) {
-      // Try legacy path
-      const checkLegacy = await sandbox.startProcess(
-        'test -f /root/.clawdbot/clawdbot.json && echo "ok"',
-      );
+    if (checkNew.exitCode !== 0) {
+      const checkLegacy = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json');
       await waitForProcess(checkLegacy, 5000);
-      const legacyLogs = await checkLegacy.getLogs();
-      if (legacyLogs.stdout?.includes('ok')) {
+      if (checkLegacy.exitCode === 0) {
         configDir = '/root/.clawdbot';
       } else {
         return {

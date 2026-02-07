@@ -70,12 +70,27 @@ echo "$R2_BUCKET" | npx wrangler secret put R2_BUCKET_NAME --name "$WORKER_NAME"
 echo "$CLOUDFLARE_ACCOUNT_ID" | npx wrangler secret put CF_ACCOUNT_ID --name "$WORKER_NAME" >&2
 
 # Set AI provider keys if available
+# Cloudflare AI Gateway (preferred)
+if [ -n "$CLOUDFLARE_AI_GATEWAY_API_KEY" ]; then
+    echo "$CLOUDFLARE_AI_GATEWAY_API_KEY" | npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY --name "$WORKER_NAME" >&2
+fi
+if [ -n "$CF_AI_GATEWAY_ACCOUNT_ID" ]; then
+    echo "$CF_AI_GATEWAY_ACCOUNT_ID" | npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID --name "$WORKER_NAME" >&2
+fi
+if [ -n "$CF_AI_GATEWAY_GATEWAY_ID" ]; then
+    echo "$CF_AI_GATEWAY_GATEWAY_ID" | npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID --name "$WORKER_NAME" >&2
+fi
+if [ -n "$CF_AI_GATEWAY_MODEL" ]; then
+    echo "$CF_AI_GATEWAY_MODEL" | npx wrangler secret put CF_AI_GATEWAY_MODEL --name "$WORKER_NAME" >&2
+fi
+# Legacy AI Gateway (still supported)
 if [ -n "$AI_GATEWAY_API_KEY" ]; then
     echo "$AI_GATEWAY_API_KEY" | npx wrangler secret put AI_GATEWAY_API_KEY --name "$WORKER_NAME" >&2
 fi
 if [ -n "$AI_GATEWAY_BASE_URL" ]; then
     echo "$AI_GATEWAY_BASE_URL" | npx wrangler secret put AI_GATEWAY_BASE_URL --name "$WORKER_NAME" >&2
 fi
+# Direct provider keys
 if [ -n "$ANTHROPIC_API_KEY" ]; then
     echo "$ANTHROPIC_API_KEY" | npx wrangler secret put ANTHROPIC_API_KEY --name "$WORKER_NAME" >&2
 fi
