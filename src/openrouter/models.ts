@@ -145,6 +145,26 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     isFree: true,
   },
+  pony: {
+    id: 'openrouter/pony-alpha',
+    alias: 'pony',
+    name: 'Pony Alpha',
+    specialty: 'Free Coding/Agentic/Reasoning',
+    score: '200K context, strong coding & roleplay',
+    cost: 'FREE',
+    supportsTools: true,
+    isFree: true,
+  },
+  gptoss: {
+    id: 'openai/gpt-oss-120b:free',
+    alias: 'gptoss',
+    name: 'GPT-OSS 120B',
+    specialty: 'Free Reasoning/Tools (OpenAI Open-Source)',
+    score: '117B MoE (5.1B active), native tool use',
+    cost: 'FREE',
+    supportsTools: true,
+    isFree: true,
+  },
 
   // === IMAGE GENERATION ===
   fluxklein: {
@@ -210,6 +230,15 @@ export const MODELS: Record<string, ModelInfo> = {
     specialty: 'Paid Premium Agentic Coding',
     score: '123B dense, 256K context',
     cost: '$0.05/$0.22',
+    supportsTools: true,
+  },
+  glm47: {
+    id: 'z-ai/glm-4.7',
+    alias: 'glm47',
+    name: 'GLM 4.7',
+    specialty: 'Paid Agentic/Reasoning',
+    score: '200K context, stable multi-step execution',
+    cost: '$0.07/$0.40',
     supportsTools: true,
   },
   mini: {
