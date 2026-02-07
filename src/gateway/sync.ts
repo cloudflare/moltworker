@@ -38,13 +38,13 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Sanity check: verify source has critical files before syncing
   // This prevents accidentally overwriting a good backup with empty/corrupted data
+  // Use exit code (0 = exists) rather than stdout parsing to avoid log-flush races
   try {
-    const checkProc = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json && echo "ok"');
+    const checkProc = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json');
     await waitForProcess(checkProc, 5000);
-    const checkLogs = await checkProc.getLogs();
-    if (!checkLogs.stdout?.includes('ok')) {
-      return { 
-        success: false, 
+    if (checkProc.exitCode !== 0) {
+      return {
+        success: false,
         error: 'Sync aborted: source missing clawdbot.json',
         details: 'The local config directory is missing critical files. This could indicate corruption or an incomplete setup.',
       };
@@ -57,9 +57,10 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
-  // Run rsync to backup config to R2
+  // Run rsync to backup config, workspace, and skills to R2
   // Note: Use --no-times because s3fs doesn't support setting timestamps
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Also sync workspace directory (excluding skills since they're synced separately)
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ && rsync -r --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
   
   try {
     const proc = await sandbox.startProcess(syncCmd);

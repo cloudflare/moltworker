@@ -43,8 +43,8 @@ describe('syncToR2', () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('')); // No "ok" output
-      
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })); // No clawdbot.json
+
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
@@ -61,13 +61,13 @@ describe('syncToR2', () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       const timestamp = '2026-01-27T12:00:00+00:00';
       
-      // Calls: mount check, sanity check, rsync, cat timestamp
+      // Calls: mount check, sanity check (exitCode 0 = file exists), rsync, cat timestamp
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 0 }))
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(timestamp));
-      
+
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
@@ -78,11 +78,11 @@ describe('syncToR2', () => {
 
     it('returns error when rsync fails (no timestamp created)', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
-      
-      // Calls: mount check, sanity check, rsync (fails), cat timestamp (empty)
+
+      // Calls: mount check, sanity check (exitCode 0 = file exists), rsync (fails), cat timestamp (empty)
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 0 }))
         .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 }))
         .mockResolvedValueOnce(createMockProcess(''));
       
@@ -100,10 +100,10 @@ describe('syncToR2', () => {
       
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 0 }))
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(timestamp));
-      
+
       const env = createMockEnvWithR2();
 
       await syncToR2(sandbox, env);

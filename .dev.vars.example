@@ -2,6 +2,17 @@
 # .dev.vars is gitignored and used by wrangler dev
 
 ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+
+# Cloudflare AI Gateway (alternative to direct provider keys)
+# CLOUDFLARE_AI_GATEWAY_API_KEY=your-provider-api-key
+# CF_AI_GATEWAY_ACCOUNT_ID=your-account-id
+# CF_AI_GATEWAY_GATEWAY_ID=your-gateway-id
+# CF_AI_GATEWAY_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+
+# Legacy AI Gateway (still supported)
+# AI_GATEWAY_API_KEY=your-key
+# AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true
