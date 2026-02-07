@@ -71,5 +71,8 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.GITHUB_REPO_URL) envVars.GITHUB_REPO_URL = env.GITHUB_REPO_URL;
   if (env.GITHUB_TOKEN) envVars.GITHUB_TOKEN = env.GITHUB_TOKEN;
 
+  // Telegram owner auto-allowlist on startup
+  if (env.TELEGRAM_OWNER_ID) envVars.TELEGRAM_OWNER_ID = env.TELEGRAM_OWNER_ID;
+
   return envVars;
 }

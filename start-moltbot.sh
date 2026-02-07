@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v52 - Write config after R2 restore
-# Cache bust: 2026-02-06-v52-config-order
+# OpenClaw Startup Script v53 - Auto-allowlist Telegram owner
+# Cache bust: 2026-02-07-v53-telegram-allowlist
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -106,9 +106,29 @@ cat > "$CONFIG_DIR/openclaw.json" << 'EOFCONFIG'
   "gateway": {
     "port": 18789,
     "mode": "local"
+  },
+  "channels": {
+    "telegram": {
+      "dmPolicy": "allowlist"
+    }
   }
 }
 EOFCONFIG
+
+# Ensure Telegram allowlist includes the owner's Telegram user ID
+ALLOWLIST_FILE="$CONFIG_DIR/credentials/telegram-allowFrom.json"
+if [ -n "$TELEGRAM_OWNER_ID" ]; then
+  mkdir -p "$CONFIG_DIR/credentials"
+  cat > "$ALLOWLIST_FILE" << EOFALLOW
+{
+  "version": 1,
+  "allowFrom": [
+    "$TELEGRAM_OWNER_ID"
+  ]
+}
+EOFALLOW
+  echo "Telegram allowlist set for owner ID: $TELEGRAM_OWNER_ID"
+fi
 log_timing "Config file written"
 
 echo "Config:"

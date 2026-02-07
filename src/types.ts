@@ -42,6 +42,7 @@ export interface MoltbotEnv {
   CLAUDE_REFRESH_TOKEN?: string; // Claude Max OAuth refresh token
   GITHUB_REPO_URL?: string; // GitHub repo URL to clone on startup
   GITHUB_TOKEN?: string; // GitHub personal access token for private repos
+  TELEGRAM_OWNER_ID?: string; // Telegram user ID to auto-allowlist on startup
 }
 
 /**
