@@ -45,7 +45,3 @@ Thumbs.db
 
 # playwright-cli
 .playwright-cli/
-
-# Private orchestration docs (stored in companion repo)
-claude-share/
-brainstorming/tool-calling-analysis.md
