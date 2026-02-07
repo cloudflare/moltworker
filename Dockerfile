@@ -46,7 +46,7 @@ RUN mkdir -p /root/.clawdbot \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
-# Build cache bust: 1769894798
+# Build cache bust: 2026-02-07-upstream-sync
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
 RUN chmod +x /usr/local/bin/start-moltbot.sh
 
