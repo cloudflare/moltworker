@@ -4,6 +4,41 @@
 
 ---
 
+## Session: 2026-02-08 | Phase 1.3: Configurable Reasoning (Session: 01Wjud3VHKMfSRbvMTzFohGS)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/review-moltworker-roadmap-q5aqD`
+**Status:** Completed
+
+### Summary
+Implemented Phase 1.3: Configurable reasoning per model. Models with `reasoning: 'configurable'` metadata (DeepSeek V3.2, Grok 4.1, Gemini 3 Flash, Gemini 3 Pro) now get provider-specific reasoning parameters injected into API requests. Auto-detection selects reasoning level based on task type (off for simple Q&A, medium for coding/tools, high for research). Users can override via `think:LEVEL` message prefix.
+
+### Changes Made
+1. **Reasoning types and utilities** (`models.ts`) — `ReasoningLevel`, `ReasoningParam` types; `getReasoningParam()` maps level to provider format (DeepSeek/Grok: `{enabled}`, Gemini: `{effort}`); `detectReasoningLevel()` auto-detects from message content; `parseReasoningOverride()` parses `think:LEVEL` prefix
+2. **Client integration** (`client.ts`) — Added `reasoning` field to `ChatCompletionRequest`; injected reasoning into `chatCompletion()`, `chatCompletionWithTools()` (upgrades 'off' to 'medium' for tool-use), and `chatCompletionStreamingWithTools()`; all methods accept `reasoningLevel` option
+3. **Telegram handler** (`handler.ts`) — Parses `think:LEVEL` prefix from user messages, passes to client methods, saves cleaned message to history
+4. **36 tests** (`reasoning.test.ts`) — `getReasoningParam` per model type, `detectReasoningLevel` for simple/coding/research, `parseReasoningOverride` edge cases, client injection verification
+
+### Files Modified
+- `src/openrouter/models.ts` (reasoning types + 4 utility functions)
+- `src/openrouter/client.ts` (reasoning injection in 3 methods)
+- `src/telegram/handler.ts` (think: prefix parsing)
+- `src/openrouter/reasoning.test.ts` (36 new tests)
+- `claude-share/core/GLOBAL_ROADMAP.md`
+- `claude-share/core/WORK_STATUS.md`
+- `claude-share/core/claude-log.md`
+- `claude-share/core/next_prompt.md`
+
+### Tests
+- [x] All 166 tests pass (36 new reasoning tests)
+- [x] Typecheck: no new errors (pre-existing errors unchanged)
+
+### Notes for Next Session
+- Phase 1.3 complete. Tool-calling optimization now done (Phase 1.1-1.3).
+- Next: Phase 2.5.7 (Daily briefing), Phase 2.5.4 (Currency conversion), Phase 2.1 (Token/cost tracking)
+
+---
+
 ## Session: 2026-02-08 | Phase 2.5.5: News Feeds Tool (Session: 01Wjud3VHKMfSRbvMTzFohGS)
 
 **AI:** Claude Opus 4.6

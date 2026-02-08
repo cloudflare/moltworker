@@ -3,7 +3,7 @@
  * Direct integration with OpenRouter API using OpenAI-compatible format
  */
 
-import { getModelId, isImageGenModel, DEFAULT_IMAGE_MODEL } from './models';
+import { getModelId, isImageGenModel, DEFAULT_IMAGE_MODEL, getReasoningParam, detectReasoningLevel, type ReasoningLevel, type ReasoningParam } from './models';
 import { AVAILABLE_TOOLS, executeTool, type ToolDefinition, type ToolCall, type ToolResult, type ToolContext } from './tools';
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
@@ -31,6 +31,7 @@ export interface ChatCompletionRequest {
   stream?: boolean;
   tools?: ToolDefinition[];
   tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+  reasoning?: ReasoningParam;
 }
 
 export interface ChatCompletionResponse {
@@ -110,6 +111,7 @@ export class OpenRouterClient {
     options?: {
       maxTokens?: number;
       temperature?: number;
+      reasoningLevel?: ReasoningLevel;
     }
   ): Promise<ChatCompletionResponse> {
     const modelId = getModelId(modelAlias);
@@ -120,6 +122,13 @@ export class OpenRouterClient {
       max_tokens: options?.maxTokens || 4096,
       temperature: options?.temperature ?? 0.7,
     };
+
+    // Inject reasoning parameter for configurable models
+    const level = options?.reasoningLevel ?? detectReasoningLevel(messages);
+    const reasoning = getReasoningParam(modelAlias, level);
+    if (reasoning) {
+      request.reasoning = reasoning;
+    }
 
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -150,6 +159,7 @@ export class OpenRouterClient {
       onToolCall?: (toolName: string, args: string) => void; // Callback for progress updates
       onIteration?: (iteration: number, totalTools: number) => void; // Callback for iteration progress
       toolContext?: ToolContext; // Context with secrets for tool execution
+      reasoningLevel?: ReasoningLevel;
     }
   ): Promise<{ response: ChatCompletionResponse; finalText: string; toolsUsed: string[]; hitLimit: boolean }> {
     const modelId = getModelId(modelAlias);
@@ -161,6 +171,11 @@ export class OpenRouterClient {
 
     // Clone messages to avoid mutating the original
     const conversationMessages: ChatMessage[] = [...messages];
+
+    // Pre-compute reasoning parameter (constant across iterations)
+    const level = options?.reasoningLevel ?? detectReasoningLevel(messages);
+    const toolLevel = level === 'off' ? 'medium' : level; // Tool-use benefits from reasoning
+    const reasoningParam = getReasoningParam(modelAlias, toolLevel);
 
     let iterations = 0;
     let lastResponse: ChatCompletionResponse;
@@ -187,6 +202,11 @@ export class OpenRouterClient {
         tools: AVAILABLE_TOOLS,
         tool_choice: 'auto',
       };
+
+      // Inject reasoning parameter for configurable models
+      if (reasoningParam) {
+        request.reasoning = reasoningParam;
+      }
 
       const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
         method: 'POST',
@@ -432,6 +452,7 @@ export class OpenRouterClient {
       toolChoice?: 'auto' | 'none';
       idleTimeoutMs?: number;
       onProgress?: () => void; // Called when chunks received - use for heartbeat
+      reasoningLevel?: ReasoningLevel;
     }
   ): Promise<ChatCompletionResponse> {
     const modelId = getModelId(modelAlias);
@@ -450,20 +471,29 @@ export class OpenRouterClient {
       const url = new URL(`${OPENROUTER_BASE_URL}/chat/completions`);
       url.searchParams.append('_nc', crypto.randomUUID().slice(0, 8)); // no-cache bust
 
+      // Compute reasoning parameter for configurable models
+      const level = options?.reasoningLevel ?? detectReasoningLevel(messages);
+      const reasoning = getReasoningParam(modelAlias, level);
+
+      const requestBody: Record<string, unknown> = {
+        model: modelId,
+        messages,
+        max_tokens: options?.maxTokens || 4096,
+        temperature: options?.temperature ?? 0.7,
+        tools: options?.tools,
+        tool_choice: options?.toolChoice ?? 'auto',
+        stream: true,
+        stream_options: { include_usage: true },
+      };
+      if (reasoning) {
+        requestBody.reasoning = reasoning;
+      }
+
       const response = await fetch(url.toString(), {
         method: 'POST',
         headers: this.getHeaders(),
         signal: controller.signal,
-        body: JSON.stringify({
-          model: modelId,
-          messages,
-          max_tokens: options?.maxTokens || 4096,
-          temperature: options?.temperature ?? 0.7,
-          tools: options?.tools,
-          tool_choice: options?.toolChoice ?? 'auto',
-          stream: true,
-          stream_options: { include_usage: true },
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       clearTimeout(fetchTimeout); // Clear fetch timeout once we have response
