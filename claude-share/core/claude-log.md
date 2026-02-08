@@ -75,7 +75,7 @@ Completed Phase 0 quick wins: added 3 new models to the catalog (Pony Alpha, GPT
 1. Added `pony` — OpenRouter Pony Alpha (free, 200K context, coding/agentic/reasoning, tools)
 2. Added `gptoss` — OpenAI GPT-OSS 120B free tier (117B MoE, native tool use)
 3. Added `glm47` — Z.AI GLM 4.7 ($0.07/$0.40, 200K context, multi-step agent tasks)
-4. Set up private companion repo with all orchestration docs
+4. Set up orchestration docs in `claude-share/core/` (public repo)
 5. Updated CLAUDE.md, AGENTS.md, .gitignore for public repo
 
 ### Files Modified
