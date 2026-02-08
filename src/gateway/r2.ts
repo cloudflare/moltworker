@@ -17,19 +17,23 @@ import { R2_MOUNT_PATH, getR2BucketName } from '../config';
  */
 let inflightMount: Promise<boolean> | null = null;
 
+/** Wait for a sandbox process to finish (up to ~2 s). */
+async function waitForProcess(proc: { status: string }): Promise<void> {
+  let attempts = 0;
+  while (proc.status === 'running' && attempts < 10) {
+    // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
+    await new Promise((r) => setTimeout(r, 200));
+    attempts++;
+  }
+}
+
 /**
  * Check if R2 is already mounted by looking at the mount table
  */
 async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
   try {
     const proc = await sandbox.startProcess(`mount | grep "s3fs on ${R2_MOUNT_PATH}"`);
-    // Wait for the command to complete
-    let attempts = 0;
-    while (proc.status === 'running' && attempts < 10) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
-      await new Promise((r) => setTimeout(r, 200));
-      attempts++;
-    }
+    await waitForProcess(proc);
     const logs = await proc.getLogs();
     // If stdout has content, the mount exists
     const mounted = !!(logs.stdout && logs.stdout.includes('s3fs'));
@@ -38,6 +42,35 @@ async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
   } catch (err) {
     console.log('isR2Mounted error:', err);
     return false;
+  }
+}
+
+/**
+ * Deduplicate s3fs passwd files inside the container.
+ *
+ * sandbox.mountBucket() appends credentials to the s3fs passwd file each time
+ * it is called.  Because the container persists across Worker invocations
+ * (keepAlive / sleepAfter), entries accumulate and s3fs refuses to mount with
+ * "there are multiple entries for the same bucket(default) in the passwd file."
+ *
+ * Rather than deleting the files (which has no effect when mountBucket writes
+ * from the orchestration layer), we deduplicate in-place so that s3fs sees
+ * exactly one entry per bucket.
+ */
+async function deduplicateS3fsPasswd(sandbox: Sandbox): Promise<void> {
+  try {
+    // sort -u deduplicates identical lines; awk '!seen[$0]++' preserves order
+    // but sort -u is simpler and order doesn't matter for passwd files.
+    // We cover all known s3fs credential file locations.
+    const proc = await sandbox.startProcess(
+      'for f in /etc/passwd-s3fs /root/.passwd-s3fs; do ' +
+        '[ -f "$f" ] && sort -u "$f" > "$f.tmp" && mv "$f.tmp" "$f"; ' +
+        'done 2>/dev/null; true',
+    );
+    await waitForProcess(proc);
+    console.log('deduplicateS3fsPasswd: completed');
+  } catch (err) {
+    console.log('deduplicateS3fsPasswd warning:', err);
   }
 }
 
@@ -77,33 +110,6 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
 }
 
 /**
- * Clear stale s3fs credential files inside the container.
- *
- * sandbox.mountBucket() appends credentials to the s3fs passwd file each time
- * it is called. Because the container persists across Worker invocations
- * (keepAlive / sleepAfter), a previous failed or successful mount leaves
- * entries behind. On the next call s3fs sees duplicates and refuses to mount.
- *
- * Clearing the files before mounting ensures a clean slate every time.
- */
-async function clearS3fsPasswdFiles(sandbox: Sandbox): Promise<void> {
-  try {
-    const proc = await sandbox.startProcess(
-      'rm -f /etc/passwd-s3fs /root/.passwd-s3fs 2>/dev/null; true',
-    );
-    let attempts = 0;
-    while (proc.status === 'running' && attempts < 10) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
-      await new Promise((r) => setTimeout(r, 200));
-      attempts++;
-    }
-  } catch (err) {
-    // Best-effort — if it fails the mount will still be attempted
-    console.log('clearS3fsPasswdFiles warning:', err);
-  }
-}
-
-/**
  * Internal mount implementation — always called at most once at a time.
  */
 async function doMount(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
@@ -113,12 +119,13 @@ async function doMount(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
     return true;
   }
 
+  // Deduplicate any stale s3fs passwd entries from previous mount attempts
+  // BEFORE calling mountBucket, so that even if mountBucket appends another
+  // entry we start from a clean (single-entry or empty) state.
+  await deduplicateS3fsPasswd(sandbox);
+
   const bucketName = getR2BucketName(env);
   try {
-    // Remove stale s3fs passwd entries from previous mount attempts to prevent
-    // "multiple entries for the same bucket(default)" errors
-    await clearS3fsPasswdFiles(sandbox);
-
     console.log('Mounting R2 bucket', bucketName, 'at', R2_MOUNT_PATH);
     await sandbox.mountBucket(bucketName, R2_MOUNT_PATH, {
       endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
@@ -135,7 +142,33 @@ async function doMount(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
     const errorMessage = err instanceof Error ? err.message : String(err);
     console.log('R2 mount error:', errorMessage);
 
-    // Check again if it's mounted - the error might be misleading
+    // If s3fs failed due to duplicate passwd entries, deduplicate and retry
+    // the mount directly inside the container (without calling mountBucket
+    // again, which would append yet another entry).
+    if (errorMessage.includes('multiple entries')) {
+      console.log('Deduplicating s3fs passwd files and retrying mount...');
+      await deduplicateS3fsPasswd(sandbox);
+
+      try {
+        const endpoint = `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+        const mountProc = await sandbox.startProcess(
+          `s3fs ${bucketName} ${R2_MOUNT_PATH}` +
+            ` -o passwd_file=/etc/passwd-s3fs` +
+            ` -o url=${endpoint}` +
+            ` -o use_path_request_style`,
+        );
+        await waitForProcess(mountProc);
+        const mountLogs = await mountProc.getLogs();
+        if (mountLogs.stderr) {
+          console.log('s3fs retry stderr:', mountLogs.stderr.slice(0, 200));
+        }
+      } catch (retryErr) {
+        console.log('s3fs retry error:', retryErr);
+      }
+    }
+
+    // Check again if it's mounted - the error might be misleading, or the
+    // retry may have succeeded
     if (await isR2Mounted(sandbox)) {
       console.log('R2 bucket is mounted despite error');
       return true;

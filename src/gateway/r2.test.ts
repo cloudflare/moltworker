@@ -131,7 +131,9 @@ describe('mountR2Storage', () => {
     it('returns false when mountBucket throws and mount check fails', async () => {
       const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox({ mounted: false });
       mountBucketMock.mockRejectedValue(new Error('Mount failed'));
+      // isR2Mounted (not mounted) → deduplicateS3fsPasswd → isR2Mounted after error (not mounted)
       startProcessMock
+        .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(''));
 
@@ -147,7 +149,7 @@ describe('mountR2Storage', () => {
       const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox();
       startProcessMock
         .mockResolvedValueOnce(createMockProcess(''))  // isR2Mounted before mount
-        .mockResolvedValueOnce(createMockProcess(''))  // clearS3fsPasswdFiles
+        .mockResolvedValueOnce(createMockProcess(''))  // deduplicateS3fsPasswd
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'));  // isR2Mounted after error
 
       mountBucketMock.mockRejectedValue(new Error('Transient error'));
@@ -157,6 +159,32 @@ describe('mountR2Storage', () => {
       const result = await mountR2Storage(sandbox, env);
 
       expect(result).toBe(true);
+      expect(console.log).toHaveBeenCalledWith('R2 bucket is mounted despite error');
+    });
+
+    it('deduplicates passwd and retries s3fs on "multiple entries" error', async () => {
+      const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox({ mounted: false });
+      mountBucketMock.mockRejectedValue(
+        new Error('S3FSMountError: s3fs: there are multiple entries for the same bucket(default)'),
+      );
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess(''))  // isR2Mounted before mount
+        .mockResolvedValueOnce(createMockProcess(''))  // deduplicateS3fsPasswd (pre-mount)
+        // After "multiple entries" error:
+        .mockResolvedValueOnce(createMockProcess(''))  // deduplicateS3fsPasswd (retry)
+        .mockResolvedValueOnce(createMockProcess(''))  // s3fs direct retry
+        .mockResolvedValueOnce(                        // isR2Mounted after retry
+          createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'),
+        );
+
+      const env = createMockEnvWithR2();
+
+      const result = await mountR2Storage(sandbox, env);
+
+      expect(result).toBe(true);
+      expect(console.log).toHaveBeenCalledWith(
+        'Deduplicating s3fs passwd files and retrying mount...',
+      );
       expect(console.log).toHaveBeenCalledWith('R2 bucket is mounted despite error');
     });
   });
@@ -183,8 +211,9 @@ describe('mountR2Storage', () => {
       // First attempt: mount fails and post-error check also says not mounted
       mountBucketMock.mockRejectedValueOnce(new Error('Mount failed'));
       startProcessMock
-        .mockResolvedValueOnce(createMockProcess('')) // isR2Mounted before mount
-        .mockResolvedValueOnce(createMockProcess('')); // isR2Mounted after error
+        .mockResolvedValueOnce(createMockProcess(''))  // isR2Mounted before mount
+        .mockResolvedValueOnce(createMockProcess(''))  // deduplicateS3fsPasswd
+        .mockResolvedValueOnce(createMockProcess(''));  // isR2Mounted after error
 
       const env = createMockEnvWithR2();
 
@@ -193,7 +222,9 @@ describe('mountR2Storage', () => {
 
       // Second attempt should be allowed (lock was released)
       mountBucketMock.mockResolvedValueOnce(undefined);
-      startProcessMock.mockResolvedValueOnce(createMockProcess('')); // isR2Mounted before mount
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess(''))  // isR2Mounted before mount
+        .mockResolvedValueOnce(createMockProcess(''));  // deduplicateS3fsPasswd
 
       const result2 = await mountR2Storage(sandbox, env);
       expect(result2).toBe(true);
