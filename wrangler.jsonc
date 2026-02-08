@@ -3,7 +3,7 @@
   "name": "moltbot-sandbox-chris",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat"], 
   "observability": { 
     "enabled": true,
   },
