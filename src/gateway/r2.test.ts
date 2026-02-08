@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mountR2Storage } from './r2';
+import { mountR2Storage, _resetMountLock } from './r2';
 import {
   createMockEnv,
   createMockEnvWithR2,
@@ -11,6 +11,7 @@ import {
 describe('mountR2Storage', () => {
   beforeEach(() => {
     suppressConsole();
+    _resetMountLock();
   });
 
   describe('credential validation', () => {
@@ -156,6 +157,46 @@ describe('mountR2Storage', () => {
 
       expect(result).toBe(true);
       expect(console.log).toHaveBeenCalledWith('R2 bucket is mounted despite error');
+    });
+  });
+
+  describe('concurrent mount protection', () => {
+    it('only calls mountBucket once when invoked concurrently', async () => {
+      const { sandbox, mountBucketMock } = createMockSandbox({ mounted: false });
+      const env = createMockEnvWithR2();
+
+      // Fire two mount calls concurrently (simulates waitUntil + catch-all race)
+      const [result1, result2] = await Promise.all([
+        mountR2Storage(sandbox, env),
+        mountR2Storage(sandbox, env),
+      ]);
+
+      expect(result1).toBe(true);
+      expect(result2).toBe(true);
+      // mountBucket should only have been called once despite two concurrent callers
+      expect(mountBucketMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets lock after failure so next attempt can retry', async () => {
+      const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox({ mounted: false });
+      // First attempt: mount fails and post-error check also says not mounted
+      mountBucketMock.mockRejectedValueOnce(new Error('Mount failed'));
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess('')) // isR2Mounted before mount
+        .mockResolvedValueOnce(createMockProcess('')); // isR2Mounted after error
+
+      const env = createMockEnvWithR2();
+
+      const result1 = await mountR2Storage(sandbox, env);
+      expect(result1).toBe(false);
+
+      // Second attempt should be allowed (lock was released)
+      mountBucketMock.mockResolvedValueOnce(undefined);
+      startProcessMock.mockResolvedValueOnce(createMockProcess('')); // isR2Mounted before mount
+
+      const result2 = await mountR2Storage(sandbox, env);
+      expect(result2).toBe(true);
+      expect(mountBucketMock).toHaveBeenCalledTimes(2);
     });
   });
 });
