@@ -4,6 +4,42 @@
 
 ---
 
+## Session: 2026-02-08 | Phase 2.1+2.2: Token/Cost Tracking + /costs command (Session: 013wvC2kun5Mbr3J81KUPn99)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/daily-briefing-aggregator-NfHhi`
+**Status:** Completed
+
+### Summary
+Implemented Phase 2.1 (Token/Cost Tracking) and Phase 2.2 (/costs Telegram command). Per-request token usage is now extracted from OpenRouter API responses, cost calculated using model pricing data, and accumulated per-user per-day. Response footers show cost info, and users can query their usage via `/costs` (today) or `/costs week` (7-day breakdown).
+
+### Changes Made
+1. **New `src/openrouter/costs.ts`** — Core cost tracking module with:
+   - `parseModelPricing()` — parses model cost strings ("$0.25/$0.38", "FREE", "$0.014/megapixel")
+   - `calculateCost()` — calculates per-call cost from model pricing catalog
+   - `recordUsage()` / `getUsage()` / `getUsageRange()` — in-memory per-user daily usage store
+   - `formatUsageSummary()` / `formatWeekSummary()` / `formatCostFooter()` — Telegram display formatters
+   - `clearUsageStore()` — test helper
+
+2. **Modified `src/durable-objects/task-processor.ts`** — Track usage per API call iteration, accumulate across multi-iteration tool-calling loops, append cost footer to final response. Added `usage` type to result variable for type safety.
+
+3. **Modified `src/telegram/handler.ts`** — Added `/costs` and `/usage` command aliases, `handleCostsCommand` method, help text entry.
+
+4. **New `src/openrouter/costs.test.ts`** — 26 tests covering pricing parser, cost calculator, usage recording/retrieval, formatting, and cleanup.
+
+### Files Modified
+- `src/openrouter/costs.ts` (NEW)
+- `src/openrouter/costs.test.ts` (NEW — 26 tests)
+- `src/durable-objects/task-processor.ts` (usage tracking + cost footer + type fix)
+- `src/telegram/handler.ts` (/costs command + help text)
+- `claude-share/core/*.md` (all sync docs updated)
+
+### Test Results
+- 212 tests pass (26 new)
+- TypeScript: only pre-existing errors (parse_mode, request.prompt)
+
+---
+
 ## Session: 2026-02-08 | Phase 2.5.4: Currency Conversion + Phase 2.5.7 + BUG-3/BUG-4 Fixes (Session: 013wvC2kun5Mbr3J81KUPn99)
 
 **AI:** Claude Opus 4.6

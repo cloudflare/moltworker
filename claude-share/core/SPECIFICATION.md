@@ -91,22 +91,24 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 ### Phase 2: Observability & Cost Intelligence
 
 #### F2.1: Token/Cost Tracking
-- **Status:** 🔲 Planned
-- **Spec:** Track per-request, per-conversation, and per-user costs.
+- **Status:** ✅ Complete
+- **Spec:** Track per-request token usage and cost, accumulate per-user daily totals, display in `/costs` command and response footers.
+- **Files:** `src/openrouter/costs.ts`, `src/openrouter/costs.test.ts`, `src/durable-objects/task-processor.ts`, `src/telegram/handler.ts`
 - **Data model:**
   ```typescript
   interface UsageRecord {
     userId: string;
-    modelAlias: string;
-    promptTokens: number;
-    completionTokens: number;
-    costUsd: number;
-    timestamp: number;
-    taskId?: string;
+    date: string; // YYYY-MM-DD
+    totalPromptTokens: number;
+    totalCompletionTokens: number;
+    totalCostUsd: number;
+    requestCount: number;
+    byModel: Record<string, { promptTokens, completionTokens, costUsd, requestCount }>;
   }
   ```
-- **Storage:** R2 (`usage/{userId}/YYYY-MM.json`)
-- **Commands:** `/costs` (today), `/costs week`, `/costs model`
+- **Storage:** In-memory Map keyed by `${userId}:${date}` (MVP; R2 persistence future enhancement)
+- **Commands:** `/costs` (today), `/costs week` (7-day breakdown)
+- **Features:** Model pricing parsed from catalog strings, cost footer appended to DO task responses, 26 tests
 
 #### F2.2: Acontext Observability
 - **Status:** 🔲 Planned

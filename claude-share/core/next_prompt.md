@@ -7,51 +7,33 @@
 
 ---
 
-## Current Task: Phase 2.1 — Token/Cost Tracking
+## Current Task: BUG-1 — "Processing complex task..." UX Fix
 
-### Phase 2.1: Token/Cost Tracking per Request
+### BUG-1: "Processing complex task..." shown for ALL messages
 
-Add per-request token usage and cost tracking. This enables users to monitor their AI spending via a `/costs` Telegram command.
+The bot currently sends "Processing complex task..." for every message, even simple ones that don't use the Durable Object path. This is confusing UX — the message should only appear when a task is actually delegated to the DO.
 
-#### Data Model
-```typescript
-interface UsageRecord {
-  userId: string;
-  modelAlias: string;
-  promptTokens: number;
-  completionTokens: number;
-  costUsd: number;
-  timestamp: number;
-  taskId?: string;
-}
-```
+#### Problem Location
+- `src/durable-objects/task-processor.ts:476` — the status message is always sent
+- `src/telegram/handler.ts` — the DO delegation decision logic
 
-#### Files to Create/Modify
-1. **`src/openrouter/costs.ts`** (new) — Cost calculation utilities, pricing data per model
-2. **`src/openrouter/client.ts`** — Extract token usage from OpenRouter API responses
-3. **`src/durable-objects/task-processor.ts`** — Accumulate costs across tool-calling iterations
-4. **`src/telegram/handler.ts`** — Add `/costs` command handler
-5. **`src/openrouter/costs.test.ts`** (new) — Tests
+#### Expected Behavior
+- Simple messages (no tools, fast response): No "Processing..." message
+- Complex tasks (tools, long-running): Show "Processing complex task..." appropriately
 
-#### Implementation Notes
-- OpenRouter responses include `usage: { prompt_tokens, completion_tokens }` in the response body
-- Cost = tokens * per-token price (from model pricing in `models.ts`)
-- Store daily usage in R2: `usage/{userId}/YYYY-MM-DD.json`
-- `/costs` shows today's usage; `/costs week` shows 7-day breakdown
-- Consider adding cost info to the bot's response footer for transparency
+#### Files to Modify
+1. **`src/telegram/handler.ts`** — Adjust DO delegation logic or suppress status message for simple tasks
+2. **`src/durable-objects/task-processor.ts`** — Consider making status message conditional
 
-### Other Known Bugs (Lower Priority)
-- **BUG-1:** "Processing complex task..." shown for ALL messages (UX, `task-processor.ts:476`)
-- **BUG-2:** DeepSeek doesn't proactively use tools (needs system prompt hint)
-- **BUG-5:** `/use fluxpro` + text → "No response" (image-gen model detection missing)
-
-### Success Criteria
-- [ ] Token usage extracted from API responses
-- [ ] Cost calculated per request using model pricing
-- [ ] `/costs` command shows usage breakdown
-- [ ] Tests added
+#### Success Criteria
+- [ ] Simple messages don't show "Processing complex task..."
+- [ ] Complex/tool-using tasks still show progress feedback
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes (pre-existing errors OK)
+
+### Other Known Bugs (Lower Priority)
+- **BUG-2:** DeepSeek doesn't proactively use tools (needs system prompt hint)
+- **BUG-5:** `/use fluxpro` + text → "No response" (image-gen model detection missing)
 
 ---
 
@@ -59,8 +41,7 @@ interface UsageRecord {
 
 | Priority | Task | Effort |
 |----------|------|--------|
-| Next | 2.1: Token/cost tracking | Medium |
-| Then | BUG-1: "Processing complex task..." UX fix | Low |
+| Next | BUG-1: "Processing complex task..." UX fix | Low |
 | Then | BUG-2: DeepSeek tool prompting | Medium |
 | Then | BUG-5: fluxpro text UX fix | Low |
 | Then | 2.5.6: Crypto expansion (CoinCap + DEX Screener) | 4h |
@@ -72,6 +53,7 @@ interface UsageRecord {
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-08 | Phase 2.1+2.2: Token/cost tracking + /costs command | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
 | 2026-02-08 | Phase 2.5.4: Currency conversion tool | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
 | 2026-02-08 | Phase 2.5.7: Daily briefing aggregator + BUG-3/BUG-4 fixes | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
 | 2026-02-08 | Phase 1.3: Configurable reasoning per model | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
