@@ -265,6 +265,45 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'get_crypto',
+      description: 'Get cryptocurrency price, market data, and DeFi trading pair info. Supports top coins by market cap, individual coin lookup, and DEX pair search.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            description: 'Action to perform: "price" for a single coin, "top" for top coins by market cap, "dex" for DEX pair search',
+            enum: ['price', 'top', 'dex'],
+          },
+          query: {
+            type: 'string',
+            description: 'Coin symbol (e.g., BTC, ETH) for "price", number of coins for "top" (default: 10), or search term for "dex"',
+          },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'geolocate_ip',
+      description: 'Get geolocation data for an IP address: city, region, country, timezone, coordinates, ISP/org.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ip: {
+            type: 'string',
+            description: 'IPv4 or IPv6 address to geolocate (e.g., 8.8.8.8)',
+          },
+        },
+        required: ['ip'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browse_url',
       description: 'Browse a URL using a real browser. Use this for JavaScript-rendered pages, screenshots, or when fetch_url fails. Returns text content by default, or a screenshot/PDF.',
       parameters: {
@@ -342,6 +381,12 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'convert_currency':
         result = await convertCurrency(args.from, args.to, args.amount);
+        break;
+      case 'get_crypto':
+        result = await getCrypto(args.action as 'price' | 'top' | 'dex', args.query);
+        break;
+      case 'geolocate_ip':
+        result = await geolocateIp(args.ip);
         break;
       case 'browse_url':
         result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
@@ -962,6 +1007,284 @@ async function convertCurrency(from: string, to: string, amountStr?: string): Pr
 
   const converted = amount * rate;
   return `${amount} ${fromCode} = ${converted.toFixed(2)} ${toCode} (rate: ${rate})`;
+}
+
+/**
+ * Crypto price cache (5-minute TTL)
+ */
+interface CryptoCache {
+  data: string;
+  timestamp: number;
+}
+
+const CRYPTO_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const cryptoCache: Map<string, CryptoCache> = new Map();
+
+/**
+ * Clear crypto cache (for testing)
+ */
+export function clearCryptoCache(): void {
+  cryptoCache.clear();
+}
+
+/**
+ * Format large numbers with K/M/B suffixes
+ */
+function formatLargeNumber(n: number): string {
+  if (n >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n.toFixed(2)}`;
+}
+
+/**
+ * Format price with appropriate decimal places
+ */
+function formatPrice(price: number): string {
+  if (price >= 1) return `$${price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (price >= 0.01) return `$${price.toFixed(4)}`;
+  return `$${price.toFixed(8)}`;
+}
+
+/**
+ * Get cryptocurrency data
+ */
+async function getCrypto(action: 'price' | 'top' | 'dex', query?: string): Promise<string> {
+  const cacheKey = `${action}:${query || ''}`;
+  const cached = cryptoCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CRYPTO_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  let result: string;
+
+  switch (action) {
+    case 'price':
+      result = await getCryptoPrice(query || 'BTC');
+      break;
+    case 'top':
+      result = await getCryptoTop(parseInt(query || '10', 10));
+      break;
+    case 'dex':
+      result = await getCryptoDex(query || 'ETH');
+      break;
+    default:
+      throw new Error(`Unknown crypto action: ${action}. Use "price", "top", or "dex".`);
+  }
+
+  cryptoCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  return result;
+}
+
+/**
+ * Get price for a single coin via CoinCap + CoinPaprika
+ */
+async function getCryptoPrice(symbol: string): Promise<string> {
+  const sym = symbol.toUpperCase().trim();
+
+  // Try CoinCap first (fast, good for top coins)
+  const [coincapResult, paprikaResult] = await Promise.allSettled([
+    fetch(`https://api.coincap.io/v2/assets?search=${encodeURIComponent(sym)}&limit=1`, {
+      headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+    }),
+    fetch(`https://api.coinpaprika.com/v1/search?q=${encodeURIComponent(sym)}&limit=1`, {
+      headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+    }),
+  ]);
+
+  const lines: string[] = [];
+
+  // CoinCap data
+  if (coincapResult.status === 'fulfilled' && coincapResult.value.ok) {
+    const data = await coincapResult.value.json() as { data: Array<{ id: string; rank: string; symbol: string; name: string; priceUsd: string; changePercent24Hr: string; marketCapUsd: string; volumeUsd24Hr: string; supply: string; maxSupply: string | null }> };
+    const coin = data.data?.[0];
+    if (coin && coin.symbol.toUpperCase() === sym) {
+      const price = parseFloat(coin.priceUsd);
+      const change = parseFloat(coin.changePercent24Hr);
+      const mcap = parseFloat(coin.marketCapUsd);
+      const vol = parseFloat(coin.volumeUsd24Hr);
+      const changeIcon = change >= 0 ? '+' : '';
+
+      lines.push(`${coin.name} (${coin.symbol}) — Rank #${coin.rank}`);
+      lines.push(`Price: ${formatPrice(price)} (${changeIcon}${change.toFixed(2)}% 24h)`);
+      lines.push(`Market Cap: ${formatLargeNumber(mcap)}`);
+      lines.push(`24h Volume: ${formatLargeNumber(vol)}`);
+      lines.push(`Supply: ${parseFloat(coin.supply).toLocaleString('en-US', { maximumFractionDigits: 0 })}${coin.maxSupply ? ` / ${parseFloat(coin.maxSupply).toLocaleString('en-US', { maximumFractionDigits: 0 })}` : ''}`);
+    }
+  }
+
+  // CoinPaprika detailed data (ATH, multi-timeframe changes)
+  if (paprikaResult.status === 'fulfilled' && paprikaResult.value.ok) {
+    const searchData = await paprikaResult.value.json() as { currencies?: Array<{ id: string; name: string; symbol: string }> };
+    const coinId = searchData.currencies?.[0]?.id;
+    if (coinId) {
+      try {
+        const tickerRes = await fetch(`https://api.coinpaprika.com/v1/tickers/${coinId}`, {
+          headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+        });
+        if (tickerRes.ok) {
+          const ticker = await tickerRes.json() as {
+            quotes: { USD: { percent_change_1h: number; percent_change_7d: number; percent_change_30d: number; ath_price: number; ath_date: string; percent_from_price_ath: number } };
+          };
+          const q = ticker.quotes?.USD;
+          if (q) {
+            lines.push('');
+            lines.push(`Changes: 1h ${q.percent_change_1h >= 0 ? '+' : ''}${q.percent_change_1h?.toFixed(2)}% | 7d ${q.percent_change_7d >= 0 ? '+' : ''}${q.percent_change_7d?.toFixed(2)}% | 30d ${q.percent_change_30d >= 0 ? '+' : ''}${q.percent_change_30d?.toFixed(2)}%`);
+            if (q.ath_price) {
+              lines.push(`ATH: ${formatPrice(q.ath_price)} (${q.ath_date?.split('T')[0]}) — ${q.percent_from_price_ath?.toFixed(1)}% from ATH`);
+            }
+          }
+        }
+      } catch {
+        // CoinPaprika detail failed, use CoinCap data only
+      }
+    }
+  }
+
+  if (lines.length === 0) {
+    throw new Error(`No data found for "${sym}". Try a common symbol like BTC, ETH, SOL, etc.`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Get top coins by market cap via CoinCap
+ */
+async function getCryptoTop(limit: number): Promise<string> {
+  const count = Math.min(Math.max(1, limit), 25);
+  const response = await fetch(`https://api.coincap.io/v2/assets?limit=${count}`, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`CoinCap API error: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as { data: Array<{ rank: string; symbol: string; name: string; priceUsd: string; changePercent24Hr: string; marketCapUsd: string }> };
+  if (!data.data?.length) {
+    throw new Error('No data returned from CoinCap API.');
+  }
+
+  const lines = data.data.map(coin => {
+    const price = parseFloat(coin.priceUsd);
+    const change = parseFloat(coin.changePercent24Hr);
+    const mcap = parseFloat(coin.marketCapUsd);
+    const changeIcon = change >= 0 ? '+' : '';
+    return `#${coin.rank} ${coin.symbol} (${coin.name}): ${formatPrice(price)} ${changeIcon}${change.toFixed(2)}% | MCap ${formatLargeNumber(mcap)}`;
+  });
+
+  return `Top ${count} Cryptocurrencies:\n\n${lines.join('\n')}`;
+}
+
+/**
+ * Search DEX pairs via DEX Screener
+ */
+async function getCryptoDex(query: string): Promise<string> {
+  const response = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`DEX Screener API error: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as {
+    pairs?: Array<{
+      chainId: string; dexId: string; baseToken: { symbol: string; name: string };
+      quoteToken: { symbol: string }; priceUsd: string;
+      volume: { h24?: number }; priceChange: { h24?: number };
+      liquidity: { usd?: number }; url: string;
+    }>;
+  };
+
+  if (!data.pairs?.length) {
+    return `No DEX pairs found for "${query}".`;
+  }
+
+  // Show top 5 pairs by liquidity
+  const sorted = data.pairs
+    .filter(p => p.liquidity?.usd && p.liquidity.usd > 0)
+    .sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))
+    .slice(0, 5);
+
+  if (sorted.length === 0) {
+    return `No liquid DEX pairs found for "${query}".`;
+  }
+
+  const lines = sorted.map((p, i) => {
+    const price = parseFloat(p.priceUsd || '0');
+    const vol = p.volume?.h24 || 0;
+    const change = p.priceChange?.h24 || 0;
+    const liq = p.liquidity?.usd || 0;
+    const changeIcon = change >= 0 ? '+' : '';
+    return `${i + 1}. ${p.baseToken.symbol}/${p.quoteToken.symbol} on ${p.dexId} (${p.chainId})\n   Price: ${formatPrice(price)} ${changeIcon}${change.toFixed(2)}% 24h | Vol: ${formatLargeNumber(vol)} | Liq: ${formatLargeNumber(liq)}`;
+  });
+
+  return `DEX Pairs for "${query}":\n\n${lines.join('\n\n')}`;
+}
+
+/**
+ * Geolocation cache (15-minute TTL)
+ */
+const GEO_CACHE_TTL_MS = 15 * 60 * 1000;
+const geoCache: Map<string, CryptoCache> = new Map(); // reuse CryptoCache shape
+
+/**
+ * Clear geolocation cache (for testing)
+ */
+export function clearGeoCache(): void {
+  geoCache.clear();
+}
+
+/**
+ * Geolocate an IP address using ipapi.co
+ */
+async function geolocateIp(ip: string): Promise<string> {
+  const trimmed = ip.trim();
+
+  // Basic IP validation (IPv4 or IPv6)
+  if (!/^[\d.:a-fA-F]+$/.test(trimmed)) {
+    throw new Error(`Invalid IP address: "${ip}". Provide a valid IPv4 or IPv6 address.`);
+  }
+
+  const cached = geoCache.get(trimmed);
+  if (cached && Date.now() - cached.timestamp < GEO_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  const response = await fetch(`https://ipapi.co/${encodeURIComponent(trimmed)}/json/`, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`ipapi.co error: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as {
+    ip: string; city: string; region: string; region_code: string;
+    country_name: string; country_code: string; postal: string;
+    latitude: number; longitude: number; timezone: string; utc_offset: string;
+    asn: string; org: string; error?: boolean; reason?: string;
+  };
+
+  if (data.error) {
+    throw new Error(`Geolocation failed: ${data.reason || 'Unknown error'}`);
+  }
+
+  const lines = [
+    `IP: ${data.ip}`,
+    `Location: ${data.city}, ${data.region} (${data.region_code}), ${data.country_name} (${data.country_code})`,
+    `Postal: ${data.postal || 'N/A'}`,
+    `Coordinates: ${data.latitude}, ${data.longitude}`,
+    `Timezone: ${data.timezone} (UTC${data.utc_offset})`,
+    `ISP: ${data.org || 'N/A'} (${data.asn || 'N/A'})`,
+  ];
+
+  const result = lines.join('\n');
+  geoCache.set(trimmed, { data: result, timestamp: Date.now() });
+  return result;
 }
 
 /**

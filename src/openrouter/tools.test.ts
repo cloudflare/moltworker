@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache, clearExchangeRateCache } from './tools';
+import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache } from './tools';
 
 describe('url_metadata tool', () => {
   beforeEach(() => {
@@ -1416,5 +1416,378 @@ describe('convert_currency tool', () => {
 
     const calledUrl = mockFetch.mock.calls[0][0];
     expect(calledUrl).toBe('https://api.exchangerate-api.com/v4/latest/EUR');
+  });
+});
+
+describe('get_crypto tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    clearCryptoCache();
+  });
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'get_crypto');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['action']);
+  });
+
+  it('should be included in TOOLS_WITHOUT_BROWSER', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'get_crypto');
+    expect(tool).toBeDefined();
+  });
+
+  it('should return price data for a known coin', async () => {
+    const mockFetch = vi.fn()
+      // CoinCap search
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [{
+            id: 'bitcoin', rank: '1', symbol: 'BTC', name: 'Bitcoin',
+            priceUsd: '97500.12', changePercent24Hr: '2.35',
+            marketCapUsd: '1920000000000', volumeUsd24Hr: '28000000000',
+            supply: '19883231', maxSupply: '21000000',
+          }],
+        }),
+      })
+      // CoinPaprika search
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          currencies: [{ id: 'btc-bitcoin', name: 'Bitcoin', symbol: 'BTC' }],
+        }),
+      })
+      // CoinPaprika ticker
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          quotes: { USD: { percent_change_1h: 0.12, percent_change_7d: 5.67, percent_change_30d: 12.34, ath_price: 108000, ath_date: '2025-01-20T14:30:00Z', percent_from_price_ath: -9.72 } },
+        }),
+      });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_1',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'price', query: 'BTC' }),
+      },
+    });
+
+    expect(result.content).toContain('Bitcoin');
+    expect(result.content).toContain('BTC');
+    expect(result.content).toContain('Rank #1');
+    expect(result.content).toContain('ATH');
+  });
+
+  it('should return top coins list', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        data: [
+          { rank: '1', symbol: 'BTC', name: 'Bitcoin', priceUsd: '97500', changePercent24Hr: '2.35', marketCapUsd: '1920000000000' },
+          { rank: '2', symbol: 'ETH', name: 'Ethereum', priceUsd: '3200', changePercent24Hr: '-1.20', marketCapUsd: '385000000000' },
+        ],
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_2',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'top', query: '2' }),
+      },
+    });
+
+    expect(result.content).toContain('Top 2 Cryptocurrencies');
+    expect(result.content).toContain('#1 BTC');
+    expect(result.content).toContain('#2 ETH');
+  });
+
+  it('should return DEX pair data', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        pairs: [{
+          chainId: 'ethereum', dexId: 'uniswap',
+          baseToken: { symbol: 'WETH', name: 'Wrapped Ether' },
+          quoteToken: { symbol: 'USDC' },
+          priceUsd: '3200.45',
+          volume: { h24: 32000000 },
+          priceChange: { h24: 2.56 },
+          liquidity: { usd: 15000000 },
+          url: 'https://dexscreener.com/ethereum/0xabc',
+        }],
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_3',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'dex', query: 'ETH' }),
+      },
+    });
+
+    expect(result.content).toContain('DEX Pairs');
+    expect(result.content).toContain('WETH/USDC');
+    expect(result.content).toContain('uniswap');
+    expect(result.content).toContain('ethereum');
+  });
+
+  it('should handle no DEX pairs found', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ pairs: [] }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_4',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'dex', query: 'NONEXISTENT' }),
+      },
+    });
+
+    expect(result.content).toContain('No DEX pairs found');
+  });
+
+  it('should cache crypto results', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: [{ rank: '1', symbol: 'BTC', name: 'Bitcoin', priceUsd: '97500', changePercent24Hr: '2.35', marketCapUsd: '1920000000000' }],
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({ id: 'call_5', type: 'function', function: { name: 'get_crypto', arguments: JSON.stringify({ action: 'top', query: '1' }) } });
+    await executeTool({ id: 'call_6', type: 'function', function: { name: 'get_crypto', arguments: JSON.stringify({ action: 'top', query: '1' }) } });
+
+    // Only 1 fetch call due to cache
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle CoinCap API error gracefully', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: false, status: 500 });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_7',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'price', query: 'BTC' }),
+      },
+    });
+
+    expect(result.content).toContain('Error');
+  });
+
+  it('should cap top coins at 25', async () => {
+    const coins = Array.from({ length: 25 }, (_, i) => ({
+      rank: String(i + 1), symbol: `C${i}`, name: `Coin${i}`,
+      priceUsd: '100', changePercent24Hr: '1.0', marketCapUsd: '1000000000',
+    }));
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: coins }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_8',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'top', query: '100' }),
+      },
+    });
+
+    // Limit param should be capped at 25
+    expect((mockFetch.mock.calls[0] as unknown[])[0]).toContain('limit=25');
+  });
+
+  it('should handle partial API failures (CoinCap ok, CoinPaprika fails)', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({
+          data: [{
+            id: 'bitcoin', rank: '1', symbol: 'BTC', name: 'Bitcoin',
+            priceUsd: '97500.12', changePercent24Hr: '2.35',
+            marketCapUsd: '1920000000000', volumeUsd24Hr: '28000000000',
+            supply: '19883231', maxSupply: '21000000',
+          }],
+        }),
+      })
+      .mockRejectedValueOnce(new Error('Network error'));
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_9',
+      type: 'function',
+      function: {
+        name: 'get_crypto',
+        arguments: JSON.stringify({ action: 'price', query: 'BTC' }),
+      },
+    });
+
+    // Should still return CoinCap data
+    expect(result.content).toContain('Bitcoin');
+    expect(result.content).not.toContain('Error');
+  });
+});
+
+describe('geolocate_ip tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    clearGeoCache();
+  });
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'geolocate_ip');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['ip']);
+  });
+
+  it('should be included in TOOLS_WITHOUT_BROWSER', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'geolocate_ip');
+    expect(tool).toBeDefined();
+  });
+
+  it('should return geolocation data for a valid IP', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        ip: '8.8.8.8', city: 'Mountain View', region: 'California',
+        region_code: 'CA', country_name: 'United States', country_code: 'US',
+        postal: '94035', latitude: 37.386, longitude: -122.0838,
+        timezone: 'America/Los_Angeles', utc_offset: '-0800',
+        asn: 'AS15169', org: 'Google LLC',
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_1',
+      type: 'function',
+      function: {
+        name: 'geolocate_ip',
+        arguments: JSON.stringify({ ip: '8.8.8.8' }),
+      },
+    });
+
+    expect(result.content).toContain('8.8.8.8');
+    expect(result.content).toContain('Mountain View');
+    expect(result.content).toContain('California');
+    expect(result.content).toContain('United States');
+    expect(result.content).toContain('America/Los_Angeles');
+    expect(result.content).toContain('Google LLC');
+  });
+
+  it('should reject invalid IP format', async () => {
+    const result = await executeTool({
+      id: 'call_2',
+      type: 'function',
+      function: {
+        name: 'geolocate_ip',
+        arguments: JSON.stringify({ ip: 'not-an-ip' }),
+      },
+    });
+
+    expect(result.content).toContain('Error');
+    expect(result.content).toContain('Invalid IP');
+  });
+
+  it('should handle API error response', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ error: true, reason: 'Rate limited' }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_3',
+      type: 'function',
+      function: {
+        name: 'geolocate_ip',
+        arguments: JSON.stringify({ ip: '8.8.8.8' }),
+      },
+    });
+
+    expect(result.content).toContain('Error');
+    expect(result.content).toContain('Rate limited');
+  });
+
+  it('should cache geolocation results', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        ip: '1.1.1.1', city: 'San Francisco', region: 'California',
+        region_code: 'CA', country_name: 'United States', country_code: 'US',
+        postal: '94107', latitude: 37.7749, longitude: -122.4194,
+        timezone: 'America/Los_Angeles', utc_offset: '-0800',
+        asn: 'AS13335', org: 'Cloudflare Inc',
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({ id: 'call_4', type: 'function', function: { name: 'geolocate_ip', arguments: JSON.stringify({ ip: '1.1.1.1' }) } });
+    await executeTool({ id: 'call_5', type: 'function', function: { name: 'geolocate_ip', arguments: JSON.stringify({ ip: '1.1.1.1' }) } });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle HTTP error from API', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 429 });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_6',
+      type: 'function',
+      function: {
+        name: 'geolocate_ip',
+        arguments: JSON.stringify({ ip: '8.8.8.8' }),
+      },
+    });
+
+    expect(result.content).toContain('Error');
+    expect(result.content).toContain('429');
+  });
+
+  it('should handle IPv6 addresses', async () => {
+    const mockFetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({
+        ip: '2001:4860:4860::8888', city: 'Mountain View', region: 'California',
+        region_code: 'CA', country_name: 'United States', country_code: 'US',
+        postal: '94035', latitude: 37.386, longitude: -122.0838,
+        timezone: 'America/Los_Angeles', utc_offset: '-0800',
+        asn: 'AS15169', org: 'Google LLC',
+      }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_7',
+      type: 'function',
+      function: {
+        name: 'geolocate_ip',
+        arguments: JSON.stringify({ ip: '2001:4860:4860::8888' }),
+      },
+    });
+
+    expect(result.content).toContain('2001:4860:4860::8888');
+    expect(result.content).toContain('Mountain View');
   });
 });
