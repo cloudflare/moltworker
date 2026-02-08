@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache } from './tools';
+import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache, clearExchangeRateCache } from './tools';
 
 describe('url_metadata tool', () => {
   beforeEach(() => {
@@ -1147,5 +1147,274 @@ describe('generateDailyBriefing', () => {
 
     // After clearing cache, new fetch calls should be made
     expect(callCount2).toBeGreaterThan(callCount1);
+  });
+});
+
+describe('convert_currency tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    clearExchangeRateCache();
+  });
+
+  const mockExchangeResponse = {
+    rates: {
+      USD: 1,
+      EUR: 0.8523,
+      GBP: 0.7412,
+      CZK: 22.45,
+      JPY: 149.32,
+    },
+  };
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'convert_currency');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['from', 'to']);
+  });
+
+  it('should be included in TOOLS_WITHOUT_BROWSER', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'convert_currency');
+    expect(tool).toBeDefined();
+  });
+
+  it('should convert currency with default amount of 1', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockExchangeResponse),
+    }));
+
+    const result = await executeTool({
+      id: 'curr_1',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR' }),
+      },
+    });
+
+    expect(result.role).toBe('tool');
+    expect(result.tool_call_id).toBe('curr_1');
+    expect(result.content).toContain('1 USD');
+    expect(result.content).toContain('0.85');
+    expect(result.content).toContain('EUR');
+    expect(result.content).toContain('rate: 0.8523');
+  });
+
+  it('should convert currency with custom amount', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockExchangeResponse),
+    }));
+
+    const result = await executeTool({
+      id: 'curr_2',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'CZK', amount: '100' }),
+      },
+    });
+
+    expect(result.content).toContain('100 USD');
+    expect(result.content).toContain('2245.00 CZK');
+    expect(result.content).toContain('rate: 22.45');
+  });
+
+  it('should handle lowercase currency codes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockExchangeResponse),
+    }));
+
+    const result = await executeTool({
+      id: 'curr_3',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'usd', to: 'gbp' }),
+      },
+    });
+
+    expect(result.content).toContain('1 USD');
+    expect(result.content).toContain('GBP');
+    expect(result.content).toContain('rate: 0.7412');
+  });
+
+  it('should reject invalid source currency code', async () => {
+    const result = await executeTool({
+      id: 'curr_4',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'INVALID', to: 'EUR' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing convert_currency');
+    expect(result.content).toContain('Invalid source currency code');
+  });
+
+  it('should reject invalid target currency code', async () => {
+    const result = await executeTool({
+      id: 'curr_5',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'X' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing convert_currency');
+    expect(result.content).toContain('Invalid target currency code');
+  });
+
+  it('should reject invalid amount', async () => {
+    const result = await executeTool({
+      id: 'curr_6',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR', amount: 'abc' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing convert_currency');
+    expect(result.content).toContain('Invalid amount');
+  });
+
+  it('should reject negative amount', async () => {
+    const result = await executeTool({
+      id: 'curr_7',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR', amount: '-5' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing convert_currency');
+    expect(result.content).toContain('Invalid amount');
+  });
+
+  it('should handle API HTTP errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+    }));
+
+    const result = await executeTool({
+      id: 'curr_8',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing convert_currency');
+    expect(result.content).toContain('ExchangeRate API error: HTTP 404');
+  });
+
+  it('should handle unknown target currency in response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ rates: { USD: 1, EUR: 0.85 } }),
+    }));
+
+    const result = await executeTool({
+      id: 'curr_9',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'XYZ' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing convert_currency');
+    expect(result.content).toContain('Currency "XYZ" not found');
+  });
+
+  it('should cache exchange rates for 30 minutes', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockExchangeResponse),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({
+      id: 'curr_10a',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR' }),
+      },
+    });
+    const callCount1 = mockFetch.mock.calls.length;
+
+    await executeTool({
+      id: 'curr_10b',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'GBP' }),
+      },
+    });
+    const callCount2 = mockFetch.mock.calls.length;
+
+    // Second call with same source currency should use cache
+    expect(callCount1).toBe(callCount2);
+  });
+
+  it('should clear cache when clearExchangeRateCache is called', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockExchangeResponse),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({
+      id: 'curr_11a',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR' }),
+      },
+    });
+    const callCount1 = mockFetch.mock.calls.length;
+
+    clearExchangeRateCache();
+
+    await executeTool({
+      id: 'curr_11b',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'USD', to: 'EUR' }),
+      },
+    });
+    const callCount2 = mockFetch.mock.calls.length;
+
+    // After clearing, new fetch should be made
+    expect(callCount2).toBeGreaterThan(callCount1);
+  });
+
+  it('should construct correct API URL', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockExchangeResponse),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({
+      id: 'curr_12',
+      type: 'function',
+      function: {
+        name: 'convert_currency',
+        arguments: JSON.stringify({ from: 'EUR', to: 'USD' }),
+      },
+    });
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toBe('https://api.exchangerate-api.com/v4/latest/EUR');
   });
 });

@@ -4,14 +4,14 @@
 
 ---
 
-## Session: 2026-02-08 | Phase 2.5.7: Daily Briefing + BUG-3/BUG-4 Fixes (Session: 013wvC2kun5Mbr3J81KUPn99)
+## Session: 2026-02-08 | Phase 2.5.4: Currency Conversion + Phase 2.5.7 + BUG-3/BUG-4 Fixes (Session: 013wvC2kun5Mbr3J81KUPn99)
 
 **AI:** Claude Opus 4.6
 **Branch:** `claude/daily-briefing-aggregator-NfHhi`
 **Status:** Completed
 
 ### Summary
-Implemented Phase 2.5.7 (Daily Briefing Aggregator) and fixed two high/medium priority bugs (BUG-3 and BUG-4) from the live testing session.
+Implemented Phase 2.5.4 (Currency Conversion Tool), Phase 2.5.7 (Daily Briefing Aggregator), and fixed two high/medium priority bugs (BUG-3 and BUG-4) from the live testing session.
 
 ### Changes Made
 1. **BUG-4 Fix (High): `/img` image generation** — Changed `modalities: ['image', 'text']` to `modalities: ['image']` in `generateImage()`. FLUX models are image-only and don't support text output modality. OpenRouter returns "No endpoints found" when text modality is requested for image-only models.
@@ -28,22 +28,25 @@ Implemented Phase 2.5.7 (Daily Briefing Aggregator) and fixed two high/medium pr
 
 4. **6 new tests** covering all sections, custom parameters, caching, partial failures, total failures, cache clearing.
 
+5. **Phase 2.5.4: `convert_currency` tool** — New tool using ExchangeRate-API (free, no auth). Supports 150+ currencies, validates 3-letter codes, caches exchange rates for 30 minutes per source currency. Format: "100 USD = 85.23 EUR (rate: 0.8523)". 14 new tests.
+
 ### Files Modified
 - `src/openrouter/client.ts` (BUG-4: modalities fix)
 - `src/durable-objects/task-processor.ts` (BUG-3: reasoningLevel in TaskRequest/TaskState)
 - `src/telegram/handler.ts` (BUG-3: pass reasoningLevel; Phase 2.5.7: /briefing command + help text)
-- `src/openrouter/tools.ts` (Phase 2.5.7: generateDailyBriefing + 4 helper functions + cache)
-- `src/openrouter/tools.test.ts` (6 new briefing tests)
+- `src/openrouter/tools.ts` (Phase 2.5.4: convert_currency + Phase 2.5.7: generateDailyBriefing + helpers + caches)
+- `src/openrouter/tools.test.ts` (14 currency + 6 briefing = 20 new tests)
 - `claude-share/core/*.md` (all sync docs updated)
 
 ### Tests
-- [x] All 172 tests pass (6 new briefing tests, 52 total in tools.test.ts)
+- [x] All 186 tests pass (14 new currency + 6 new briefing, 66 total in tools.test.ts)
 - [x] Typecheck: no new errors (pre-existing errors unchanged)
 
 ### Notes for Next Session
 - BUG-3 and BUG-4 now fixed. Remaining bugs: BUG-1 (UX), BUG-2 (DeepSeek tool prompting), BUG-5 (fluxpro text UX)
-- Next priorities: Phase 2.5.4 (Currency conversion), Phase 2.1 (Token/cost tracking)
+- Next priorities: Phase 2.1 (Token/cost tracking), remaining bugs
 - `/briefing` defaults to Prague coordinates — user can customize via args
+- Tool count: 10 (was 9)
 
 ---
 
