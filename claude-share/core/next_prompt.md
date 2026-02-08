@@ -7,49 +7,45 @@
 
 ---
 
-## Current Task: Phase 2.5.5 — News Feeds (HackerNews + Reddit + arXiv)
+## Current Task: Phase 1.3 — Configurable Reasoning per Model
 
 ### Requirements
 
 You are working on Moltworker, a multi-platform AI assistant gateway on Cloudflare Workers.
 
-Add a new `fetch_news` tool that fetches top stories from HackerNews, Reddit, and arXiv. This provides tech pulse, crypto sentiment, and AI research feeds for the daily briefing aggregator (Phase 2.5.7). All three APIs are free with no authentication required.
+Add configurable reasoning support for models that expose reasoning control. Phase 1.2 already added `reasoning` metadata (`'none' | 'fixed' | 'configurable'`) to all models in `models.ts`. Now wire it up so models with `reasoning: 'configurable'` get the appropriate API parameter passed.
 
-### APIs
+### Models with Configurable Reasoning
 
-1. **HackerNews** — `https://hacker-news.firebaseio.com/v0/topstories.json` (returns array of IDs), then `https://hacker-news.firebaseio.com/v0/item/{id}.json` for each story
-2. **Reddit** — `https://www.reddit.com/r/{subreddit}/top.json?limit=10&t=day` (returns listing with children)
-3. **arXiv** — `https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10` (returns Atom XML)
+1. **DeepSeek V3.2** (`deepseek/deepseek-chat-v3-0324`): `reasoning: { enabled: boolean }`
+2. **Gemini 3 Flash** (`google/gemini-3-flash`): `reasoning: { effort: 'minimal' | 'low' | 'medium' | 'high' }`
+3. **Grok 4.1** (`x-ai/grok-4-1`): `reasoning: { enabled: boolean }`
 
 ### Files to modify
 
-1. **`src/openrouter/tools.ts`** — Add `fetch_news` tool definition and execution handler
-   - Tool schema: `{ name: "fetch_news", parameters: { source: string, topic?: string } }`
-   - `source`: One of `hackernews`, `reddit`, `arxiv`
-   - `topic`: Optional subreddit name for Reddit (default: `technology`), or arXiv category (default: `cs.AI`)
-   - Returns formatted list of top stories with title, URL, score/points
-   - Limit to top 10 items per source
+1. **`src/openrouter/client.ts`** — Add reasoning parameter to ChatCompletionRequest when model supports it
+2. **`src/openrouter/models.ts`** — Verify reasoning metadata is correct for all models
 
 ### Implementation Notes
 
-- For HackerNews: Fetch top 10 IDs, then fetch each item in parallel
-- For Reddit: Parse JSON response, extract title/url/score from `data.children`
-- For arXiv: Parse XML response (simple string parsing — no XML library needed, extract `<entry>` elements)
-- Validate source parameter against allowed values
-- Handle API errors gracefully
+- Check `model.reasoning === 'configurable'` before adding the parameter
+- Default behavior: auto-detect from task type (simple Q&A → disabled, coding/tool-use → medium, research → high)
+- Allow user override via message prefix (e.g., `/deep think:high <message>`)
+- Ensure backwards compatibility — models without reasoning support should be unaffected
 
 ### Success Criteria
 
-- [ ] New `fetch_news` tool appears in tool definitions
-- [ ] Supports all three sources (hackernews, reddit, arxiv)
-- [ ] Returns formatted top 10 stories per source
-- [ ] Handles errors gracefully (invalid source, API failure)
-- [ ] Test file: `src/openrouter/tools.test.ts` (extend existing)
+- [ ] Models with `reasoning: 'configurable'` get reasoning parameter in API request
+- [ ] Default reasoning level selected based on task type
+- [ ] User can override reasoning level
+- [ ] No regressions for models without reasoning support
+- [ ] Tests added
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes (pre-existing errors OK)
 
 ### Key Files
-- `src/openrouter/tools.ts` — Tool definitions and execution
+- `src/openrouter/client.ts` — API client
+- `src/openrouter/models.ts` — Model catalog with capability metadata
 
 ---
 
@@ -57,9 +53,9 @@ Add a new `fetch_news` tool that fetches top stories from HackerNews, Reddit, an
 
 | Priority | Task | Effort |
 |----------|------|--------|
-| Next | 1.3: Configurable reasoning per model | Medium |
-| Then | 2.5.7: Daily briefing aggregator | 6h |
+| Next | 2.5.7: Daily briefing aggregator | 6h |
 | Then | 2.5.4: Currency conversion (ExchangeRate-API) | 1h |
+| Then | 2.1: Token/cost tracking | Medium |
 
 ---
 
@@ -67,6 +63,7 @@ Add a new `fetch_news` tool that fetches top stories from HackerNews, Reddit, an
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-08 | Phase 2.5.5: News feeds (HN/Reddit/arXiv) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
 | 2026-02-08 | Phase 2.5.3: Weather tool (Open-Meteo) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
 | 2026-02-08 | Phase 2.5.2: Chart image generation (QuickChart) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
 | 2026-02-08 | Phase 2.5.1: URL metadata tool (Microlink) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
