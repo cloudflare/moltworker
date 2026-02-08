@@ -39,19 +39,38 @@ describe('syncToR2', () => {
   });
 
   describe('sanity checks', () => {
-    it('returns error when source has no config file', async () => {
+    it('returns error when config directories are empty', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })) // No openclaw.json
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })); // No clawdbot.json either
+        .mockResolvedValueOnce(createMockProcess('')) // Empty .openclaw dir
+        .mockResolvedValueOnce(createMockProcess('')); // Empty .clawdbot dir
 
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Sync aborted: no config file found');
+      expect(result.error).toBe('Sync aborted: no config data found');
+    });
+
+    it('syncs when config dir has content but no openclaw.json (exitCode null)', async () => {
+      const { sandbox, startProcessMock } = createMockSandbox();
+      const timestamp = '2026-02-09T12:00:00+00:00';
+
+      // ls returns directory content even when exitCode is null (#212)
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
+        .mockResolvedValueOnce(createMockProcess('agents\n', { exitCode: undefined as any }))
+        .mockResolvedValueOnce(createMockProcess(''))
+        .mockResolvedValueOnce(createMockProcess(timestamp));
+
+      const env = createMockEnvWithR2();
+
+      const result = await syncToR2(sandbox, env);
+
+      expect(result.success).toBe(true);
+      expect(result.lastSync).toBe(timestamp);
     });
   });
 
@@ -60,10 +79,10 @@ describe('syncToR2', () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       const timestamp = '2026-01-27T12:00:00+00:00';
 
-      // Calls: mount check, check openclaw.json, rsync, cat timestamp
+      // Calls: mount check, ls config dir, rsync, cat timestamp
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('openclaw.json\n'))
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(timestamp));
 
@@ -78,10 +97,10 @@ describe('syncToR2', () => {
     it('returns error when rsync fails (no timestamp created)', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
 
-      // Calls: mount check, check openclaw.json, rsync (fails), cat timestamp (empty)
+      // Calls: mount check, ls config dir, rsync (fails), cat timestamp (empty)
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('openclaw.json\n'))
         .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 }))
         .mockResolvedValueOnce(createMockProcess(''));
 
@@ -99,7 +118,7 @@ describe('syncToR2', () => {
 
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('ok'))
+        .mockResolvedValueOnce(createMockProcess('openclaw.json\n'))
         .mockResolvedValueOnce(createMockProcess(''))
         .mockResolvedValueOnce(createMockProcess(timestamp));
 
