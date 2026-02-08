@@ -239,6 +239,32 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     }
 }
 
+// Default Anthropic / GLM-4.7 configuration if direct API key is used
+if (process.env.ANTHROPIC_API_KEY && !process.env.CF_AI_GATEWAY_MODEL) {
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers['anthropic'] = {
+        baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        api: 'anthropic-messages',
+        models: [
+            {
+                id: 'glm-4.7',
+                name: 'GLM-4.7',
+                reasoning: false,
+                input: ['text'],
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                contextWindow: 200000,
+                maxTokens: 8192
+            }
+        ]
+    };
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: 'anthropic/glm-4.7' };
+    console.log('Direct Anthropic config applied with GLM-4.7 override');
+}
+
 // Telegram configuration
 // Overwrite entire channel object to drop stale keys from old R2 backups
 // that would fail OpenClaw's strict config validation (see #47)

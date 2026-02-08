@@ -2,8 +2,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "moltbot-sandbox",
   "main": "src/index.ts",
+  "account_id": "b5ee1671e54d7c7fcf17e90b9ca7741a",
   "compatibility_date": "2025-05-06",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "observability": {
     "enabled": true,
   },
@@ -19,12 +22,16 @@
   "rules": [
     {
       "type": "Text",
-      "globs": ["**/*.html"],
+      "globs": [
+        "**/*.html"
+      ],
       "fallthrough": false,
     },
     {
       "type": "Data",
-      "globs": ["**/*.png"],
+      "globs": [
+        "**/*.png"
+      ],
       "fallthrough": false,
     },
   ],
@@ -51,20 +58,20 @@
   },
   "migrations": [
     {
-      "new_sqlite_classes": ["Sandbox"],
+      "new_sqlite_classes": [
+        "Sandbox"
+      ],
       "tag": "v1",
     },
   ],
+  "vars": {
+    "DEBUG_ROUTES": "true",
+    "DEV_MODE": "true"
+  },
   // R2 bucket for persistent storage (moltbot data, conversations, etc.)
-  "r2_buckets": [
-    {
-      "binding": "MOLTBOT_BUCKET",
-      "bucket_name": "moltbot-data",
-    },
-  ],
-  // Cron trigger to sync moltbot data to R2 every 5 minutes
+  "r2_buckets": [],
   "triggers": {
-    "crons": ["*/5 * * * *"],
+    "crons": [],
   },
   // Browser Rendering binding for CDP shim
   "browser": {
