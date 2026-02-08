@@ -142,6 +142,25 @@ describe('mountR2Storage', () => {
       expect(console.error).toHaveBeenCalledWith('Failed to mount R2 bucket:', expect.any(Error));
     });
 
+    it('returns true when mount fails with "already in use" error', async () => {
+      const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox({ mounted: false });
+      mountBucketMock.mockRejectedValue(
+        new Error('InvalidMountConfigError: Mount path "/data/moltbot" is already in use by bucket "moltbot-data". Unmount the existing bucket first or use a different mount path.'),
+      );
+      startProcessMock.mockResolvedValueOnce(createMockProcess(''));
+
+      const env = createMockEnvWithR2();
+
+      const result = await mountR2Storage(sandbox, env);
+
+      expect(result).toBe(true);
+      expect(console.log).toHaveBeenCalledWith(
+        'R2 bucket already mounted at',
+        '/data/moltbot',
+        '(detected via mount error)',
+      );
+    });
+
     it('returns true if mount fails but check shows it is actually mounted', async () => {
       const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox();
       startProcessMock

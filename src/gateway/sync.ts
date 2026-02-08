@@ -1,6 +1,7 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH } from '../config';
+import { ensureMoltbotGateway } from './process';
 import { mountR2Storage } from './r2';
 import { waitForProcess } from './utils';
 
@@ -33,6 +34,18 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   // Check if R2 is configured
   if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
     return { success: false, error: 'R2 storage is not configured' };
+  }
+
+  // Ensure the gateway is running — the startup script creates the config
+  // file via `openclaw onboard`, which is required before we can sync
+  try {
+    await ensureMoltbotGateway(sandbox, env);
+  } catch (err) {
+    return {
+      success: false,
+      error: 'Failed to start gateway',
+      details: err instanceof Error ? err.message : 'Unknown error',
+    };
   }
 
   // Mount R2 if not already mounted

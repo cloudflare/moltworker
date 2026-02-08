@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { syncToR2 } from './sync';
 import {
   createMockEnv,
@@ -7,6 +7,10 @@ import {
   createMockSandbox,
   suppressConsole,
 } from '../test-utils';
+
+vi.mock('./process', () => ({
+  ensureMoltbotGateway: vi.fn().mockResolvedValue({ id: 'mock-process' }),
+}));
 
 describe('syncToR2', () => {
   beforeEach(() => {
