@@ -111,15 +111,15 @@ async function doMount(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
     // Using '>' (overwrite) instead of '>>' ensures exactly one entry
     // regardless of how many times this runs — avoiding the "multiple
     // entries for the same bucket" error that plagues mountBucket().
+    //
+    // Credentials are base64-encoded to avoid shell escaping issues and
+    // to keep raw secrets out of the command string / process logs.
+    // (sandbox.startProcess does not support the env option.)
     console.log('Writing s3fs credentials and mounting', bucketName, 'at', R2_MOUNT_PATH);
+    const credLine = `${env.R2_ACCESS_KEY_ID}:${env.R2_SECRET_ACCESS_KEY}`;
+    const credB64 = btoa(credLine);
     const setupProc = await sandbox.startProcess(
-      `printf '%s:%s\\n' "$R2_KEY" "$R2_SECRET" > /etc/passwd-s3fs && chmod 600 /etc/passwd-s3fs`,
-      {
-        env: {
-          R2_KEY: env.R2_ACCESS_KEY_ID!,
-          R2_SECRET: env.R2_SECRET_ACCESS_KEY!,
-        },
-      },
+      `echo '${credB64}' | base64 -d > /etc/passwd-s3fs && chmod 600 /etc/passwd-s3fs`,
     );
     await waitForProcess(setupProc);
 

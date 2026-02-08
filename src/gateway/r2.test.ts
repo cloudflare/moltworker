@@ -83,12 +83,9 @@ describe('mountR2Storage', () => {
       const result = await mountR2Storage(sandbox, env);
 
       expect(result).toBe(true);
-      // Verify passwd file is written with env vars (not embedded in command)
+      // Verify passwd file is written via base64-encoded credentials
       expect(startProcessMock).toHaveBeenCalledWith(
-        expect.stringContaining('passwd-s3fs'),
-        expect.objectContaining({
-          env: { R2_KEY: 'key123', R2_SECRET: 'secret' },
-        }),
+        expect.stringContaining('base64 -d > /etc/passwd-s3fs'),
       );
       // Verify s3fs mount command
       expect(startProcessMock).toHaveBeenCalledWith(
