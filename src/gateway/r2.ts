@@ -3,6 +3,21 @@ import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH, getR2BucketName } from '../config';
 
 /**
+ * In-flight mount promise used to deduplicate concurrent mount attempts.
+ *
+ * Multiple concurrent requests (e.g. the loading-page waitUntil + the next
+ * polling request) can both call mountR2Storage before the first one finishes.
+ * Each call to sandbox.mountBucket() appends credentials to the s3fs passwd
+ * file, so concurrent calls produce duplicate entries and s3fs refuses to
+ * mount with: "there are multiple entries for the same bucket(default) in
+ * the passwd file."
+ *
+ * By caching the in-flight promise we ensure only one mount attempt runs at
+ * a time within a Worker isolate.
+ */
+let inflightMount: Promise<boolean> | null = null;
+
+/**
  * Check if R2 is already mounted by looking at the mount table
  */
 async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
@@ -27,7 +42,12 @@ async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
 }
 
 /**
- * Mount R2 bucket for persistent storage
+ * Mount R2 bucket for persistent storage.
+ *
+ * Concurrent calls are coalesced: only the first caller actually attempts the
+ * mount; subsequent callers await the same promise.  This prevents the s3fs
+ * "multiple entries for the same bucket" passwd-file error that occurs when
+ * sandbox.mountBucket() is invoked more than once in parallel.
  *
  * @param sandbox - The sandbox instance
  * @param env - Worker environment bindings
@@ -42,6 +62,24 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
     return false;
   }
 
+  // If a mount is already in progress, wait for it instead of starting another
+  if (inflightMount) {
+    console.log('R2 mount already in progress, waiting for existing attempt...');
+    return inflightMount;
+  }
+
+  inflightMount = doMount(sandbox, env);
+  try {
+    return await inflightMount;
+  } finally {
+    inflightMount = null;
+  }
+}
+
+/**
+ * Internal mount implementation — always called at most once at a time.
+ */
+async function doMount(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
   // Check if already mounted first - this avoids errors and is faster
   if (await isR2Mounted(sandbox)) {
     console.log('R2 bucket already mounted at', R2_MOUNT_PATH);
@@ -54,9 +92,10 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
     await sandbox.mountBucket(bucketName, R2_MOUNT_PATH, {
       endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       // Pass credentials explicitly since we use R2_* naming instead of AWS_*
+      // Non-null assertions are safe: mountR2Storage validates these before calling doMount
       credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+        accessKeyId: env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: env.R2_SECRET_ACCESS_KEY!,
       },
     });
     console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
@@ -75,4 +114,9 @@ export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise
     console.error('Failed to mount R2 bucket:', err);
     return false;
   }
+}
+
+/** Exposed for testing only — reset the in-flight lock between tests */
+export function _resetMountLock(): void {
+  inflightMount = null;
 }
