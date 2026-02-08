@@ -18,8 +18,9 @@
 
 | Task ID | Description | Assignee | Status | Branch |
 |---------|-------------|----------|--------|--------|
-| 1.3 | Configurable reasoning per model | Claude Opus 4.6 | ✅ Complete | `claude/review-moltworker-roadmap-q5aqD` |
-| 2.5.5 | HackerNews + Reddit + arXiv feeds | Claude Opus 4.6 | ✅ Complete | `claude/review-moltworker-roadmap-q5aqD` |
+| 2.5.7 | Daily briefing aggregator | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
+| BUG-3 | Pass think: override through DO path | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
+| BUG-4 | Fix /img image generation | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 
 ---
 
@@ -27,7 +28,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Live testing complete, 5 bugs logged | `claude/review-moltworker-roadmap-q5aqD` | 2026-02-08 |
+| Claude | Phase 2.5.7 + BUG-3/BUG-4 complete | `claude/daily-briefing-aggregator-NfHhi` | 2026-02-08 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -52,6 +53,9 @@
 | 2.5.3 | Weather tool (Open-Meteo) | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
 | 2.5.5 | News feeds (HN/Reddit/arXiv) | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
 | 1.3 | Configurable reasoning per model | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
+| 2.5.7 | Daily briefing aggregator | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
+| BUG-3 | think: override DO passthrough fix | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
+| BUG-4 | /img modalities fix | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 
 ---
 
@@ -61,8 +65,8 @@
 |--------|-------|----------|-------|--------|
 | BUG-1 | "Processing complex task..." shown for ALL messages | Low/UX | `task-processor.ts:476` | 🔲 Open |
 | BUG-2 | DeepSeek doesn't proactively use tools | Medium | `client.ts` / system prompt | 🔲 Open |
-| BUG-3 | `think:` override not passed through DO path | Medium | `handler.ts`, `task-processor.ts` | 🔲 Open |
-| BUG-4 | `/img` fails — modalities not supported | High | `client.ts:357` | 🔲 Open |
+| BUG-3 | `think:` override not passed through DO path | Medium | `handler.ts`, `task-processor.ts` | ✅ Fixed |
+| BUG-4 | `/img` fails — modalities not supported | High | `client.ts:357` | ✅ Fixed |
 | BUG-5 | `/use fluxpro` + text → "No response" | Low | `handler.ts` | 🔲 Open |
 
 ### Blocked
@@ -77,11 +81,11 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **BUG-4** — Fix `/img` image generation (High priority, investigate OpenRouter modalities API)
-2. **BUG-3** — Pass `think:` override through Durable Object path (Medium priority)
-3. **Phase 2.5.7** — Daily briefing aggregator (6h, combines 2.5.1-2.5.6)
-4. **Phase 2.5.4** — Currency conversion (ExchangeRate-API) (1h)
-5. **Phase 2.1** — Token/cost tracking (medium effort, high value)
+1. **Phase 2.5.4** — Currency conversion (ExchangeRate-API) (1h)
+2. **Phase 2.1** — Token/cost tracking (medium effort, high value)
+3. **BUG-1** — "Processing complex task..." shown for ALL messages (UX polish)
+4. **BUG-2** — DeepSeek doesn't proactively use tools (system prompt hint)
+5. **BUG-5** — `/use fluxpro` + text → "No response" (UX routing)
 
 ---
 
@@ -89,4 +93,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 16 | Phase 0 complete, Phase 1.1-1.3 complete, upstream sync complete, Phase 2.5.1-2.5.3+2.5.5 complete, ahead of plan |
+| Sprint 1 (current) | 8 | 19 | Phase 0 complete, Phase 1.1-1.3 complete, upstream sync complete, Phase 2.5.1-2.5.3+2.5.5+2.5.7 complete, BUG-3+BUG-4 fixed, ahead of plan |
