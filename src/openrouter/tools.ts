@@ -240,6 +240,31 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'convert_currency',
+      description: 'Convert between currencies using live exchange rates. Supports 150+ currencies including USD, EUR, GBP, CZK, JPY, etc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          from: {
+            type: 'string',
+            description: 'Source currency code (e.g., USD, EUR, CZK)',
+          },
+          to: {
+            type: 'string',
+            description: 'Target currency code (e.g., EUR, USD, GBP)',
+          },
+          amount: {
+            type: 'string',
+            description: 'Amount to convert (default: 1)',
+          },
+        },
+        required: ['from', 'to'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browse_url',
       description: 'Browse a URL using a real browser. Use this for JavaScript-rendered pages, screenshots, or when fetch_url fails. Returns text content by default, or a screenshot/PDF.',
       parameters: {
@@ -314,6 +339,9 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'fetch_news':
         result = await fetchNews(args.source, args.topic);
+        break;
+      case 'convert_currency':
+        result = await convertCurrency(args.from, args.to, args.amount);
         break;
       case 'browse_url':
         result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
@@ -865,6 +893,75 @@ async function fetchArxiv(category: string): Promise<string> {
   }
 
   return `arXiv ${category} Latest Papers:\n\n${entries.join('\n\n')}`;
+}
+
+/**
+ * Exchange rate cache (30-minute TTL)
+ */
+interface ExchangeRateCache {
+  rates: Record<string, number>;
+  timestamp: number;
+}
+
+const EXCHANGE_RATE_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const exchangeRateCache: Map<string, ExchangeRateCache> = new Map();
+
+/**
+ * Clear exchange rate cache (for testing)
+ */
+export function clearExchangeRateCache(): void {
+  exchangeRateCache.clear();
+}
+
+/**
+ * Convert between currencies using ExchangeRate-API
+ */
+async function convertCurrency(from: string, to: string, amountStr?: string): Promise<string> {
+  const fromCode = from.toUpperCase().trim();
+  const toCode = to.toUpperCase().trim();
+
+  // Validate currency codes (3 uppercase letters)
+  if (!/^[A-Z]{3}$/.test(fromCode)) {
+    throw new Error(`Invalid source currency code: "${from}". Must be 3 letters (e.g., USD, EUR).`);
+  }
+  if (!/^[A-Z]{3}$/.test(toCode)) {
+    throw new Error(`Invalid target currency code: "${to}". Must be 3 letters (e.g., USD, EUR).`);
+  }
+
+  const amount = amountStr ? parseFloat(amountStr) : 1;
+  if (isNaN(amount) || amount <= 0) {
+    throw new Error(`Invalid amount: "${amountStr}". Must be a positive number.`);
+  }
+
+  // Check cache
+  const cached = exchangeRateCache.get(fromCode);
+  let rates: Record<string, number>;
+
+  if (cached && (Date.now() - cached.timestamp) < EXCHANGE_RATE_CACHE_TTL_MS) {
+    rates = cached.rates;
+  } else {
+    const response = await fetch(`https://api.exchangerate-api.com/v4/latest/${fromCode}`, {
+      headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`ExchangeRate API error: HTTP ${response.status}`);
+    }
+
+    const data = await response.json() as { rates: Record<string, number> };
+    rates = data.rates;
+
+    // Update cache
+    exchangeRateCache.set(fromCode, { rates, timestamp: Date.now() });
+  }
+
+  const rate = rates[toCode];
+  if (rate === undefined) {
+    throw new Error(`Currency "${toCode}" not found. The API may not support this currency code.`);
+  }
+
+  const converted = amount * rate;
+  return `${amount} ${fromCode} = ${converted.toFixed(2)} ${toCode} (rate: ${rate})`;
 }
 
 /**
