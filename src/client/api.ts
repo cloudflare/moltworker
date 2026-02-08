@@ -101,6 +101,16 @@ export async function approveAllDevices(): Promise<ApproveAllResponse> {
   });
 }
 
+export interface GatewayStatusResponse {
+  status: 'running' | 'starting' | 'stopped';
+  processId?: string;
+  error?: string;
+}
+
+export async function getGatewayStatus(): Promise<GatewayStatusResponse> {
+  return apiRequest<GatewayStatusResponse>('/gateway/status');
+}
+
 export interface RestartGatewayResponse {
   success: boolean;
   message?: string;
