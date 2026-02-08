@@ -391,7 +391,8 @@ async function initCDPSession(ws: WebSocket, env: MoltbotEnv): Promise<void> {
       return;
     }
 
-    console.log('[CDP] Request:', request.method, request.params);
+    // Never log params: they can include sensitive data (headers, cookies, form values).
+    console.log('[CDP] Request:', request.method);
 
     try {
       const result = await handleCDPMethod(session, request.method, request.params || {}, ws);
