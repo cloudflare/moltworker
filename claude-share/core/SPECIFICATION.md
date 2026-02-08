@@ -145,10 +145,10 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 - **Implementation:** `src/openrouter/tools.ts` — tool definition + `fetchNews()` dispatcher + 3 source handlers (parallel HN item fetches, Reddit JSON parsing, arXiv XML string parsing). 14 tests in `tools.test.ts`.
 
 #### F2.5.7: Daily Briefing Aggregator
-- **Status:** 🔲 Planned
-- **Spec:** Telegram `/brief` command combining weather + crypto + news + quotes into a single formatted message.
-- **Dependencies:** F2.5.1-F2.5.6 (individual data sources).
-- **Effort:** 6h (aggregator + formatting + Telegram command).
+- **Status:** ✅ Complete
+- **Spec:** Telegram `/briefing` command combining weather + HackerNews top 5 + Reddit top 3 + arXiv latest 3 into a single formatted message.
+- **Dependencies:** F2.5.3 (weather), F2.5.5 (news feeds).
+- **Implementation:** `src/openrouter/tools.ts` — `generateDailyBriefing()` with `Promise.allSettled()` for parallel fetching + graceful partial failures. 15-minute cache via `briefingCache`. `src/telegram/handler.ts` — `/briefing` and `/brief` commands with configurable lat/lon, subreddit, arXiv category. 6 tests in `tools.test.ts`.
 
 ---
 
@@ -217,8 +217,8 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 |----|-------|----------|------------|----------|
 | BUG-1 | "Processing complex task..." shown for ALL messages on tool-capable models | Low/UX | Durable Object always sends this status, even for simple queries | `task-processor.ts:476` |
 | BUG-2 | DeepSeek V3.2 doesn't proactively use tools (prefers answering from knowledge) | Medium | Model behavior — Grok uses tools naturally; DeepSeek needs system prompt hint | Model-specific |
-| BUG-3 | `think:LEVEL` override only works on direct fallback path, not through Durable Object | Medium | `reasoningLevel` is parsed in handler but not included in `TaskRequest` sent to DO | `handler.ts` → `task-processor.ts` |
-| BUG-4 | `/img` fails: "No endpoints found that support output modalities: image, text" | High | OpenRouter may have changed FLUX.2 image generation API format | `client.ts:357` |
+| BUG-3 | `think:LEVEL` override only works on direct fallback path, not through Durable Object | Medium | ✅ Fixed — `reasoningLevel` now added to `TaskRequest` and passed through DO | `handler.ts` → `task-processor.ts` |
+| BUG-4 | `/img` fails: "No endpoints found that support output modalities: image, text" | High | ✅ Fixed — FLUX models need `modalities: ['image']`, not `['image', 'text']` | `client.ts:357` |
 | BUG-5 | `/use fluxpro` then text message → "No response generated" | Low | Chat path doesn't detect image-gen-only model and redirect to `/img` | `handler.ts` |
 
 ---

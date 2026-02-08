@@ -5,7 +5,7 @@
 
 import { OpenRouterClient, createOpenRouterClient, extractTextResponse, type ChatMessage } from '../openrouter/client';
 import { UserStorage, createUserStorage, SkillStorage, createSkillStorage } from '../openrouter/storage';
-import { modelSupportsTools } from '../openrouter/tools';
+import { modelSupportsTools, generateDailyBriefing } from '../openrouter/tools';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import {
   MODELS,
@@ -753,6 +753,11 @@ export class TelegramHandler {
         break;
       }
 
+      case '/briefing':
+      case '/brief':
+        await this.handleBriefingCommand(chatId, args);
+        break;
+
       default:
         // Check if it's a model alias command (e.g., /deep, /gpt)
         const modelAlias = cmd.slice(1); // Remove leading /
@@ -918,6 +923,53 @@ export class TelegramHandler {
   }
 
   /**
+   * Handle /briefing command
+   * Usage: /briefing [lat,lon] [subreddit] [arxiv_category]
+   * Example: /briefing
+   * Example: /briefing 40.71,-74.01 programming cs.LG
+   */
+  private async handleBriefingCommand(chatId: number, args: string[]): Promise<void> {
+    await this.bot.sendChatAction(chatId, 'typing');
+
+    // Parse optional arguments
+    let latitude = '50.08'; // Prague default
+    let longitude = '14.44';
+    let subreddit = 'technology';
+    let arxivCategory = 'cs.AI';
+
+    if (args.length > 0) {
+      // First arg: lat,lon
+      const coordMatch = args[0].match(/^(-?[\d.]+),(-?[\d.]+)$/);
+      if (coordMatch) {
+        latitude = coordMatch[1];
+        longitude = coordMatch[2];
+      }
+    }
+    if (args.length > 1) {
+      subreddit = args[1];
+    }
+    if (args.length > 2) {
+      arxivCategory = args[2];
+    }
+
+    try {
+      const briefing = await generateDailyBriefing(latitude, longitude, subreddit, arxivCategory);
+
+      // Split and send if too long for Telegram
+      if (briefing.length > 4000) {
+        const chunks = this.splitMessage(briefing, 4000);
+        for (const chunk of chunks) {
+          await this.bot.sendMessage(chatId, chunk);
+        }
+      } else {
+        await this.bot.sendMessage(chatId, briefing);
+      }
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `Briefing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Handle vision (image + text)
    */
   private async handleVision(message: TelegramMessage): Promise<void> {
@@ -1017,6 +1069,7 @@ export class TelegramHandler {
             moonshotKey: this.moonshotKey,
             deepseekKey: this.deepseekKey,
             autoResume,
+            reasoningLevel: reasoningLevel ?? undefined,
           };
 
           // Get or create DO instance for this user
@@ -1403,6 +1456,7 @@ export class TelegramHandler {
 /clear - Clear history
 /cancel - Cancel running task
 /credits - Check OpenRouter credits
+/briefing - Daily briefing (weather+news+research)
 /ping - Test bot response
 
 💾 Checkpoint Management:

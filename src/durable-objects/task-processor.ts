@@ -7,7 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, type ChatMessage } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
-import { getModelId, getProvider, getProviderConfig, type Provider } from '../openrouter/models';
+import { getModelId, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, type Provider, type ReasoningLevel } from '../openrouter/models';
 
 // Max characters for a single tool result before truncation
 const MAX_TOOL_RESULT_LENGTH = 8000; // ~2K tokens (reduced for CPU)
@@ -41,6 +41,8 @@ interface TaskState {
   // Auto-resume settings
   autoResume?: boolean; // If true, automatically resume on timeout
   autoResumeCount?: number; // Number of auto-resumes so far
+  // Reasoning level override
+  reasoningLevel?: ReasoningLevel;
 }
 
 // Task request from the worker
@@ -59,6 +61,8 @@ export interface TaskRequest {
   deepseekKey?: string;    // For DeepSeek
   // Auto-resume setting
   autoResume?: boolean;    // If true, auto-resume on timeout
+  // Reasoning level override (from think:LEVEL prefix)
+  reasoningLevel?: ReasoningLevel;
 }
 
 // DO environment with R2 binding
@@ -157,6 +161,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         moonshotKey: task.moonshotKey,
         deepseekKey: task.deepseekKey,
         autoResume: task.autoResume,
+        reasoningLevel: task.reasoningLevel,
       };
 
       // Use waitUntil to trigger resume without blocking alarm
@@ -458,6 +463,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     task.deepseekKey = request.deepseekKey;
     // Preserve auto-resume setting (and count if resuming)
     task.autoResume = request.autoResume;
+    task.reasoningLevel = request.reasoningLevel;
     // Keep existing autoResumeCount if resuming, otherwise start at 0
     const existingTask = await this.doState.storage.get<TaskState>('task');
     if (existingTask?.autoResumeCount !== undefined) {
@@ -627,6 +633,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   tools: TOOLS_WITHOUT_BROWSER,
                   toolChoice: 'auto',
                   idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
+                  reasoningLevel: request.reasoningLevel,
                   onProgress: () => {
                     progressCount++;
                     // Update watchdog every 50 chunks (~every few seconds)

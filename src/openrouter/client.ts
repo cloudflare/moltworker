@@ -346,6 +346,7 @@ export class OpenRouterClient {
     const modelId = getModelId(alias);
 
     // OpenRouter uses chat/completions with modalities for image generation
+    // Image-only models (FLUX) must use ['image'], not ['image', 'text']
     const request = {
       model: modelId,
       messages: [
@@ -354,7 +355,7 @@ export class OpenRouterClient {
           content: prompt,
         },
       ],
-      modalities: ['image', 'text'],
+      modalities: ['image'],
     };
 
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {

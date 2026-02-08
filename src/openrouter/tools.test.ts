@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool } from './tools';
+import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache } from './tools';
 
 describe('url_metadata tool', () => {
   beforeEach(() => {
@@ -937,5 +937,215 @@ describe('fetch_news tool', () => {
     expect(result.content).toContain('...');
     // Should not contain the full 200 chars
     expect(result.content).not.toContain(longSummary);
+  });
+});
+
+describe('generateDailyBriefing', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    clearBriefingCache();
+  });
+
+  const mockWeatherResponse = {
+    current_weather: {
+      temperature: 22.5,
+      windspeed: 12.3,
+      weathercode: 2,
+      time: '2026-02-08T14:00',
+    },
+    daily: {
+      time: ['2026-02-08', '2026-02-09', '2026-02-10'],
+      temperature_2m_max: [24.0, 26.1, 23.5],
+      temperature_2m_min: [18.0, 19.2, 17.8],
+      weathercode: [2, 61, 0],
+    },
+    timezone: 'Europe/Prague',
+  };
+
+  const mockHNIds = [1, 2, 3, 4, 5];
+  const mockHNItems = [
+    { id: 1, title: 'HN Story One', score: 100, by: 'user1', descendants: 50 },
+    { id: 2, title: 'HN Story Two', score: 200, by: 'user2', descendants: 75 },
+    { id: 3, title: 'HN Story Three', score: 150, by: 'user3', descendants: 30 },
+    { id: 4, title: 'HN Story Four', score: 80, by: 'user4', descendants: 20 },
+    { id: 5, title: 'HN Story Five', score: 60, by: 'user5', descendants: 10 },
+  ];
+
+  const mockRedditResponse = {
+    data: {
+      children: [
+        { data: { title: 'Reddit Post 1', url: 'https://example.com/r1', score: 500, permalink: '/r/technology/comments/abc', num_comments: 120, author: 'redditor1' } },
+        { data: { title: 'Reddit Post 2', url: 'https://example.com/r2', score: 300, permalink: '/r/technology/comments/def', num_comments: 80, author: 'redditor2' } },
+        { data: { title: 'Reddit Post 3', url: 'https://example.com/r3', score: 200, permalink: '/r/technology/comments/ghi', num_comments: 40, author: 'redditor3' } },
+      ],
+    },
+  };
+
+  const mockArxivXml = `<?xml version="1.0" encoding="UTF-8"?>
+<feed>
+  <entry>
+    <id>http://arxiv.org/abs/2602.12345v1</id>
+    <title>Paper Alpha</title>
+    <summary>Summary A</summary>
+    <author><name>Author A</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.12346v1</id>
+    <title>Paper Beta</title>
+    <summary>Summary B</summary>
+    <author><name>Author B</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.12347v1</id>
+    <title>Paper Gamma</title>
+    <summary>Summary C</summary>
+    <author><name>Author C</name></author>
+  </entry>
+</feed>`;
+
+  function setupAllMocks() {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      // Weather
+      if (url.includes('open-meteo.com')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockWeatherResponse) });
+      }
+      // HN top stories
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockHNIds) });
+      }
+      // HN individual items
+      if (url.includes('hacker-news.firebaseio.com/v0/item/')) {
+        const id = parseInt(url.split('/item/')[1].split('.json')[0]);
+        const item = mockHNItems.find(i => i.id === id);
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(item || null) });
+      }
+      // Reddit
+      if (url.includes('reddit.com')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockRedditResponse) });
+      }
+      // arXiv
+      if (url.includes('arxiv.org')) {
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(mockArxivXml) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+    return mockFetch;
+  }
+
+  it('should return a formatted daily briefing with all sections', async () => {
+    setupAllMocks();
+
+    const result = await generateDailyBriefing();
+
+    expect(result).toContain('Daily Briefing');
+    expect(result).toContain('Weather');
+    expect(result).toContain('22.5');
+    expect(result).toContain('HackerNews Top 5');
+    expect(result).toContain('HN Story One');
+    expect(result).toContain('HN Story Five');
+    expect(result).toContain('Reddit r/technology');
+    expect(result).toContain('Reddit Post 1');
+    expect(result).toContain('arXiv cs.AI');
+    expect(result).toContain('Paper Alpha');
+    expect(result).toContain('Updates every 15 minutes');
+  });
+
+  it('should accept custom location parameters', async () => {
+    const mockFetch = setupAllMocks();
+
+    await generateDailyBriefing('40.71', '-74.01', 'programming', 'cs.LG');
+
+    // Verify weather was called with custom coords
+    const weatherCall = mockFetch.mock.calls.find((call: unknown[]) => (call[0] as string).includes('open-meteo.com'));
+    expect(weatherCall).toBeDefined();
+    expect(weatherCall![0]).toContain('latitude=40.71');
+    expect(weatherCall![0]).toContain('longitude=-74.01');
+
+    // Verify Reddit was called with custom subreddit
+    const redditCall = mockFetch.mock.calls.find((call: unknown[]) => (call[0] as string).includes('reddit.com'));
+    expect(redditCall).toBeDefined();
+    expect(redditCall![0]).toContain('/r/programming/');
+
+    // Verify arXiv was called with custom category
+    const arxivCall = mockFetch.mock.calls.find((call: unknown[]) => (call[0] as string).includes('arxiv.org'));
+    expect(arxivCall).toBeDefined();
+    expect(arxivCall![0]).toContain('cat:cs.LG');
+  });
+
+  it('should cache results for 15 minutes', async () => {
+    const mockFetch = setupAllMocks();
+
+    const result1 = await generateDailyBriefing();
+    const callCount1 = mockFetch.mock.calls.length;
+
+    const result2 = await generateDailyBriefing();
+    const callCount2 = mockFetch.mock.calls.length;
+
+    // Second call should use cache (no new fetch calls)
+    expect(result1).toBe(result2);
+    expect(callCount1).toBe(callCount2);
+  });
+
+  it('should handle partial failures gracefully', async () => {
+    // Make weather fail, others succeed
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('open-meteo.com')) {
+        return Promise.resolve({ ok: false, status: 503 });
+      }
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockHNIds) });
+      }
+      if (url.includes('hacker-news.firebaseio.com/v0/item/')) {
+        const id = parseInt(url.split('/item/')[1].split('.json')[0]);
+        const item = mockHNItems.find(i => i.id === id);
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(item || null) });
+      }
+      if (url.includes('reddit.com')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockRedditResponse) });
+      }
+      if (url.includes('arxiv.org')) {
+        return Promise.resolve({ ok: true, text: () => Promise.resolve(mockArxivXml) });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await generateDailyBriefing();
+
+    // Weather should show as unavailable
+    expect(result).toContain('Unavailable');
+    // Other sections should still work
+    expect(result).toContain('HN Story One');
+    expect(result).toContain('Reddit Post 1');
+    expect(result).toContain('Paper Alpha');
+  });
+
+  it('should handle all sections failing', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    }));
+
+    const result = await generateDailyBriefing();
+
+    expect(result).toContain('Daily Briefing');
+    expect(result).toContain('Unavailable');
+    // Should still not throw
+    expect(result).toContain('Updates every 15 minutes');
+  });
+
+  it('should clear cache when clearBriefingCache is called', async () => {
+    const mockFetch = setupAllMocks();
+
+    await generateDailyBriefing();
+    const callCount1 = mockFetch.mock.calls.length;
+
+    clearBriefingCache();
+    await generateDailyBriefing();
+    const callCount2 = mockFetch.mock.calls.length;
+
+    // After clearing cache, new fetch calls should be made
+    expect(callCount2).toBeGreaterThan(callCount1);
   });
 });

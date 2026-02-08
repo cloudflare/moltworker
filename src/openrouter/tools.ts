@@ -1020,6 +1020,203 @@ async function browseUrl(
 }
 
 /**
+ * Daily briefing cache (15-minute TTL)
+ */
+const BRIEFING_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+let briefingCache: { result: string; timestamp: number } | null = null;
+
+/**
+ * Briefing section result
+ */
+interface BriefingSection {
+  header: string;
+  content: string;
+  ok: boolean;
+}
+
+/**
+ * Generate a daily briefing by aggregating weather, news, and research data.
+ * Calls multiple APIs in parallel and formats results for Telegram.
+ *
+ * @param latitude - User latitude for weather (default: 50.08 = Prague)
+ * @param longitude - User longitude for weather (default: 14.44 = Prague)
+ * @param subreddit - Subreddit for Reddit section (default: technology)
+ * @param arxivCategory - arXiv category (default: cs.AI)
+ */
+export async function generateDailyBriefing(
+  latitude: string = '50.08',
+  longitude: string = '14.44',
+  subreddit: string = 'technology',
+  arxivCategory: string = 'cs.AI'
+): Promise<string> {
+  // Check cache
+  if (briefingCache && (Date.now() - briefingCache.timestamp) < BRIEFING_CACHE_TTL_MS) {
+    return briefingCache.result;
+  }
+
+  // Fetch all sections in parallel
+  const [weatherResult, hnResult, redditResult, arxivResult] = await Promise.allSettled([
+    fetchBriefingWeather(latitude, longitude),
+    fetchBriefingHN(),
+    fetchBriefingReddit(subreddit),
+    fetchBriefingArxiv(arxivCategory),
+  ]);
+
+  const sections: BriefingSection[] = [
+    extractSection(weatherResult, '\u2600\uFE0F Weather'),
+    extractSection(hnResult, '\uD83D\uDD25 HackerNews Top 5'),
+    extractSection(redditResult, `\uD83D\uDCAC Reddit r/${subreddit}`),
+    extractSection(arxivResult, `\uD83D\uDCDA arXiv ${arxivCategory}`),
+  ];
+
+  const date = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  let output = `\uD83D\uDCCB Daily Briefing \u2014 ${date}\n`;
+  output += '\u2500'.repeat(30) + '\n\n';
+
+  for (const section of sections) {
+    output += `${section.header}\n`;
+    if (section.ok) {
+      output += `${section.content}\n\n`;
+    } else {
+      output += `\u26A0\uFE0F Unavailable: ${section.content}\n\n`;
+    }
+  }
+
+  output += '\uD83D\uDD04 Updates every 15 minutes';
+
+  // Update cache
+  briefingCache = { result: output, timestamp: Date.now() };
+
+  return output;
+}
+
+/**
+ * Extract a section result from a settled promise
+ */
+function extractSection(
+  result: PromiseSettledResult<string>,
+  header: string
+): BriefingSection {
+  if (result.status === 'fulfilled') {
+    return { header, content: result.value, ok: true };
+  }
+  const error = result.reason instanceof Error ? result.reason.message : String(result.reason);
+  return { header, content: error, ok: false };
+}
+
+/**
+ * Fetch weather data formatted for briefing
+ */
+async function fetchBriefingWeather(latitude: string, longitude: string): Promise<string> {
+  const lat = parseFloat(latitude);
+  const lon = parseFloat(longitude);
+  const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto&forecast_days=3`;
+  const response = await fetch(apiUrl, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Weather API HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as OpenMeteoResponse;
+  const current = data.current_weather;
+  const weatherDesc = WMO_WEATHER_CODES[current.weathercode] || 'Unknown';
+
+  let output = `${weatherDesc}, ${current.temperature}\u00B0C, wind ${current.windspeed} km/h\n`;
+  const days = Math.min(data.daily.time.length, 3);
+  for (let i = 0; i < days; i++) {
+    const dayWeather = WMO_WEATHER_CODES[data.daily.weathercode[i]] || 'Unknown';
+    output += `  ${data.daily.time[i]}: ${data.daily.temperature_2m_min[i]}\u2013${data.daily.temperature_2m_max[i]}\u00B0C, ${dayWeather}\n`;
+  }
+
+  return output.trim();
+}
+
+/**
+ * Fetch top 5 HackerNews stories for briefing
+ */
+async function fetchBriefingHN(): Promise<string> {
+  const idsResponse = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!idsResponse.ok) throw new Error(`HN API HTTP ${idsResponse.status}`);
+
+  const allIds = await idsResponse.json() as number[];
+  const topIds = allIds.slice(0, 5);
+
+  const items = await Promise.all(
+    topIds.map(async (id) => {
+      const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
+        headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+      });
+      if (!response.ok) return null;
+      return response.json() as Promise<HNItem>;
+    })
+  );
+
+  return items
+    .filter((item): item is HNItem => item !== null && !!item.title)
+    .map((item, i) => `${i + 1}. ${item.title} (${item.score || 0}\u2B06)`)
+    .join('\n');
+}
+
+/**
+ * Fetch top 3 Reddit posts for briefing
+ */
+async function fetchBriefingReddit(subreddit: string): Promise<string> {
+  const url = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/top.json?limit=3&t=day`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) throw new Error(`Reddit API HTTP ${response.status}`);
+
+  const data = await response.json() as RedditListing;
+  return data.data.children
+    .map((child, i) => `${i + 1}. ${child.data.title} (${child.data.score}\u2B06, ${child.data.num_comments} comments)`)
+    .join('\n');
+}
+
+/**
+ * Fetch latest 3 arXiv papers for briefing
+ */
+async function fetchBriefingArxiv(category: string): Promise<string> {
+  const url = `https://export.arxiv.org/api/query?search_query=cat:${encodeURIComponent(category)}&sortBy=submittedDate&sortOrder=descending&max_results=3`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) throw new Error(`arXiv API HTTP ${response.status}`);
+
+  const xml = await response.text();
+  const entries: string[] = [];
+  const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+  let match;
+  while ((match = entryRegex.exec(xml)) !== null) {
+    const entry = match[1];
+    const title = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\s+/g, ' ').trim() || 'Untitled';
+    entries.push(`${entries.length + 1}. ${title}`);
+  }
+
+  return entries.length > 0 ? entries.join('\n') : 'No recent papers found';
+}
+
+/**
+ * Clear the briefing cache (for testing)
+ */
+export function clearBriefingCache(): void {
+  briefingCache = null;
+}
+
+/**
  * Tools available without browser binding (for Durable Objects)
  */
 export const TOOLS_WITHOUT_BROWSER: ToolDefinition[] = AVAILABLE_TOOLS.filter(
