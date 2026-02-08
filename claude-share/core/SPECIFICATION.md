@@ -34,7 +34,7 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 
 #### F0.2: Tool Calling
 - **Status:** ✅ Complete (5 tools, parallel execution)
-- **Tools:** `fetch_url`, `github_read_file`, `github_list_files`, `github_api`, `url_metadata`, `generate_chart`, `get_weather`, `fetch_news`, `browse_url`
+- **Tools:** `fetch_url`, `github_read_file`, `github_list_files`, `github_api`, `url_metadata`, `generate_chart`, `get_weather`, `fetch_news`, `convert_currency`, `browse_url`
 - **Execution:** Parallel via `Promise.all()`, max 10 iterations (Worker) or 100 (Durable Object)
 
 #### F0.3: Image Generation
@@ -143,6 +143,12 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 - **Sources:** `hackernews` (Firebase API), `reddit` (JSON API, configurable subreddit), `arxiv` (Atom XML, configurable category).
 - **API:** All 🟢 No auth — HN Firebase, Reddit JSON, arXiv Atom.
 - **Implementation:** `src/openrouter/tools.ts` — tool definition + `fetchNews()` dispatcher + 3 source handlers (parallel HN item fetches, Reddit JSON parsing, arXiv XML string parsing). 14 tests in `tools.test.ts`.
+
+#### F2.5.4: Currency Conversion Tool (ExchangeRate-API)
+- **Status:** ✅ Complete
+- **Spec:** New tool `convert_currency({ from, to, amount? })` returning formatted conversion result with rate.
+- **API:** `api.exchangerate-api.com/v4/latest/{FROM}` — 🟢 No auth, 150+ currencies.
+- **Implementation:** `src/openrouter/tools.ts` — tool definition + `convertCurrency()` handler with 3-letter code validation, 30-minute rate cache per source currency, positive amount validation. 14 tests in `tools.test.ts`.
 
 #### F2.5.7: Daily Briefing Aggregator
 - **Status:** ✅ Complete

@@ -18,6 +18,7 @@
 
 | Task ID | Description | Assignee | Status | Branch |
 |---------|-------------|----------|--------|--------|
+| 2.5.4 | Currency conversion tool | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | 2.5.7 | Daily briefing aggregator | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-3 | Pass think: override through DO path | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-4 | Fix /img image generation | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
@@ -28,7 +29,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Phase 2.5.7 + BUG-3/BUG-4 complete | `claude/daily-briefing-aggregator-NfHhi` | 2026-02-08 |
+| Claude | Phase 2.5.4 + 2.5.7 + BUG-3/BUG-4 complete | `claude/daily-briefing-aggregator-NfHhi` | 2026-02-08 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -56,6 +57,7 @@
 | 2.5.7 | Daily briefing aggregator | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-3 | think: override DO passthrough fix | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-4 | /img modalities fix | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
+| 2.5.4 | Currency conversion tool | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 
 ---
 
@@ -81,8 +83,7 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 2.5.4** — Currency conversion (ExchangeRate-API) (1h)
-2. **Phase 2.1** — Token/cost tracking (medium effort, high value)
+1. **Phase 2.1** — Token/cost tracking (medium effort, high value)
 3. **BUG-1** — "Processing complex task..." shown for ALL messages (UX polish)
 4. **BUG-2** — DeepSeek doesn't proactively use tools (system prompt hint)
 5. **BUG-5** — `/use fluxpro` + text → "No response" (UX routing)
@@ -93,4 +94,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 19 | Phase 0 complete, Phase 1.1-1.3 complete, upstream sync complete, Phase 2.5.1-2.5.3+2.5.5+2.5.7 complete, BUG-3+BUG-4 fixed, ahead of plan |
+| Sprint 1 (current) | 8 | 20 | Phase 0 complete, Phase 1.1-1.3 complete, upstream sync complete, Phase 2.5.1-2.5.5+2.5.7 complete, BUG-3+BUG-4 fixed, well ahead of plan |
