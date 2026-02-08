@@ -3,15 +3,15 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-07
+**Last Updated:** 2026-02-08
 
 ---
 
 ## Project Overview
 
 **Moltworker** is a multi-platform AI assistant gateway deployed on Cloudflare Workers. It provides:
-- 26+ AI models via OpenRouter + direct provider APIs
-- 5 tools (fetch_url, github_read_file, github_list_files, github_api, browse_url)
+- 30+ AI models via OpenRouter + direct provider APIs (with capability metadata)
+- 5 tools (fetch_url, github_read_file, github_list_files, github_api, browse_url) — parallel execution
 - Durable Objects for unlimited-time task execution
 - Multi-platform chat (Telegram, Discord, Slack)
 - Image generation (FLUX.2 models)
@@ -54,14 +54,26 @@
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
-| 1.1 | Implement parallel tool execution (`Promise.allSettled`) | 🔲 | Claude | `client.ts` L221-238, `task-processor.ts` L728-759 |
-| 1.2 | Enrich model capability metadata | 🔲 | Claude/Codex | Extend `ModelInfo` with `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext` |
+| 1.1 | Implement parallel tool execution (`Promise.all`) | ✅ | Claude | `client.ts` + `task-processor.ts` — concurrent execution of all tool_calls |
+| 1.2 | Enrich model capability metadata | ✅ | Claude | `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext` for all 30+ models |
 | 1.3 | Add configurable reasoning per model | 🔲 | Claude | Pass `reasoning` param to API based on model capability |
 | 1.4 | Combine vision + tools into unified method | 🔲 | Codex | Merge `chatCompletionWithVision` and `chatCompletionWithTools` |
 | 1.5 | Add structured output support | 🔲 | Claude | `response_format: { type: "json_schema" }` for compatible models |
 
 > 🧑 HUMAN CHECK 1.6: Test parallel tool execution with real API calls — ⏳ PENDING
 > 🧑 HUMAN CHECK 1.7: Verify reasoning control doesn't break existing models — ⏳ PENDING
+
+### Phase 1.5: Upstream Sync & Infrastructure (Completed)
+
+| ID | Task | Status | Owner | Notes |
+|----|------|--------|-------|-------|
+| 1.5.1 | Cherry-pick upstream exitCode fix (0c1b37d) | ✅ | Claude | `sync.ts` — fixes race condition in config file detection |
+| 1.5.2 | Cherry-pick container downgrade (92eb06a) | ✅ | Claude | `standard-4` → `standard-1` (~$26→$6/mo) |
+| 1.5.3 | Cherry-pick WebSocket token injection (73acb8a) | ✅ | Claude | Fixes CF Access users losing `?token=` after auth redirect |
+| 1.5.4 | Port AI Gateway model support (021a9ed) | ✅ | Claude | `CF_AI_GATEWAY_MODEL` env var for any provider/model |
+| 1.5.5 | Port channel config overwrite fix (fb6bc1e) | ✅ | Claude | Prevents stale R2 backup keys failing validation |
+| 1.5.6 | Port Anthropic config leak fix (1a3c118) | ✅ | Claude | Remove `console.log` of full config with secrets |
+| 1.5.7 | Port workspace sync to R2 (12eb483) | ✅ | Claude | Persists IDENTITY.md, MEMORY.md across restarts |
 
 ---
 
@@ -76,6 +88,31 @@
 
 > 🧑 HUMAN CHECK 2.5: Set up Acontext account and configure API key — ⏳ PENDING
 > 🧑 HUMAN CHECK 2.6: Review cost tracking accuracy against OpenRouter billing — ⏳ PENDING
+
+---
+
+### Phase 2.5: Free API Integration (Low effort, high value, $0 cost)
+
+> Based on [storia-free-apis-catalog.md](storia-free-apis-catalog.md). All APIs are free/no-auth or free-tier.
+> These can be implemented as new moltworker tools or Telegram/Discord commands.
+
+| ID | Task | Status | Owner | Effort | Notes |
+|----|------|--------|-------|--------|-------|
+| 2.5.1 | URL metadata tool (Microlink) | 🔲 | Any AI | 1h | Rich link previews in chat — title, description, image extraction. 🟢 No auth |
+| 2.5.2 | Chart image generation (QuickChart) | 🔲 | Any AI | 2h | Generate chart images for `/brief` command and data visualization. 🟢 No auth |
+| 2.5.3 | Weather tool (Open-Meteo) | 🔲 | Any AI | 2h | Full weather forecast, no key, no rate limits. 🟢 No auth |
+| 2.5.4 | Currency conversion tool (ExchangeRate-API) | 🔲 | Any AI | 1h | 150+ currencies, zero auth. 🟢 No auth |
+| 2.5.5 | HackerNews + Reddit + arXiv feeds | 🔲 | Any AI | 3h | Tech pulse, crypto sentiment, AI research. 🟢 No auth. New data sources for briefings |
+| 2.5.6 | Crypto expansion (CoinCap + DEX Screener + CoinPaprika) | 🔲 | Any AI | 4h | DeFi pairs + richer metadata beyond CoinGecko. 🟢 No auth |
+| 2.5.7 | Daily briefing aggregator | 🔲 | Claude | 6h | Combine weather + crypto + news + quotes into gecko-style morning briefing via Telegram |
+| 2.5.8 | Geolocation from IP (ipapi) | 🔲 | Any AI | 1h | Auto-detect timezone/location for regional relevance. 🟢 No auth |
+| 2.5.9 | Holiday awareness (Nager.Date) | 🔲 | Any AI | 1h | 100+ countries, adjust briefing tone on holidays. 🟢 No auth |
+| 2.5.10 | Quotes & personality (Quotable + Advice Slip) | 🔲 | Any AI | 2h | Enrich bot personality in daily briefings and idle responses. 🟢 No auth |
+
+**Total: ~23h = 10 new capabilities at $0/month cost.**
+
+> 🧑 HUMAN CHECK 2.5.11: Decide which free APIs to prioritize first — ⏳ PENDING
+> Recommended order: 2.5.1 (Microlink) → 2.5.2 (QuickChart) → 2.5.3 (Weather) → 2.5.5 (News feeds) → 2.5.7 (Daily briefing)
 
 ---
 
@@ -153,6 +190,7 @@
 | 1.6 | Test parallel tool execution with real APIs | ⏳ PENDING |
 | 1.7 | Verify reasoning control compatibility | ⏳ PENDING |
 | 2.5 | Set up Acontext account/API key | ⏳ PENDING |
+| 2.5.11 | Decide which free APIs to prioritize first | ⏳ PENDING |
 | 2.6 | Review cost tracking vs. OpenRouter billing | ⏳ PENDING |
 | 3.5 | Review learning data quality | ⏳ PENDING |
 | 4.5 | Validate Acontext context quality | ⏳ PENDING |
@@ -174,6 +212,9 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-08 | Claude Opus 4.6 (Session: 01Lg3st5TTU3gXnMqPxfCPpW) | docs: update all core docs — mark Phase 1.1/1.2 complete, add Phase 2.5 (free APIs), update sprint status | claude-share/core/*.md
+2026-02-08 | Claude Opus 4.6 (Session: 01Lg3st5TTU3gXnMqPxfCPpW) | feat(upstream): cherry-pick 7 upstream fixes — WS token, AI Gateway, channel config, workspace sync, exitCode, container downgrade, config leak | src/index.ts, src/types.ts, src/gateway/*.ts, start-moltbot.sh, Dockerfile, wrangler.jsonc, README.md
+2026-02-08 | Claude Opus 4.6 (Session: 01Lg3st5TTU3gXnMqPxfCPpW) | feat(tools): parallel tool execution + model capability metadata — Phase 1.1 + 1.2 complete | src/openrouter/client.ts, src/durable-objects/task-processor.ts, src/openrouter/models.ts
 2026-02-07 | Claude Opus 4.6 (Session: 011qMKSadt2zPFgn2GdTTyxH) | feat(models): add Pony Alpha, GPT-OSS-120B, GLM 4.7 — Phase 0 complete | src/openrouter/models.ts
 2026-02-06 | Claude Opus 4.6 (Session: 011qMKSadt2zPFgn2GdTTyxH) | docs: Create multi-AI orchestration documentation structure | claude-share/core/*.md, CLAUDE.md, AGENTS.md
 2026-02-06 | Claude Opus 4.6 (Session: 011qMKSadt2zPFgn2GdTTyxH) | docs: Add Compound Engineering Plugin analysis | brainstorming/tool-calling-analysis.md
@@ -187,25 +228,30 @@
 
 ```mermaid
 graph TD
-    P0[Phase 0: Quick Wins] --> P1[Phase 1: Tool-Calling Optimization]
+    P0[Phase 0: Quick Wins ✅] --> P1[Phase 1: Tool-Calling ✅/🔄]
+    P0 --> P15[Phase 1.5: Upstream Sync ✅]
     P1 --> P2[Phase 2: Observability & Costs]
+    P1 --> P25[Phase 2.5: Free APIs 🔲]
     P1 --> P3[Phase 3: Compound Engineering]
     P2 --> P4[Phase 4: Context Engineering]
     P3 --> P4
     P4 --> P5[Phase 5: Advanced Capabilities]
     P5 --> P6[Phase 6: Platform Expansion]
+    P25 --> P6
 
-    subgraph "Phase 0 (Trivial)"
-        P0_1[0.1 Gemini Flash tools]
-        P0_2[0.2 GPT-OSS-120B]
-        P0_3[0.3 GLM 4.7]
+    subgraph "Phase 1 (1.1-1.2 ✅)"
+        P1_1[1.1 Parallel tools ✅]
+        P1_2[1.2 Model metadata ✅]
+        P1_3[1.3 Reasoning control 🔲]
+        P1_4[1.4 Vision + tools 🔲]
     end
 
-    subgraph "Phase 1 (Low-Medium)"
-        P1_1[1.1 Parallel tools]
-        P1_2[1.2 Model metadata]
-        P1_3[1.3 Reasoning control]
-        P1_4[1.4 Vision + tools]
+    subgraph "Phase 2.5: Free APIs ($0 cost)"
+        P25_1[2.5.1 URL metadata - Microlink]
+        P25_2[2.5.2 Charts - QuickChart]
+        P25_3[2.5.3 Weather - Open-Meteo]
+        P25_5[2.5.5 News feeds - HN/Reddit/arXiv]
+        P25_7[2.5.7 Daily briefing aggregator]
     end
 
     subgraph "Phase 2 (Medium)"
@@ -218,23 +264,14 @@ graph TD
         P3_2[3.2 Task phases]
     end
 
-    subgraph "Phase 4 (Medium-High)"
-        P4_1[4.1 Acontext context]
-        P4_3[4.3 Tool caching]
-    end
-
-    subgraph "Phase 5 (High)"
-        P5_1[5.1 Multi-agent review]
-        P5_2[5.2 MCP integration]
-        P5_3[5.3 Code execution]
-    end
-
-    P0_1 --> P1_2
-    P0_2 --> P1_2
-    P1_1 --> P5_1
+    P1_1 --> P5_1[5.1 Multi-agent review]
     P1_2 --> P1_3
     P1_2 --> P2_1
-    P2_3 --> P4_1
+    P25_1 --> P25_7
+    P25_2 --> P25_7
+    P25_3 --> P25_7
+    P25_5 --> P25_7
+    P2_3 --> P4
     P3_1 --> P3_2
     P3_2 --> P5_1
 ```
@@ -244,6 +281,7 @@ graph TD
 ## References
 
 - [Tool-Calling Analysis](../../brainstorming/tool-calling-analysis.md) — Full analysis with 10 gaps and 13 recommendations
+- [Free APIs Catalog](storia-free-apis-catalog.md) — 25+ free APIs for zero-cost feature expansion
 - [Future Integrations](../../brainstorming/future-integrations.md) — Original roadmap (pre-analysis)
 - [README](../../README.md) — User-facing documentation
 - [AGENTS.md](../../AGENTS.md) — Developer/AI agent instructions

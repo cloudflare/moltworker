@@ -2,8 +2,8 @@
 
 > Product vision, feature specifications, and technical requirements.
 
-**Last Updated:** 2026-02-06
-**Version:** 2.0 (post-analysis)
+**Last Updated:** 2026-02-08
+**Version:** 2.1 (post-implementation + free APIs)
 
 ---
 
@@ -27,14 +27,15 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 
 #### F0.1: Multi-Model Chat
 - **Status:** ✅ Complete
-- **Description:** 26+ models accessible via aliases (`/deep`, `/sonnet`, `/grok`, etc.)
-- **Models:** OpenRouter (20+) + Direct APIs (DashScope, Moonshot, DeepSeek)
+- **Description:** 30+ models accessible via aliases (`/deep`, `/sonnet`, `/grok`, etc.)
+- **Models:** OpenRouter (26+) + Direct APIs (DashScope, Moonshot, DeepSeek)
 - **Interface:** Telegram, Discord, Slack, Web UI (via OpenClaw)
+- **Capability metadata:** Each model tagged with `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext`
 
 #### F0.2: Tool Calling
-- **Status:** ✅ Complete (5 tools)
+- **Status:** ✅ Complete (5 tools, parallel execution)
 - **Tools:** `fetch_url`, `github_read_file`, `github_list_files`, `github_api`, `browse_url`
-- **Execution:** Sequential, single-model, max 10 iterations (Worker) or 100 (Durable Object)
+- **Execution:** Parallel via `Promise.all()`, max 10 iterations (Worker) or 100 (Durable Object)
 
 #### F0.3: Image Generation
 - **Status:** ✅ Complete
@@ -51,26 +52,24 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 ### Phase 1: Tool-Calling Intelligence
 
 #### F1.1: Parallel Tool Execution
-- **Status:** 🔲 Planned
-- **Spec:** When a model returns multiple `tool_calls`, execute independent calls concurrently via `Promise.allSettled()`.
-- **Dependency detection:** Tools with output→input dependencies (e.g., `github_read_file` result used in `github_api` body) must remain sequential. Initial implementation: parallelize ALL calls (models already handle ordering).
-- **Metric:** Measure iteration time reduction (target: 2-5x for multi-tool iterations).
+- **Status:** ✅ Complete
+- **Spec:** When a model returns multiple `tool_calls`, all calls execute concurrently via `Promise.all()`.
+- **Implementation:** Both `client.ts` (Worker) and `task-processor.ts` (Durable Object) parallelized.
+- **Metric:** 2-5x faster for multi-tool iterations. Logging shows total parallel time vs individual tool times.
 
 #### F1.2: Model Capability Metadata
-- **Status:** 🔲 Planned
-- **Spec:** Extend `ModelInfo` interface:
+- **Status:** ✅ Complete
+- **Spec:** Extended `ModelInfo` interface with 4 new fields, populated for all 30+ models:
   ```typescript
   interface ModelInfo {
     // ... existing fields
     parallelCalls?: boolean;
     structuredOutput?: boolean;
     reasoning?: 'none' | 'fixed' | 'configurable';
-    reasoningLevels?: string[];  // e.g., ['minimal', 'low', 'medium', 'high']
     maxContext?: number;          // tokens
-    specialties?: string[];      // 'coding', 'research', 'agentic', etc.
   }
   ```
-- **Usage:** Tool dispatch, model recommendation, cost optimization.
+- **Usage:** Enables future intelligent model routing and reasoning control (F1.3).
 
 #### F1.3: Configurable Reasoning
 - **Status:** 🔲 Planned
@@ -110,6 +109,36 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 - **Status:** 🔲 Planned
 - **Spec:** Store all task processor messages in Acontext Sessions. Link admin dashboard to Acontext for session replay and success rate tracking.
 - **Dependency:** Acontext API key (human setup).
+
+---
+
+### Phase 2.5: Free API Integration
+
+> All APIs below require zero cost and zero or free-tier auth. See [storia-free-apis-catalog.md](storia-free-apis-catalog.md).
+
+#### F2.5.1: URL Metadata Tool (Microlink)
+- **Status:** 🔲 Planned
+- **Spec:** New tool `url_metadata({ url: string })` returning title, description, image, author from any URL.
+- **API:** `api.microlink.io/?url=<url>` — 🟢 No auth, free tier.
+- **Effort:** 1h. Enhances existing `fetch_url` with structured metadata extraction.
+
+#### F2.5.2: Chart Image Generation (QuickChart)
+- **Status:** 🔲 Planned
+- **Spec:** New tool `generate_chart({ type, labels, data })` returning chart image URL.
+- **API:** `quickchart.io/chart?c=<config>` — 🟢 No auth.
+- **Effort:** 2h. Enables data visualization in Telegram `/brief` and Discord digests.
+
+#### F2.5.3: Weather Tool (Open-Meteo)
+- **Status:** 🔲 Planned
+- **Spec:** New tool `get_weather({ latitude, longitude })` returning current conditions + 7-day forecast.
+- **API:** `api.open-meteo.com/v1/forecast` — 🟢 No auth, no rate limits.
+- **Effort:** 2h.
+
+#### F2.5.7: Daily Briefing Aggregator
+- **Status:** 🔲 Planned
+- **Spec:** Telegram `/brief` command combining weather + crypto + news + quotes into a single formatted message.
+- **Dependencies:** F2.5.1-F2.5.6 (individual data sources).
+- **Effort:** 6h (aggregator + formatting + Telegram command).
 
 ---
 
