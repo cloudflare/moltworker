@@ -197,6 +197,19 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  // SPECIAL CASE: Allow WebSocket connections with valid gateway token to bypass CF Access
+  // This is critical for CLI/TUI tools that cannot perform interactive CF Access login
+  const url = new URL(c.req.url);
+  const isWebSocket = c.req.header('Upgrade')?.toLowerCase() === 'websocket';
+  const hasGatewayToken = url.searchParams.has('token') &&
+    url.searchParams.get('token') === c.env.MOLTBOT_GATEWAY_TOKEN;
+
+  if (isWebSocket && hasGatewayToken) {
+    console.log('[AUTH] WebSocket with valid gateway token - bypassing Cloudflare Access');
+    c.set('accessUser', { email: 'cli-user', name: 'CLI User' });
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
