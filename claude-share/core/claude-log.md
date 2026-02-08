@@ -4,6 +4,43 @@
 
 ---
 
+## Session: 2026-02-08 | Phase 2.5.1: URL Metadata Tool (Session: 01Wjud3VHKMfSRbvMTzFohGS)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/review-moltworker-roadmap-q5aqD`
+**Status:** Completed
+
+### Summary
+Implemented Phase 2.5.1: new `url_metadata` tool using the free Microlink API. The tool extracts structured metadata (title, description, image, author, publisher, date) from any URL, complementing the existing `fetch_url` tool which returns raw content.
+
+### Changes Made
+1. **New `url_metadata` tool definition** — Added to `AVAILABLE_TOOLS` array with proper schema
+2. **Execution handler** — `urlMetadata()` function calls `api.microlink.io`, validates URL, handles errors gracefully
+3. **Switch case** — Added `url_metadata` to `executeTool()` dispatcher
+4. **MicrolinkResponse interface** — Typed API response shape
+5. **Comprehensive test suite** — 9 tests covering success, missing fields, API failure, HTTP errors, invalid URL, invalid JSON, URL encoding
+6. **Documentation updates** — Updated GLOBAL_ROADMAP, WORK_STATUS, next_prompt, claude-log
+
+### Files Modified
+- `src/openrouter/tools.ts` (tool definition + execution handler)
+- `src/openrouter/tools.test.ts` (new, 9 tests)
+- `claude-share/core/GLOBAL_ROADMAP.md`
+- `claude-share/core/WORK_STATUS.md`
+- `claude-share/core/next_prompt.md`
+- `claude-share/core/claude-log.md`
+
+### Tests
+- [x] All 93 tests pass (9 new for url_metadata)
+- [x] Typecheck: no new errors (pre-existing errors in task-processor.ts and telegram/handler.ts unchanged)
+
+### Notes for Next Session
+- Phase 2.5.1 complete. Tool count now: 6 (was 5)
+- **Next priority: Phase 2.5.2** — Chart image generation via QuickChart
+- See `next_prompt.md` for ready-to-copy task prompt
+- The `url_metadata` tool is automatically included in `TOOLS_WITHOUT_BROWSER` since the filter only excludes `browse_url`
+
+---
+
 ## Session: 2026-02-08 | Phase 1 Implementation + Upstream Sync + Free API Planning (Session: 01Lg3st5TTU3gXnMqPxfCPpW)
 
 **AI:** Claude Opus 4.6

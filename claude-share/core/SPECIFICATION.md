@@ -117,10 +117,10 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 > All APIs below require zero cost and zero or free-tier auth. See [storia-free-apis-catalog.md](storia-free-apis-catalog.md).
 
 #### F2.5.1: URL Metadata Tool (Microlink)
-- **Status:** 🔲 Planned
-- **Spec:** New tool `url_metadata({ url: string })` returning title, description, image, author from any URL.
+- **Status:** ✅ Complete
+- **Spec:** New tool `url_metadata({ url: string })` returning title, description, image, author, publisher, date from any URL.
 - **API:** `api.microlink.io/?url=<url>` — 🟢 No auth, free tier.
-- **Effort:** 1h. Enhances existing `fetch_url` with structured metadata extraction.
+- **Implementation:** `src/openrouter/tools.ts` — tool definition + `urlMetadata()` handler. 9 tests in `tools.test.ts`.
 
 #### F2.5.2: Chart Image Generation (QuickChart)
 - **Status:** 🔲 Planned

@@ -154,6 +154,23 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'url_metadata',
+      description: 'Extract metadata (title, description, image, author, publisher, date) from a URL. Use this when you need structured info about a webpage rather than its full content.',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'The URL to extract metadata from',
+          },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browse_url',
       description: 'Browse a URL using a real browser. Use this for JavaScript-rendered pages, screenshots, or when fetch_url fails. Returns text content by default, or a screenshot/PDF.',
       parameters: {
@@ -216,6 +233,9 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'github_api':
         result = await githubApi(args.endpoint, args.method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', args.body, githubToken);
+        break;
+      case 'url_metadata':
+        result = await urlMetadata(args.url);
         break;
       case 'browse_url':
         result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
@@ -401,6 +421,70 @@ async function githubApi(
   } catch {
     return responseText;
   }
+}
+
+/**
+ * Microlink API response shape
+ */
+interface MicrolinkResponse {
+  status: string;
+  message?: string;
+  data: {
+    title?: string;
+    description?: string;
+    image?: { url?: string };
+    author?: string;
+    publisher?: string;
+    date?: string;
+  };
+}
+
+/**
+ * Extract metadata from a URL using the Microlink API
+ */
+async function urlMetadata(url: string): Promise<string> {
+  // Validate URL
+  try {
+    new URL(url);
+  } catch {
+    throw new Error(`Invalid URL: ${url}`);
+  }
+
+  const apiUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}`;
+  const response = await fetch(apiUrl, {
+    headers: {
+      'User-Agent': 'MoltworkerBot/1.0',
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Microlink API error: HTTP ${response.status}`);
+  }
+
+  const result = await response.json() as MicrolinkResponse;
+
+  if (result.status !== 'success') {
+    return `Error: ${result.message || 'Failed to extract metadata'}`;
+  }
+
+  const { title, description, image, author, publisher, date } = result.data;
+  const metadata = {
+    title: title || null,
+    description: description || null,
+    image: image?.url || null,
+    author: author || null,
+    publisher: publisher || null,
+    date: date || null,
+  };
+
+  const output = JSON.stringify(metadata, null, 2);
+
+  // Truncate if unexpectedly large
+  if (output.length > 50000) {
+    return output.slice(0, 50000) + '\n\n[Content truncated - exceeded 50KB]';
+  }
+
+  return output;
 }
 
 /**
