@@ -405,3 +405,204 @@ describe('generate_chart tool', () => {
     }
   });
 });
+
+describe('get_weather tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const mockWeatherResponse = {
+    current_weather: {
+      temperature: 22.5,
+      windspeed: 12.3,
+      weathercode: 2,
+      time: '2026-02-08T14:00',
+    },
+    daily: {
+      time: ['2026-02-08', '2026-02-09', '2026-02-10'],
+      temperature_2m_max: [24.0, 26.1, 23.5],
+      temperature_2m_min: [18.0, 19.2, 17.8],
+      weathercode: [2, 61, 0],
+    },
+    timezone: 'Europe/Prague',
+  };
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'get_weather');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['latitude', 'longitude']);
+  });
+
+  it('should be included in TOOLS_WITHOUT_BROWSER', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'get_weather');
+    expect(tool).toBeDefined();
+  });
+
+  it('should return formatted weather on success', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockWeatherResponse),
+    }));
+
+    const result = await executeTool({
+      id: 'weather_1',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '50.08', longitude: '14.44' }),
+      },
+    });
+
+    expect(result.role).toBe('tool');
+    expect(result.tool_call_id).toBe('weather_1');
+    expect(result.content).toContain('Europe/Prague');
+    expect(result.content).toContain('Partly cloudy');
+    expect(result.content).toContain('22.5');
+    expect(result.content).toContain('12.3 km/h');
+    expect(result.content).toContain('2026-02-08');
+    expect(result.content).toContain('2026-02-09');
+    expect(result.content).toContain('Slight rain');
+    expect(result.content).toContain('Clear sky');
+  });
+
+  it('should construct correct API URL', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockWeatherResponse),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({
+      id: 'weather_2',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '48.8566', longitude: '2.3522' }),
+      },
+    });
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('api.open-meteo.com');
+    expect(calledUrl).toContain('latitude=48.8566');
+    expect(calledUrl).toContain('longitude=2.3522');
+    expect(calledUrl).toContain('current_weather=true');
+    expect(calledUrl).toContain('daily=');
+  });
+
+  it('should reject latitude out of range (too high)', async () => {
+    const result = await executeTool({
+      id: 'weather_3',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '91', longitude: '0' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing get_weather');
+    expect(result.content).toContain('Invalid latitude');
+  });
+
+  it('should reject latitude out of range (too low)', async () => {
+    const result = await executeTool({
+      id: 'weather_4',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '-91', longitude: '0' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing get_weather');
+    expect(result.content).toContain('Invalid latitude');
+  });
+
+  it('should reject longitude out of range', async () => {
+    const result = await executeTool({
+      id: 'weather_5',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '0', longitude: '181' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing get_weather');
+    expect(result.content).toContain('Invalid longitude');
+  });
+
+  it('should reject non-numeric latitude', async () => {
+    const result = await executeTool({
+      id: 'weather_6',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: 'abc', longitude: '0' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing get_weather');
+    expect(result.content).toContain('Invalid latitude');
+  });
+
+  it('should handle Open-Meteo API HTTP errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    }));
+
+    const result = await executeTool({
+      id: 'weather_7',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '50', longitude: '14' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing get_weather');
+    expect(result.content).toContain('Open-Meteo API error: HTTP 500');
+  });
+
+  it('should accept boundary coordinates', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockWeatherResponse),
+    }));
+
+    // Extreme valid values
+    const result = await executeTool({
+      id: 'weather_8',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '-90', longitude: '-180' }),
+      },
+    });
+
+    expect(result.content).toContain('Current weather');
+  });
+
+  it('should handle unknown weather codes gracefully', async () => {
+    const unknownCodeResponse = {
+      ...mockWeatherResponse,
+      current_weather: { ...mockWeatherResponse.current_weather, weathercode: 999 },
+    };
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(unknownCodeResponse),
+    }));
+
+    const result = await executeTool({
+      id: 'weather_9',
+      type: 'function',
+      function: {
+        name: 'get_weather',
+        arguments: JSON.stringify({ latitude: '50', longitude: '14' }),
+      },
+    });
+
+    expect(result.content).toContain('Unknown');
+  });
+});

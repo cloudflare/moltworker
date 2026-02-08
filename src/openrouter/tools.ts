@@ -197,6 +197,27 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'get_weather',
+      description: 'Get current weather and 7-day forecast for a location. Provide latitude and longitude coordinates.',
+      parameters: {
+        type: 'object',
+        properties: {
+          latitude: {
+            type: 'string',
+            description: 'Latitude (-90 to 90)',
+          },
+          longitude: {
+            type: 'string',
+            description: 'Longitude (-180 to 180)',
+          },
+        },
+        required: ['latitude', 'longitude'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browse_url',
       description: 'Browse a URL using a real browser. Use this for JavaScript-rendered pages, screenshots, or when fetch_url fails. Returns text content by default, or a screenshot/PDF.',
       parameters: {
@@ -265,6 +286,9 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'generate_chart':
         result = await generateChart(args.type, args.labels, args.datasets);
+        break;
+      case 'get_weather':
+        result = await getWeather(args.latitude, args.longitude);
         break;
       case 'browse_url':
         result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
@@ -569,6 +593,99 @@ async function generateChart(
   }
 
   return chartUrl;
+}
+
+/**
+ * WMO Weather Interpretation Codes (WW)
+ * https://www.noaa.gov/weather
+ */
+const WMO_WEATHER_CODES: Record<number, string> = {
+  0: 'Clear sky',
+  1: 'Mainly clear',
+  2: 'Partly cloudy',
+  3: 'Overcast',
+  45: 'Fog',
+  48: 'Depositing rime fog',
+  51: 'Light drizzle',
+  53: 'Moderate drizzle',
+  55: 'Dense drizzle',
+  56: 'Light freezing drizzle',
+  57: 'Dense freezing drizzle',
+  61: 'Slight rain',
+  63: 'Moderate rain',
+  65: 'Heavy rain',
+  66: 'Light freezing rain',
+  67: 'Heavy freezing rain',
+  71: 'Slight snow fall',
+  73: 'Moderate snow fall',
+  75: 'Heavy snow fall',
+  77: 'Snow grains',
+  80: 'Slight rain showers',
+  81: 'Moderate rain showers',
+  82: 'Violent rain showers',
+  85: 'Slight snow showers',
+  86: 'Heavy snow showers',
+  95: 'Thunderstorm',
+  96: 'Thunderstorm with slight hail',
+  99: 'Thunderstorm with heavy hail',
+};
+
+/**
+ * Open-Meteo API response shape
+ */
+interface OpenMeteoResponse {
+  current_weather: {
+    temperature: number;
+    windspeed: number;
+    weathercode: number;
+    time: string;
+  };
+  daily: {
+    time: string[];
+    temperature_2m_max: number[];
+    temperature_2m_min: number[];
+    weathercode: number[];
+  };
+  timezone: string;
+}
+
+/**
+ * Get weather forecast from Open-Meteo API
+ */
+async function getWeather(latitude: string, longitude: string): Promise<string> {
+  const lat = parseFloat(latitude);
+  const lon = parseFloat(longitude);
+
+  if (isNaN(lat) || lat < -90 || lat > 90) {
+    throw new Error(`Invalid latitude: ${latitude}. Must be between -90 and 90`);
+  }
+  if (isNaN(lon) || lon < -180 || lon > 180) {
+    throw new Error(`Invalid longitude: ${longitude}. Must be between -180 and 180`);
+  }
+
+  const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto`;
+  const response = await fetch(apiUrl, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Open-Meteo API error: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as OpenMeteoResponse;
+  const current = data.current_weather;
+  const weatherDesc = WMO_WEATHER_CODES[current.weathercode] || 'Unknown';
+
+  let output = `Current weather (${data.timezone}):\n`;
+  output += `${weatherDesc}, ${current.temperature}\u00B0C, wind ${current.windspeed} km/h\n`;
+  output += `\n7-day forecast:\n`;
+
+  for (let i = 0; i < data.daily.time.length; i++) {
+    const dayWeather = WMO_WEATHER_CODES[data.daily.weathercode[i]] || 'Unknown';
+    output += `${data.daily.time[i]}: ${data.daily.temperature_2m_min[i]}\u2013${data.daily.temperature_2m_max[i]}\u00B0C, ${dayWeather}\n`;
+  }
+
+  return output;
 }
 
 /**

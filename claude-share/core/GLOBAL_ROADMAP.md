@@ -100,7 +100,7 @@
 |----|------|--------|-------|--------|-------|
 | 2.5.1 | URL metadata tool (Microlink) | ✅ | Claude | 1h | Rich link previews in chat — title, description, image extraction. 🟢 No auth |
 | 2.5.2 | Chart image generation (QuickChart) | ✅ | Claude | 2h | Generate chart images for `/brief` command and data visualization. 🟢 No auth |
-| 2.5.3 | Weather tool (Open-Meteo) | 🔲 | Any AI | 2h | Full weather forecast, no key, no rate limits. 🟢 No auth |
+| 2.5.3 | Weather tool (Open-Meteo) | ✅ | Claude | 2h | Full weather forecast, no key, no rate limits. 🟢 No auth |
 | 2.5.4 | Currency conversion tool (ExchangeRate-API) | 🔲 | Any AI | 1h | 150+ currencies, zero auth. 🟢 No auth |
 | 2.5.5 | HackerNews + Reddit + arXiv feeds | 🔲 | Any AI | 3h | Tech pulse, crypto sentiment, AI research. 🟢 No auth. New data sources for briefings |
 | 2.5.6 | Crypto expansion (CoinCap + DEX Screener + CoinPaprika) | 🔲 | Any AI | 4h | DeFi pairs + richer metadata beyond CoinGecko. 🟢 No auth |
@@ -212,6 +212,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add get_weather tool via Open-Meteo API — Phase 2.5.3 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add generate_chart tool via QuickChart API — Phase 2.5.2 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add url_metadata tool via Microlink API — Phase 2.5.1 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Lg3st5TTU3gXnMqPxfCPpW) | docs: update all core docs — mark Phase 1.1/1.2 complete, add Phase 2.5 (free APIs), update sprint status | claude-share/core/*.md

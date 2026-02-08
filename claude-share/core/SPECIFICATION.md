@@ -129,10 +129,10 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 - **Implementation:** `src/openrouter/tools.ts` — tool definition + `generateChart()` handler with type/JSON validation + HEAD check. 12 tests in `tools.test.ts`.
 
 #### F2.5.3: Weather Tool (Open-Meteo)
-- **Status:** 🔲 Planned
-- **Spec:** New tool `get_weather({ latitude, longitude })` returning current conditions + 7-day forecast.
+- **Status:** ✅ Complete
+- **Spec:** New tool `get_weather({ latitude, longitude })` returning current conditions + 7-day forecast with WMO weather code descriptions.
 - **API:** `api.open-meteo.com/v1/forecast` — 🟢 No auth, no rate limits.
-- **Effort:** 2h.
+- **Implementation:** `src/openrouter/tools.ts` — tool definition + `getWeather()` handler + WMO_WEATHER_CODES mapping (28 codes). 11 tests in `tools.test.ts`.
 
 #### F2.5.7: Daily Briefing Aggregator
 - **Status:** 🔲 Planned
