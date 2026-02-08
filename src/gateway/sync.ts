@@ -2,6 +2,7 @@ import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH } from '../config';
 import { mountR2Storage } from './r2';
+import { findExistingMoltbotProcess } from './process';
 import { waitForProcess } from './utils';
 
 export interface SyncResult {
@@ -29,6 +30,69 @@ export interface SyncResult {
  * @param env - Worker environment bindings
  * @returns SyncResult with success status and optional error details
  */
+async function runDiagnosticCmd(sandbox: Sandbox, cmd: string): Promise<string> {
+  const proc = await sandbox.startProcess(cmd);
+  await waitForProcess(proc, 5000);
+  const logs = await proc.getLogs();
+  return (logs.stdout || '').trim();
+}
+
+async function diagnoseConfigMissing(sandbox: Sandbox): Promise<string> {
+  const parts: string[] = [];
+
+  // Check if the gateway process is running
+  const gateway = await findExistingMoltbotProcess(sandbox);
+  if (!gateway) {
+    parts.push('Gateway process is not running — config has not been created yet.');
+    return parts.join(' | ');
+  }
+
+  parts.push(`Gateway running (${gateway.id}, status: ${gateway.status})`);
+
+  // Get gateway logs for clues (did onboard or patching fail?)
+  try {
+    const logs = await gateway.getLogs();
+    const stderr = logs.stderr?.trim();
+    if (stderr) {
+      parts.push(`Gateway stderr: ${stderr.slice(0, 300)}`);
+    }
+  } catch {
+    // getLogs may not be available on all process types
+  }
+
+  // Check local config directory contents
+  try {
+    const localLs = await runDiagnosticCmd(sandbox, 'ls -la /root/.openclaw/ 2>&1');
+    parts.push(`Local /root/.openclaw/: ${localLs.slice(0, 300)}`);
+  } catch {
+    parts.push('Local /root/.openclaw/: failed to list');
+  }
+
+  // Check R2 backup directory contents
+  try {
+    const r2Ls = await runDiagnosticCmd(
+      sandbox,
+      `ls -la ${R2_MOUNT_PATH}/openclaw/ 2>&1; echo "---"; ls -la ${R2_MOUNT_PATH}/clawdbot/ 2>&1`,
+    );
+    parts.push(`R2 backups: ${r2Ls.slice(0, 300)}`);
+  } catch {
+    parts.push('R2 backups: failed to list');
+  }
+
+  // Check R2 mount health (can we actually read from it?)
+  try {
+    const mountTest = await runDiagnosticCmd(
+      sandbox,
+      `cat ${R2_MOUNT_PATH}/.last-sync 2>&1 || echo "no .last-sync file"`,
+    );
+    parts.push(`R2 .last-sync: ${mountTest.slice(0, 100)}`);
+  } catch {
+    parts.push('R2 mount: unresponsive');
+  }
+
+  return parts.join(' | ');
+}
+
 export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
   // Check if R2 is configured
   if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
@@ -54,10 +118,12 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
       if (checkLegacy.exitCode === 0) {
         configDir = '/root/.clawdbot';
       } else {
+        // Gather diagnostics to explain why config is missing
+        const diagnostics = await diagnoseConfigMissing(sandbox);
         return {
           success: false,
           error: 'Sync aborted: no config file found',
-          details: 'Neither openclaw.json nor clawdbot.json found in config directory.',
+          details: diagnostics,
         };
       }
     }

@@ -248,6 +248,18 @@ adminApi.get('/storage', async (c) => {
 adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
 
+  // Check if the gateway is running before attempting sync
+  const gatewayProcess = await findExistingMoltbotProcess(sandbox);
+  if (!gatewayProcess) {
+    return c.json(
+      {
+        success: false,
+        error: 'Gateway not running yet, nothing to sync',
+      },
+      409,
+    );
+  }
+
   const result = await syncToR2(sandbox, c.env);
 
   if (result.success) {
@@ -257,7 +269,9 @@ adminApi.post('/storage/sync', async (c) => {
       lastSync: result.lastSync,
     });
   } else {
-    const status = result.error?.includes('not configured') ? 400 : 500;
+    const isClientError =
+      result.error?.includes('not configured') || result.error?.includes('Sync aborted');
+    const status = isClientError ? 400 : 500;
     return c.json(
       {
         success: false,

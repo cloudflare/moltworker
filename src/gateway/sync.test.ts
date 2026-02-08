@@ -39,7 +39,7 @@ describe('syncToR2', () => {
   });
 
   describe('sanity checks', () => {
-    it('returns error when source has no config file', async () => {
+    it('returns error with diagnostics when config file missing and gateway not running', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       startProcessMock
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
@@ -52,6 +52,33 @@ describe('syncToR2', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sync aborted: no config file found');
+      expect(result.details).toContain('Gateway process is not running');
+    });
+
+    it('returns error with diagnostics when config file missing but gateway is running', async () => {
+      const { sandbox, startProcessMock, listProcessesMock } = createMockSandbox();
+      listProcessesMock.mockResolvedValue([
+        { command: 'start-openclaw.sh', status: 'running', id: 'proc_123' },
+      ]);
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })) // No openclaw.json
+        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })) // No clawdbot.json
+        // Diagnostic commands:
+        .mockResolvedValueOnce(createMockProcess('total 0')) // ls /root/.openclaw/
+        .mockResolvedValueOnce(createMockProcess('No such file or directory')) // ls R2 backups
+        .mockResolvedValueOnce(createMockProcess('no .last-sync file')); // cat .last-sync
+
+      const env = createMockEnvWithR2();
+
+      const result = await syncToR2(sandbox, env);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Sync aborted: no config file found');
+      expect(result.details).toContain('Gateway running');
+      expect(result.details).toContain('proc_123');
+      expect(result.details).toContain('Local /root/.openclaw/');
+      expect(result.details).toContain('R2 backups');
     });
   });
 
