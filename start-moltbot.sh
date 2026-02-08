@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v61 - Kill stale processes on startup
-# Cache bust: 2026-02-08-v61-process-guard
+# OpenClaw Startup Script v62 - Fix cron registration syntax
+# Cache bust: 2026-02-08-v62-cron-fix
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -206,10 +206,19 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
 
         # Register autonomous study cron (every 6 hours) if Serper API is available
         if [ -n "$SERPER_API_KEY" ] && [ -f "$STUDY_SCRIPT" ]; then
-          echo "[STUDY] Registering autonomous study cron job..."
-          openclaw cron add "auto-study" "0 */6 * * *" "node $STUDY_SCRIPT" 2>/dev/null \
-            || echo "[WARN] Study cron registration failed (may already exist)"
-          echo "[STUDY] Study cron registered (every 6 hours)"
+          # Check if auto-study cron already exists
+          if ! openclaw cron list 2>/dev/null | grep -q "auto-study"; then
+            echo "[STUDY] Registering autonomous study cron job..."
+            openclaw cron add \
+              --name "auto-study" \
+              --every "6h" \
+              --session isolated \
+              --message "Run autonomous study session: execute node /root/clawd/skills/web-researcher/scripts/study-session.js and summarize the output. Save key findings to your memory." \
+              2>/dev/null || echo "[WARN] Study cron registration failed"
+            echo "[STUDY] Study cron registered (every 6 hours)"
+          else
+            echo "[STUDY] auto-study cron already exists, skipping"
+          fi
         fi
         break
       fi
