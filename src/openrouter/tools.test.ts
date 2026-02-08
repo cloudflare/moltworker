@@ -606,3 +606,336 @@ describe('get_weather tool', () => {
     expect(result.content).toContain('Unknown');
   });
 });
+
+describe('fetch_news tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'fetch_news');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['source']);
+    expect(tool!.function.parameters.properties.source.enum).toEqual(['hackernews', 'reddit', 'arxiv']);
+  });
+
+  it('should be included in TOOLS_WITHOUT_BROWSER', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'fetch_news');
+    expect(tool).toBeDefined();
+  });
+
+  it('should reject invalid source', async () => {
+    const result = await executeTool({
+      id: 'news_1',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'invalid_source' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing fetch_news');
+    expect(result.content).toContain('Invalid source');
+  });
+
+  // --- HackerNews tests ---
+
+  it('should fetch HackerNews top stories', async () => {
+    const mockIds = [1, 2, 3];
+    const mockItems = [
+      { id: 1, title: 'Story One', url: 'https://example.com/1', score: 100, by: 'user1', descendants: 50 },
+      { id: 2, title: 'Story Two', url: 'https://example.com/2', score: 200, by: 'user2', descendants: 75 },
+      { id: 3, title: 'Story Three', url: 'https://example.com/3', score: 150, by: 'user3', descendants: 30 },
+    ];
+
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockIds) });
+      }
+      const id = parseInt(url.split('/item/')[1].split('.json')[0]);
+      const item = mockItems.find(i => i.id === id);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(item) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'news_2',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'hackernews' }),
+      },
+    });
+
+    expect(result.content).toContain('HackerNews Top Stories');
+    expect(result.content).toContain('Story One');
+    expect(result.content).toContain('Story Two');
+    expect(result.content).toContain('Story Three');
+    expect(result.content).toContain('100 points');
+    expect(result.content).toContain('user1');
+    expect(result.content).toContain('50 comments');
+  });
+
+  it('should handle HackerNews API error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+    }));
+
+    const result = await executeTool({
+      id: 'news_3',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'hackernews' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing fetch_news');
+    expect(result.content).toContain('HackerNews API error: HTTP 503');
+  });
+
+  it('should handle HackerNews items that fail to load', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([1, 2]) });
+      }
+      if (url.includes('/item/1.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: 'Good Story', url: 'https://example.com', score: 10, by: 'user', descendants: 5 }) });
+      }
+      // Item 2 fails
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'news_4',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'hackernews' }),
+      },
+    });
+
+    expect(result.content).toContain('Good Story');
+    // Should still work even though item 2 failed
+    expect(result.content).toContain('HackerNews Top Stories');
+  });
+
+  // --- Reddit tests ---
+
+  it('should fetch Reddit top posts with default subreddit', async () => {
+    const mockRedditResponse = {
+      data: {
+        children: [
+          { data: { title: 'Reddit Post 1', url: 'https://example.com/r1', score: 500, permalink: '/r/technology/comments/abc', num_comments: 120, author: 'redditor1' } },
+          { data: { title: 'Reddit Post 2', url: 'https://example.com/r2', score: 300, permalink: '/r/technology/comments/def', num_comments: 80, author: 'redditor2' } },
+        ],
+      },
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockRedditResponse),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'news_5',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'reddit' }),
+      },
+    });
+
+    expect(result.content).toContain('Reddit r/technology');
+    expect(result.content).toContain('Reddit Post 1');
+    expect(result.content).toContain('500 points');
+    expect(result.content).toContain('redditor1');
+    expect(result.content).toContain('120 comments');
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('/r/technology/top.json');
+  });
+
+  it('should fetch Reddit posts with custom subreddit', async () => {
+    const mockRedditResponse = {
+      data: { children: [{ data: { title: 'Crypto News', url: 'https://example.com/c1', score: 100, permalink: '/r/cryptocurrency/comments/xyz', num_comments: 50, author: 'cryptofan' } }] },
+    };
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockRedditResponse),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'news_6',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'reddit', topic: 'cryptocurrency' }),
+      },
+    });
+
+    expect(result.content).toContain('Reddit r/cryptocurrency');
+    expect(result.content).toContain('Crypto News');
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('/r/cryptocurrency/top.json');
+  });
+
+  it('should handle Reddit API error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+    }));
+
+    const result = await executeTool({
+      id: 'news_7',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'reddit' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing fetch_news');
+    expect(result.content).toContain('Reddit API error: HTTP 429');
+  });
+
+  // --- arXiv tests ---
+
+  it('should fetch arXiv papers with default category', async () => {
+    const mockXml = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2602.12345v1</id>
+    <title>Transformers Are All You Still Need</title>
+    <summary>We present a novel approach to transformer architectures that improves efficiency.</summary>
+    <author><name>Alice Smith</name></author>
+    <author><name>Bob Jones</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2602.12346v1</id>
+    <title>Scaling Laws for Language Models</title>
+    <summary>An analysis of scaling properties in large language models.</summary>
+    <author><name>Charlie Brown</name></author>
+  </entry>
+</feed>`;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockXml),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'news_8',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'arxiv' }),
+      },
+    });
+
+    expect(result.content).toContain('arXiv cs.AI Latest Papers');
+    expect(result.content).toContain('Transformers Are All You Still Need');
+    expect(result.content).toContain('Alice Smith, Bob Jones');
+    expect(result.content).toContain('Scaling Laws for Language Models');
+    expect(result.content).toContain('Charlie Brown');
+    expect(result.content).toContain('arxiv.org/abs/2602.12345');
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('cat:cs.AI');
+  });
+
+  it('should fetch arXiv papers with custom category', async () => {
+    const mockXml = `<feed><entry><id>http://arxiv.org/abs/1234</id><title>ML Paper</title><summary>Summary here.</summary><author><name>Author</name></author></entry></feed>`;
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockXml),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'news_9',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'arxiv', topic: 'cs.LG' }),
+      },
+    });
+
+    expect(result.content).toContain('arXiv cs.LG Latest Papers');
+    expect(result.content).toContain('ML Paper');
+
+    const calledUrl = mockFetch.mock.calls[0][0];
+    expect(calledUrl).toContain('cat:cs.LG');
+  });
+
+  it('should handle arXiv API error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    }));
+
+    const result = await executeTool({
+      id: 'news_10',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'arxiv' }),
+      },
+    });
+
+    expect(result.content).toContain('Error executing fetch_news');
+    expect(result.content).toContain('arXiv API error: HTTP 500');
+  });
+
+  it('should handle arXiv empty results', async () => {
+    const mockXml = `<feed></feed>`;
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockXml),
+    }));
+
+    const result = await executeTool({
+      id: 'news_11',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'arxiv', topic: 'nonexistent.category' }),
+      },
+    });
+
+    expect(result.content).toContain('No papers found');
+  });
+
+  it('should truncate long arXiv summaries', async () => {
+    const longSummary = 'A'.repeat(200);
+    const mockXml = `<feed><entry><id>http://arxiv.org/abs/1234</id><title>Long Paper</title><summary>${longSummary}</summary><author><name>Author</name></author></entry></feed>`;
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve(mockXml),
+    }));
+
+    const result = await executeTool({
+      id: 'news_12',
+      type: 'function',
+      function: {
+        name: 'fetch_news',
+        arguments: JSON.stringify({ source: 'arxiv' }),
+      },
+    });
+
+    expect(result.content).toContain('Long Paper');
+    expect(result.content).toContain('...');
+    // Should not contain the full 200 chars
+    expect(result.content).not.toContain(longSummary);
+  });
+});

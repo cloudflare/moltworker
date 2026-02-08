@@ -218,6 +218,28 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
   {
     type: 'function',
     function: {
+      name: 'fetch_news',
+      description: 'Fetch top stories from a news source. Supports HackerNews (tech), Reddit (any subreddit), and arXiv (research papers).',
+      parameters: {
+        type: 'object',
+        properties: {
+          source: {
+            type: 'string',
+            description: 'News source to fetch from',
+            enum: ['hackernews', 'reddit', 'arxiv'],
+          },
+          topic: {
+            type: 'string',
+            description: 'Optional: subreddit name for Reddit (default: technology) or arXiv category (default: cs.AI)',
+          },
+        },
+        required: ['source'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'browse_url',
       description: 'Browse a URL using a real browser. Use this for JavaScript-rendered pages, screenshots, or when fetch_url fails. Returns text content by default, or a screenshot/PDF.',
       parameters: {
@@ -289,6 +311,9 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'get_weather':
         result = await getWeather(args.latitude, args.longitude);
+        break;
+      case 'fetch_news':
+        result = await fetchNews(args.source, args.topic);
         break;
       case 'browse_url':
         result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
@@ -686,6 +711,160 @@ async function getWeather(latitude: string, longitude: string): Promise<string> 
   }
 
   return output;
+}
+
+/**
+ * Valid news sources for fetch_news
+ */
+const VALID_NEWS_SOURCES = ['hackernews', 'reddit', 'arxiv'] as const;
+
+/**
+ * HackerNews story item shape
+ */
+interface HNItem {
+  id: number;
+  title?: string;
+  url?: string;
+  score?: number;
+  by?: string;
+  descendants?: number;
+}
+
+/**
+ * Reddit listing response shape
+ */
+interface RedditListing {
+  data: {
+    children: Array<{
+      data: {
+        title: string;
+        url: string;
+        score: number;
+        permalink: string;
+        num_comments: number;
+        author: string;
+      };
+    }>;
+  };
+}
+
+/**
+ * Fetch top stories from a news source
+ */
+async function fetchNews(source: string, topic?: string): Promise<string> {
+  if (!VALID_NEWS_SOURCES.includes(source as typeof VALID_NEWS_SOURCES[number])) {
+    throw new Error(`Invalid source: ${source}. Must be one of: ${VALID_NEWS_SOURCES.join(', ')}`);
+  }
+
+  switch (source) {
+    case 'hackernews':
+      return fetchHackerNews();
+    case 'reddit':
+      return fetchReddit(topic || 'technology');
+    case 'arxiv':
+      return fetchArxiv(topic || 'cs.AI');
+    default:
+      throw new Error(`Unknown source: ${source}`);
+  }
+}
+
+/**
+ * Fetch top 10 stories from HackerNews
+ */
+async function fetchHackerNews(): Promise<string> {
+  const idsResponse = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!idsResponse.ok) {
+    throw new Error(`HackerNews API error: HTTP ${idsResponse.status}`);
+  }
+
+  const allIds = await idsResponse.json() as number[];
+  const topIds = allIds.slice(0, 10);
+
+  const items = await Promise.all(
+    topIds.map(async (id) => {
+      const response = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`, {
+        headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+      });
+      if (!response.ok) return null;
+      return response.json() as Promise<HNItem>;
+    })
+  );
+
+  const stories = items
+    .filter((item): item is HNItem => item !== null && !!item.title)
+    .map((item, i) => {
+      const url = item.url || `https://news.ycombinator.com/item?id=${item.id}`;
+      return `${i + 1}. ${item.title}\n   ${url}\n   ${item.score || 0} points by ${item.by || 'unknown'} | ${item.descendants || 0} comments`;
+    });
+
+  return `HackerNews Top Stories:\n\n${stories.join('\n\n')}`;
+}
+
+/**
+ * Fetch top 10 posts from a Reddit subreddit
+ */
+async function fetchReddit(subreddit: string): Promise<string> {
+  const url = `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/top.json?limit=10&t=day`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Reddit API error: HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as RedditListing;
+  const posts = data.data.children.map((child, i) => {
+    const post = child.data;
+    return `${i + 1}. ${post.title}\n   ${post.url}\n   ${post.score} points by ${post.author} | ${post.num_comments} comments`;
+  });
+
+  return `Reddit r/${subreddit} Top Posts (today):\n\n${posts.join('\n\n')}`;
+}
+
+/**
+ * Fetch latest 10 papers from arXiv
+ */
+async function fetchArxiv(category: string): Promise<string> {
+  const url = `https://export.arxiv.org/api/query?search_query=cat:${encodeURIComponent(category)}&sortBy=submittedDate&sortOrder=descending&max_results=10`;
+  const response = await fetch(url, {
+    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`arXiv API error: HTTP ${response.status}`);
+  }
+
+  const xml = await response.text();
+
+  // Simple XML parsing — extract <entry> elements
+  const entries: string[] = [];
+  const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
+  let match;
+  while ((match = entryRegex.exec(xml)) !== null) {
+    const entry = match[1];
+    const title = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\s+/g, ' ').trim() || 'Untitled';
+    const link = entry.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim() || '';
+    const summary = entry.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.replace(/\s+/g, ' ').trim() || '';
+    const authors: string[] = [];
+    const authorRegex = /<author>\s*<name>([\s\S]*?)<\/name>/g;
+    let authorMatch;
+    while ((authorMatch = authorRegex.exec(entry)) !== null) {
+      authors.push(authorMatch[1].trim());
+    }
+
+    const shortSummary = summary.length > 150 ? summary.slice(0, 150) + '...' : summary;
+    entries.push(`${entries.length + 1}. ${title}\n   ${link}\n   Authors: ${authors.join(', ') || 'Unknown'}\n   ${shortSummary}`);
+  }
+
+  if (entries.length === 0) {
+    return `No papers found for arXiv category: ${category}`;
+  }
+
+  return `arXiv ${category} Latest Papers:\n\n${entries.join('\n\n')}`;
 }
 
 /**

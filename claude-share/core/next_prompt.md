@@ -7,48 +7,45 @@
 
 ---
 
-## Current Task: Phase 2.5.5 — News Feeds (HackerNews + Reddit + arXiv)
+## Current Task: Phase 2.5.7 — Daily Briefing Aggregator
 
 ### Requirements
 
 You are working on Moltworker, a multi-platform AI assistant gateway on Cloudflare Workers.
 
-Add a new `fetch_news` tool that fetches top stories from HackerNews, Reddit, and arXiv. This provides tech pulse, crypto sentiment, and AI research feeds for the daily briefing aggregator (Phase 2.5.7). All three APIs are free with no authentication required.
+Add a `/briefing` command that aggregates data from multiple existing tools into a concise daily summary. This combines the outputs of tools already built in Phases 2.5.1-2.5.5.
 
-### APIs
+### Briefing Sections
 
-1. **HackerNews** — `https://hacker-news.firebaseio.com/v0/topstories.json` (returns array of IDs), then `https://hacker-news.firebaseio.com/v0/item/{id}.json` for each story
-2. **Reddit** — `https://www.reddit.com/r/{subreddit}/top.json?limit=10&t=day` (returns listing with children)
-3. **arXiv** — `https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=10` (returns Atom XML)
+1. **Weather** — Current conditions + forecast for user's location (via `get_weather`)
+2. **Top News** — Top 5 stories from HackerNews (via `fetch_news`)
+3. **Trending on Reddit** — Top 3 posts from a configured subreddit (via `fetch_news`)
+4. **Recent arXiv** — Latest 3 papers in cs.AI or configured category (via `fetch_news`)
 
 ### Files to modify
 
-1. **`src/openrouter/tools.ts`** — Add `fetch_news` tool definition and execution handler
-   - Tool schema: `{ name: "fetch_news", parameters: { source: string, topic?: string } }`
-   - `source`: One of `hackernews`, `reddit`, `arxiv`
-   - `topic`: Optional subreddit name for Reddit (default: `technology`), or arXiv category (default: `cs.AI`)
-   - Returns formatted list of top stories with title, URL, score/points
-   - Limit to top 10 items per source
+1. **`src/telegram/handler.ts`** — Add `/briefing` command handler
+2. **`src/openrouter/tools.ts`** — Potentially add a `daily_briefing` tool the AI can invoke
 
 ### Implementation Notes
 
-- For HackerNews: Fetch top 10 IDs, then fetch each item in parallel
-- For Reddit: Parse JSON response, extract title/url/score from `data.children`
-- For arXiv: Parse XML response (simple string parsing — no XML library needed, extract `<entry>` elements)
-- Validate source parameter against allowed values
-- Handle API errors gracefully
+- Call multiple tools in parallel using `Promise.all` for speed
+- Format output as a clean Telegram message with sections and emoji headers
+- Allow user to configure their location (latitude/longitude) for weather
+- Cache results for 15 minutes to avoid redundant API calls
+- Gracefully handle partial failures (if one source fails, show the rest)
 
 ### Success Criteria
 
-- [ ] New `fetch_news` tool appears in tool definitions
-- [ ] Supports all three sources (hackernews, reddit, arxiv)
-- [ ] Returns formatted top 10 stories per source
-- [ ] Handles errors gracefully (invalid source, API failure)
-- [ ] Test file: `src/openrouter/tools.test.ts` (extend existing)
+- [ ] `/briefing` command returns a formatted daily summary
+- [ ] Weather, news, reddit, and arXiv sections all populated
+- [ ] Partial failures handled gracefully
+- [ ] Tests added
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes (pre-existing errors OK)
 
 ### Key Files
+- `src/telegram/handler.ts` — Telegram bot handler
 - `src/openrouter/tools.ts` — Tool definitions and execution
 
 ---
@@ -57,9 +54,9 @@ Add a new `fetch_news` tool that fetches top stories from HackerNews, Reddit, an
 
 | Priority | Task | Effort |
 |----------|------|--------|
-| Next | 1.3: Configurable reasoning per model | Medium |
-| Then | 2.5.7: Daily briefing aggregator | 6h |
-| Then | 2.5.4: Currency conversion (ExchangeRate-API) | 1h |
+| Next | 2.5.4: Currency conversion (ExchangeRate-API) | 1h |
+| Then | 2.1: Token/cost tracking | Medium |
+| Then | 1.4: Combine vision + tools into unified method | Medium |
 
 ---
 
@@ -67,6 +64,8 @@ Add a new `fetch_news` tool that fetches top stories from HackerNews, Reddit, an
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-08 | Phase 1.3: Configurable reasoning per model | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
+| 2026-02-08 | Phase 2.5.5: News feeds (HN/Reddit/arXiv) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
 | 2026-02-08 | Phase 2.5.3: Weather tool (Open-Meteo) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
 | 2026-02-08 | Phase 2.5.2: Chart image generation (QuickChart) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |
 | 2026-02-08 | Phase 2.5.1: URL metadata tool (Microlink) | Claude Opus 4.6 | 01Wjud3VHKMfSRbvMTzFohGS |

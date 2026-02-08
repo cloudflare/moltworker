@@ -34,7 +34,7 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 
 #### F0.2: Tool Calling
 - **Status:** ✅ Complete (5 tools, parallel execution)
-- **Tools:** `fetch_url`, `github_read_file`, `github_list_files`, `github_api`, `browse_url`
+- **Tools:** `fetch_url`, `github_read_file`, `github_list_files`, `github_api`, `url_metadata`, `generate_chart`, `get_weather`, `fetch_news`, `browse_url`
 - **Execution:** Parallel via `Promise.all()`, max 10 iterations (Worker) or 100 (Durable Object)
 
 #### F0.3: Image Generation
@@ -133,6 +133,13 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 - **Spec:** New tool `get_weather({ latitude, longitude })` returning current conditions + 7-day forecast with WMO weather code descriptions.
 - **API:** `api.open-meteo.com/v1/forecast` — 🟢 No auth, no rate limits.
 - **Implementation:** `src/openrouter/tools.ts` — tool definition + `getWeather()` handler + WMO_WEATHER_CODES mapping (28 codes). 11 tests in `tools.test.ts`.
+
+#### F2.5.5: News Feeds Tool (HackerNews + Reddit + arXiv)
+- **Status:** ✅ Complete
+- **Spec:** New tool `fetch_news({ source, topic? })` fetching top 10 stories from HackerNews, Reddit, or arXiv.
+- **Sources:** `hackernews` (Firebase API), `reddit` (JSON API, configurable subreddit), `arxiv` (Atom XML, configurable category).
+- **API:** All 🟢 No auth — HN Firebase, Reddit JSON, arXiv Atom.
+- **Implementation:** `src/openrouter/tools.ts` — tool definition + `fetchNews()` dispatcher + 3 source handlers (parallel HN item fetches, Reddit JSON parsing, arXiv XML string parsing). 14 tests in `tools.test.ts`.
 
 #### F2.5.7: Daily Briefing Aggregator
 - **Status:** 🔲 Planned

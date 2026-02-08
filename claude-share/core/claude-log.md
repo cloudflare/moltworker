@@ -4,6 +4,80 @@
 
 ---
 
+## Session: 2026-02-08 | Phase 1.3: Configurable Reasoning (Session: 01Wjud3VHKMfSRbvMTzFohGS)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/review-moltworker-roadmap-q5aqD`
+**Status:** Completed
+
+### Summary
+Implemented Phase 1.3: Configurable reasoning per model. Models with `reasoning: 'configurable'` metadata (DeepSeek V3.2, Grok 4.1, Gemini 3 Flash, Gemini 3 Pro) now get provider-specific reasoning parameters injected into API requests. Auto-detection selects reasoning level based on task type (off for simple Q&A, medium for coding/tools, high for research). Users can override via `think:LEVEL` message prefix.
+
+### Changes Made
+1. **Reasoning types and utilities** (`models.ts`) — `ReasoningLevel`, `ReasoningParam` types; `getReasoningParam()` maps level to provider format (DeepSeek/Grok: `{enabled}`, Gemini: `{effort}`); `detectReasoningLevel()` auto-detects from message content; `parseReasoningOverride()` parses `think:LEVEL` prefix
+2. **Client integration** (`client.ts`) — Added `reasoning` field to `ChatCompletionRequest`; injected reasoning into `chatCompletion()`, `chatCompletionWithTools()` (upgrades 'off' to 'medium' for tool-use), and `chatCompletionStreamingWithTools()`; all methods accept `reasoningLevel` option
+3. **Telegram handler** (`handler.ts`) — Parses `think:LEVEL` prefix from user messages, passes to client methods, saves cleaned message to history
+4. **36 tests** (`reasoning.test.ts`) — `getReasoningParam` per model type, `detectReasoningLevel` for simple/coding/research, `parseReasoningOverride` edge cases, client injection verification
+
+### Files Modified
+- `src/openrouter/models.ts` (reasoning types + 4 utility functions)
+- `src/openrouter/client.ts` (reasoning injection in 3 methods)
+- `src/telegram/handler.ts` (think: prefix parsing)
+- `src/openrouter/reasoning.test.ts` (36 new tests)
+- `claude-share/core/GLOBAL_ROADMAP.md`
+- `claude-share/core/WORK_STATUS.md`
+- `claude-share/core/claude-log.md`
+- `claude-share/core/next_prompt.md`
+
+### Tests
+- [x] All 166 tests pass (36 new reasoning tests)
+- [x] Typecheck: no new errors (pre-existing errors unchanged)
+
+### Notes for Next Session
+- Phase 1.3 complete. Tool-calling optimization now done (Phase 1.1-1.3).
+- Next: Phase 2.5.7 (Daily briefing), Phase 2.5.4 (Currency conversion), Phase 2.1 (Token/cost tracking)
+
+---
+
+## Session: 2026-02-08 | Phase 2.5.5: News Feeds Tool (Session: 01Wjud3VHKMfSRbvMTzFohGS)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/review-moltworker-roadmap-q5aqD`
+**Status:** Completed
+
+### Summary
+Implemented Phase 2.5.5: new `fetch_news` tool supporting three free news sources — HackerNews (Firebase API), Reddit (JSON API), and arXiv (Atom XML). Each source returns top 10 stories with title, URL, score/points, and author info. Supports configurable subreddit (Reddit) and category (arXiv) via optional `topic` parameter.
+
+### Changes Made
+1. **New `fetch_news` tool definition** — Added to `AVAILABLE_TOOLS` with `source` (enum: hackernews/reddit/arxiv) and optional `topic` parameters
+2. **Execution dispatcher** — `fetchNews()` validates source and routes to appropriate handler
+3. **HackerNews handler** — `fetchHackerNews()` fetches top 10 IDs then parallel-fetches each item via `Promise.all()`
+4. **Reddit handler** — `fetchReddit()` parses JSON listing response with configurable subreddit (default: technology)
+5. **arXiv handler** — `fetchArxiv()` parses Atom XML via regex, extracts title/id/summary/authors with summary truncation at 150 chars
+6. **Typed interfaces** — `HNItem`, `RedditListing` for API response shapes
+7. **14 new tests** — Tool presence, invalid source, HN success + API error + failed items, Reddit default + custom subreddit + API error, arXiv default + custom category + API error + empty results + long summary truncation
+8. **Documentation updates** — All core docs updated
+
+### Files Modified
+- `src/openrouter/tools.ts` (tool definition + 3 source handlers)
+- `src/openrouter/tools.test.ts` (14 new tests)
+- `claude-share/core/GLOBAL_ROADMAP.md`
+- `claude-share/core/WORK_STATUS.md`
+- `claude-share/core/SPECIFICATION.md`
+- `claude-share/core/next_prompt.md`
+- `claude-share/core/claude-log.md`
+
+### Tests
+- [x] All 130 tests pass (14 new for fetch_news + 11 get_weather + 12 generate_chart + 9 url_metadata + 84 existing)
+- [x] Typecheck: no new errors (pre-existing errors unchanged)
+
+### Notes for Next Session
+- Phase 2.5.5 complete. Tool count now: 9 (was 8)
+- **Next priority: Phase 1.3** — Configurable reasoning per model
+- See `next_prompt.md` for ready-to-copy task prompt
+
+---
+
 ## Session: 2026-02-08 | Phase 2.5.3: Weather Tool (Session: 01Wjud3VHKMfSRbvMTzFohGS)
 
 **AI:** Claude Opus 4.6

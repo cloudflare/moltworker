@@ -11,7 +11,7 @@
 
 **Moltworker** is a multi-platform AI assistant gateway deployed on Cloudflare Workers. It provides:
 - 30+ AI models via OpenRouter + direct provider APIs (with capability metadata)
-- 5 tools (fetch_url, github_read_file, github_list_files, github_api, browse_url) — parallel execution
+- 9 tools (fetch_url, github_read_file, github_list_files, github_api, url_metadata, generate_chart, get_weather, fetch_news, browse_url) — parallel execution
 - Durable Objects for unlimited-time task execution
 - Multi-platform chat (Telegram, Discord, Slack)
 - Image generation (FLUX.2 models)
@@ -56,7 +56,7 @@
 |----|------|--------|-------|-------|
 | 1.1 | Implement parallel tool execution (`Promise.all`) | ✅ | Claude | `client.ts` + `task-processor.ts` — concurrent execution of all tool_calls |
 | 1.2 | Enrich model capability metadata | ✅ | Claude | `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext` for all 30+ models |
-| 1.3 | Add configurable reasoning per model | 🔲 | Claude | Pass `reasoning` param to API based on model capability |
+| 1.3 | Add configurable reasoning per model | ✅ | Claude | Auto-detect + `think:LEVEL` override; DeepSeek/Grok `{enabled}`, Gemini `{effort}` |
 | 1.4 | Combine vision + tools into unified method | 🔲 | Codex | Merge `chatCompletionWithVision` and `chatCompletionWithTools` |
 | 1.5 | Add structured output support | 🔲 | Claude | `response_format: { type: "json_schema" }` for compatible models |
 
@@ -102,7 +102,7 @@
 | 2.5.2 | Chart image generation (QuickChart) | ✅ | Claude | 2h | Generate chart images for `/brief` command and data visualization. 🟢 No auth |
 | 2.5.3 | Weather tool (Open-Meteo) | ✅ | Claude | 2h | Full weather forecast, no key, no rate limits. 🟢 No auth |
 | 2.5.4 | Currency conversion tool (ExchangeRate-API) | 🔲 | Any AI | 1h | 150+ currencies, zero auth. 🟢 No auth |
-| 2.5.5 | HackerNews + Reddit + arXiv feeds | 🔲 | Any AI | 3h | Tech pulse, crypto sentiment, AI research. 🟢 No auth. New data sources for briefings |
+| 2.5.5 | HackerNews + Reddit + arXiv feeds | ✅ | Claude | 3h | `fetch_news` tool — 3 sources, 14 tests. 🟢 No auth |
 | 2.5.6 | Crypto expansion (CoinCap + DEX Screener + CoinPaprika) | 🔲 | Any AI | 4h | DeFi pairs + richer metadata beyond CoinGecko. 🟢 No auth |
 | 2.5.7 | Daily briefing aggregator | 🔲 | Claude | 6h | Combine weather + crypto + news + quotes into gecko-style morning briefing via Telegram |
 | 2.5.8 | Geolocation from IP (ipapi) | 🔲 | Any AI | 1h | Auto-detect timezone/location for regional relevance. 🟢 No auth |
@@ -212,6 +212,8 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(client): configurable reasoning per model — Phase 1.3 complete | src/openrouter/models.ts, src/openrouter/client.ts, src/telegram/handler.ts, src/openrouter/reasoning.test.ts
+2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add fetch_news tool (HN/Reddit/arXiv) — Phase 2.5.5 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add get_weather tool via Open-Meteo API — Phase 2.5.3 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add generate_chart tool via QuickChart API — Phase 2.5.2 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add url_metadata tool via Microlink API — Phase 2.5.1 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts

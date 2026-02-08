@@ -15,6 +15,8 @@ import {
   supportsVision,
   isImageGenModel,
   DEFAULT_MODEL,
+  parseReasoningOverride,
+  type ReasoningLevel,
 } from '../openrouter/models';
 
 // Telegram Types
@@ -970,6 +972,10 @@ export class TelegramHandler {
 
     await this.bot.sendChatAction(chatId, 'typing');
 
+    // Parse optional think:LEVEL prefix (e.g., "think:high how do I ...")
+    const { level: reasoningLevel, cleanMessage } = parseReasoningOverride(text);
+    const messageText = cleanMessage;
+
     // Get user's model and conversation history
     const modelAlias = await this.storage.getUserModel(userId);
     const history = await this.storage.getConversation(userId, 10);
@@ -985,7 +991,7 @@ export class TelegramHandler {
         role: msg.role as 'user' | 'assistant',
         content: msg.content,
       })),
-      { role: 'user', content: text },
+      { role: 'user', content: messageText },
     ];
 
     try {
@@ -1110,6 +1116,7 @@ export class TelegramHandler {
               githubToken: this.githubToken,
               browser: this.browser,
             },
+            reasoningLevel: reasoningLevel ?? undefined,
           }
         );
 
@@ -1136,12 +1143,14 @@ export class TelegramHandler {
         }
       } else {
         // Regular chat completion without tools
-        const response = await this.openrouter.chatCompletion(modelAlias, messages);
+        const response = await this.openrouter.chatCompletion(modelAlias, messages, {
+          reasoningLevel: reasoningLevel ?? undefined,
+        });
         responseText = extractTextResponse(response);
       }
 
-      // Save to history
-      await this.storage.addMessage(userId, 'user', text);
+      // Save to history (use cleaned message without think: prefix)
+      await this.storage.addMessage(userId, 'user', messageText);
       await this.storage.addMessage(userId, 'assistant', responseText);
 
       // Send response (handle long messages)

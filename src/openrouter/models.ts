@@ -648,6 +648,105 @@ export function formatModelsList(): string {
   return lines.join('\n');
 }
 
+// === REASONING SUPPORT ===
+
+export type ReasoningLevel = 'off' | 'low' | 'medium' | 'high';
+
+/**
+ * Reasoning parameter formats per provider:
+ * - DeepSeek/Grok: { enabled: boolean }
+ * - Gemini: { effort: 'minimal' | 'low' | 'medium' | 'high' }
+ */
+export type ReasoningParam =
+  | { enabled: boolean }
+  | { effort: 'minimal' | 'low' | 'medium' | 'high' };
+
+/**
+ * Build the provider-specific reasoning parameter for a model.
+ * Returns undefined if the model doesn't support configurable reasoning.
+ */
+export function getReasoningParam(alias: string, level: ReasoningLevel): ReasoningParam | undefined {
+  const model = getModel(alias);
+  if (!model || model.reasoning !== 'configurable') return undefined;
+
+  // Gemini models use effort levels
+  if (model.id.startsWith('google/')) {
+    const effortMap: Record<ReasoningLevel, 'minimal' | 'low' | 'medium' | 'high'> = {
+      off: 'minimal',
+      low: 'low',
+      medium: 'medium',
+      high: 'high',
+    };
+    return { effort: effortMap[level] };
+  }
+
+  // DeepSeek and Grok use enabled boolean
+  return { enabled: level !== 'off' };
+}
+
+/**
+ * Auto-detect reasoning level based on message content.
+ * - Simple Q&A → off (save tokens)
+ * - Coding/tool-use → medium
+ * - Research/analysis → high
+ */
+export function detectReasoningLevel(messages: readonly ChatMessageLike[]): ReasoningLevel {
+  // Find the last user message
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  if (!lastUserMsg) return 'off';
+
+  const text = typeof lastUserMsg.content === 'string'
+    ? lastUserMsg.content
+    : '';
+
+  if (!text) return 'off';
+
+  const lower = text.toLowerCase();
+
+  // Research indicators → high
+  if (/\b(research|analy[sz]e|compare|explain in detail|comprehensive|deep dive|thorough|investigate|literature|survey|pros and cons)\b/.test(lower)) {
+    return 'high';
+  }
+
+  // Coding/tool-use indicators → medium
+  if (/\b(code|implement|debug|fix|refactor|function|class|api|fetch|github|weather|chart|news|build|deploy|test|error|bug|script)\b/.test(lower)) {
+    return 'medium';
+  }
+
+  // Math/logic → medium
+  if (/\b(calculate|solve|prove|equation|algorithm|optimize|formula)\b/.test(lower)) {
+    return 'medium';
+  }
+
+  // Default: simple Q&A → off
+  return 'off';
+}
+
+/**
+ * Parse a `think:LEVEL` prefix from user message text.
+ * Returns the parsed level and the cleaned message.
+ *
+ * Examples:
+ *   "think:high what is X?" → { level: 'high', cleanMessage: "what is X?" }
+ *   "no prefix here"       → { level: null, cleanMessage: "no prefix here" }
+ */
+export function parseReasoningOverride(message: string): { level: ReasoningLevel | null; cleanMessage: string } {
+  const match = message.match(/^think:(off|low|medium|high)\s+/i);
+  if (match) {
+    return {
+      level: match[1].toLowerCase() as ReasoningLevel,
+      cleanMessage: message.slice(match[0].length),
+    };
+  }
+  return { level: null, cleanMessage: message };
+}
+
+/** Minimal shape needed for reasoning detection (avoids importing ChatMessage) */
+interface ChatMessageLike {
+  role: string;
+  content: string | unknown[] | null;
+}
+
 /**
  * Default model alias
  */

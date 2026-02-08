@@ -18,8 +18,8 @@
 
 | Task ID | Description | Assignee | Status | Branch |
 |---------|-------------|----------|--------|--------|
-| 1.3 | Configurable reasoning per model | Unassigned | 🔲 Not Started | — |
-| 2.5.5 | HackerNews + Reddit + arXiv feeds | Unassigned | 🔲 Not Started | — |
+| 1.3 | Configurable reasoning per model | Claude Opus 4.6 | ✅ Complete | `claude/review-moltworker-roadmap-q5aqD` |
+| 2.5.5 | HackerNews + Reddit + arXiv feeds | Claude Opus 4.6 | ✅ Complete | `claude/review-moltworker-roadmap-q5aqD` |
 
 ---
 
@@ -27,7 +27,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Phase 2.5.3 complete | `claude/review-moltworker-roadmap-q5aqD` | 2026-02-08 |
+| Claude | Phase 1.3 complete | `claude/review-moltworker-roadmap-q5aqD` | 2026-02-08 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -50,6 +50,8 @@
 | 2.5.1 | URL metadata tool (Microlink) | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
 | 2.5.2 | Chart image generation (QuickChart) | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
 | 2.5.3 | Weather tool (Open-Meteo) | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
+| 2.5.5 | News feeds (HN/Reddit/arXiv) | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
+| 1.3 | Configurable reasoning per model | Claude Opus 4.6 | 2026-02-08 | `claude/review-moltworker-roadmap-q5aqD` |
 
 ---
 
@@ -65,10 +67,9 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 2.5.5** — News feeds: HackerNews + Reddit + arXiv (3h, no auth, data sources)
-5. **Phase 1.3** — Configurable reasoning per model (medium effort, uses 1.2 metadata)
-6. **Phase 2.1** — Token/cost tracking (medium effort, high value)
-7. **Phase 2.5.7** — Daily briefing aggregator (6h, combines 2.5.1-2.5.6)
+1. **Phase 2.5.7** — Daily briefing aggregator (6h, combines 2.5.1-2.5.6)
+2. **Phase 2.5.4** — Currency conversion (ExchangeRate-API) (1h)
+3. **Phase 2.1** — Token/cost tracking (medium effort, high value)
 
 ---
 
@@ -76,4 +77,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 14 | Phase 0 complete, Phase 1.1+1.2 complete, upstream sync complete, Phase 2.5.1-2.5.3 complete, ahead of plan |
+| Sprint 1 (current) | 8 | 16 | Phase 0 complete, Phase 1.1-1.3 complete, upstream sync complete, Phase 2.5.1-2.5.3+2.5.5 complete, ahead of plan |
