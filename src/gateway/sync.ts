@@ -41,23 +41,32 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     return { success: false, error: 'Failed to mount R2 storage' };
   }
 
-  // Determine which config directory exists
-  // Check new path first, fall back to legacy
-  // Use exit code (0 = exists) rather than stdout parsing to avoid log-flush races
+  // Determine which config directory has content worth backing up.
+  // Uses stdout-based detection (ls output) instead of exitCode, because the
+  // sandbox API sometimes returns null for exitCode even on success (#212).
   let configDir = '/root/.openclaw';
   try {
-    const checkNew = await sandbox.startProcess('test -f /root/.openclaw/openclaw.json');
+    const checkNew = await sandbox.startProcess('ls -A /root/.openclaw/ 2>/dev/null | head -1');
     await waitForProcess(checkNew, 5000);
-    if (checkNew.exitCode !== 0) {
-      const checkLegacy = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json');
+    const checkNewLogs = await checkNew.getLogs();
+    const hasNewContent = (checkNewLogs.stdout || '').trim().length > 0;
+
+    if (!hasNewContent) {
+      const checkLegacy = await sandbox.startProcess(
+        'ls -A /root/.clawdbot/ 2>/dev/null | head -1',
+      );
       await waitForProcess(checkLegacy, 5000);
-      if (checkLegacy.exitCode === 0) {
+      const checkLegacyLogs = await checkLegacy.getLogs();
+      const hasLegacyContent = (checkLegacyLogs.stdout || '').trim().length > 0;
+
+      if (hasLegacyContent) {
         configDir = '/root/.clawdbot';
       } else {
         return {
           success: false,
-          error: 'Sync aborted: no config file found',
-          details: 'Neither openclaw.json nor clawdbot.json found in config directory.',
+          error: 'Sync aborted: no config data found',
+          details:
+            'Neither /root/.openclaw/ nor /root/.clawdbot/ contain data to back up.',
         };
       }
     }
