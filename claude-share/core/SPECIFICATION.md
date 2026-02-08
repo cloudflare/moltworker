@@ -211,6 +211,18 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 
 ---
 
+### Known Issues (Found 2026-02-08)
+
+| ID | Issue | Severity | Root Cause | Location |
+|----|-------|----------|------------|----------|
+| BUG-1 | "Processing complex task..." shown for ALL messages on tool-capable models | Low/UX | Durable Object always sends this status, even for simple queries | `task-processor.ts:476` |
+| BUG-2 | DeepSeek V3.2 doesn't proactively use tools (prefers answering from knowledge) | Medium | Model behavior — Grok uses tools naturally; DeepSeek needs system prompt hint | Model-specific |
+| BUG-3 | `think:LEVEL` override only works on direct fallback path, not through Durable Object | Medium | `reasoningLevel` is parsed in handler but not included in `TaskRequest` sent to DO | `handler.ts` → `task-processor.ts` |
+| BUG-4 | `/img` fails: "No endpoints found that support output modalities: image, text" | High | OpenRouter may have changed FLUX.2 image generation API format | `client.ts:357` |
+| BUG-5 | `/use fluxpro` then text message → "No response generated" | Low | Chat path doesn't detect image-gen-only model and redirect to `/img` | `handler.ts` |
+
+---
+
 ## Technical Requirements
 
 ### Performance

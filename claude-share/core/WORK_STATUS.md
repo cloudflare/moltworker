@@ -27,7 +27,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Phase 1.3 complete | `claude/review-moltworker-roadmap-q5aqD` | 2026-02-08 |
+| Claude | Live testing complete, 5 bugs logged | `claude/review-moltworker-roadmap-q5aqD` | 2026-02-08 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -55,6 +55,16 @@
 
 ---
 
+### Bugs Found During Testing (2026-02-08)
+
+| Bug ID | Issue | Severity | Files | Status |
+|--------|-------|----------|-------|--------|
+| BUG-1 | "Processing complex task..." shown for ALL messages | Low/UX | `task-processor.ts:476` | 🔲 Open |
+| BUG-2 | DeepSeek doesn't proactively use tools | Medium | `client.ts` / system prompt | 🔲 Open |
+| BUG-3 | `think:` override not passed through DO path | Medium | `handler.ts`, `task-processor.ts` | 🔲 Open |
+| BUG-4 | `/img` fails — modalities not supported | High | `client.ts:357` | 🔲 Open |
+| BUG-5 | `/use fluxpro` + text → "No response" | Low | `handler.ts` | 🔲 Open |
+
 ### Blocked
 
 | Task ID | Description | Blocked By | Resolution |
@@ -67,9 +77,11 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 2.5.7** — Daily briefing aggregator (6h, combines 2.5.1-2.5.6)
-2. **Phase 2.5.4** — Currency conversion (ExchangeRate-API) (1h)
-3. **Phase 2.1** — Token/cost tracking (medium effort, high value)
+1. **BUG-4** — Fix `/img` image generation (High priority, investigate OpenRouter modalities API)
+2. **BUG-3** — Pass `think:` override through Durable Object path (Medium priority)
+3. **Phase 2.5.7** — Daily briefing aggregator (6h, combines 2.5.1-2.5.6)
+4. **Phase 2.5.4** — Currency conversion (ExchangeRate-API) (1h)
+5. **Phase 2.1** — Token/cost tracking (medium effort, high value)
 
 ---
 

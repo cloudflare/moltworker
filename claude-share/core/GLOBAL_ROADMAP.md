@@ -61,7 +61,8 @@
 | 1.5 | Add structured output support | 🔲 | Claude | `response_format: { type: "json_schema" }` for compatible models |
 
 > 🧑 HUMAN CHECK 1.6: Test parallel tool execution with real API calls — ⏳ PENDING
-> 🧑 HUMAN CHECK 1.7: Verify reasoning control doesn't break existing models — ⏳ PENDING
+> 🧑 HUMAN CHECK 1.7: Verify reasoning control doesn't break existing models — ✅ TESTED (works but BUG-3: think: not passed through DO)
+> ⚠️ BUG-3: `think:` override only works on fallback path, not Durable Object path — see Bug Fixes section
 
 ### Phase 1.5: Upstream Sync & Infrastructure (Completed)
 
@@ -201,9 +202,13 @@
 
 ## Bug Fixes & Corrective Actions
 
-| Date | Issue | Fix | Files | AI |
-|------|-------|-----|-------|----|
-| — | No bugs tracked yet | — | — | — |
+| ID | Date | Issue | Severity | Fix | Files | AI |
+|----|------|-------|----------|-----|-------|----|
+| BUG-1 | 2026-02-08 | "Processing complex task..." shown for ALL messages on tool-capable models | Low/UX | Change status message to be context-aware or remove for simple queries | `task-processor.ts:476` | 🔲 |
+| BUG-2 | 2026-02-08 | DeepSeek V3.2 doesn't proactively use tools (prefers answering from knowledge) | Medium | Add system prompt hint for tool-capable models encouraging tool use when relevant | `client.ts` or `task-processor.ts` | 🔲 |
+| BUG-3 | 2026-02-08 | `think:` override not passed through Durable Object path | Medium | Add `reasoningLevel` field to `TaskRequest` interface, pass from handler to DO | `handler.ts`, `task-processor.ts` | 🔲 |
+| BUG-4 | 2026-02-08 | `/img` fails — "No endpoints found that support output modalities: image, text" | High | OpenRouter may have changed FLUX.2 image gen API format; investigate and fix | `client.ts:357` | 🔲 |
+| BUG-5 | 2026-02-08 | `/use fluxpro` + text → "No response generated" | Low | Chat path doesn't detect image-gen-only model and redirect to `/img` | `handler.ts` | 🔲 |
 
 ---
 
@@ -212,6 +217,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | docs: log 5 bugs found during live testing (BUG-1 to BUG-5) — DO status msg, DeepSeek tool use, think: passthrough, /img failure, fluxpro UX | claude-share/core/*.md
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(client): configurable reasoning per model — Phase 1.3 complete | src/openrouter/models.ts, src/openrouter/client.ts, src/telegram/handler.ts, src/openrouter/reasoning.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add fetch_news tool (HN/Reddit/arXiv) — Phase 2.5.5 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 01Wjud3VHKMfSRbvMTzFohGS) | feat(tools): add get_weather tool via Open-Meteo API — Phase 2.5.3 complete | src/openrouter/tools.ts, src/openrouter/tools.test.ts
@@ -247,7 +253,7 @@ graph TD
     subgraph "Phase 1 (1.1-1.2 ✅)"
         P1_1[1.1 Parallel tools ✅]
         P1_2[1.2 Model metadata ✅]
-        P1_3[1.3 Reasoning control 🔲]
+        P1_3[1.3 Reasoning control ✅]
         P1_4[1.4 Vision + tools 🔲]
     end
 

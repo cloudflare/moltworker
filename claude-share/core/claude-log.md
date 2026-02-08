@@ -4,6 +4,59 @@
 
 ---
 
+## Session: 2026-02-08 | Live Testing & Bug Documentation (Session: 01Wjud3VHKMfSRbvMTzFohGS)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/review-moltworker-roadmap-q5aqD`
+**Status:** Completed
+
+### Summary
+User performed live testing of the deployed bot on Telegram. Tested reasoning control (Phase 1.3), tool usage, and image generation. Discovered 5 bugs documented as BUG-1 through BUG-5. All documentation files updated with findings.
+
+### Testing Results
+1. **Reasoning auto-detect** — Working correctly:
+   - "hello" (DeepSeek) → ~10s, reasoning off
+   - "implement fibonacci" → ~30s, reasoning medium
+   - "analyze pros and cons" → ~42s, reasoning high
+2. **think: override** — Working on direct path:
+   - "think:high what is 2+2?" → ~15s, forced high
+   - "think:off research quantum computing" → ~29s, forced off
+3. **Tool usage** — Model-dependent behavior:
+   - DeepSeek: "what's trending on hacker news?" → used web search, NOT fetch_news tool
+   - DeepSeek: explicit "use the fetch_news tool" → worked, 8 tool calls, 72s
+   - Grok: same query → immediately used fetch_news, 12s, 2 iterations
+4. **Image generation** — Broken:
+   - `/img a cat wearing a top hat` → "No endpoints found that support output modalities: image, text"
+   - `/use fluxpro` + text → "No response generated"
+
+### Bugs Found
+| ID | Issue | Severity | Location |
+|----|-------|----------|----------|
+| BUG-1 | "Processing complex task..." shown for ALL messages | Low/UX | `task-processor.ts:476` |
+| BUG-2 | DeepSeek doesn't proactively use tools | Medium | Model behavior |
+| BUG-3 | `think:` override not passed through DO path | Medium | `handler.ts` → `task-processor.ts` |
+| BUG-4 | `/img` fails — modalities not supported | High | `client.ts:357` |
+| BUG-5 | `/use fluxpro` + text → "No response" | Low | `handler.ts` |
+
+### Files Modified
+- `claude-share/core/GLOBAL_ROADMAP.md` (bug fixes section + changelog)
+- `claude-share/core/WORK_STATUS.md` (bug tracking + priorities)
+- `claude-share/core/SPECIFICATION.md` (known issues section)
+- `claude-share/core/claude-log.md` (this entry)
+- `claude-share/core/next_prompt.md` (bug context for next session)
+
+### Tests
+- [x] No code changes in this update
+- [x] Documentation only
+
+### Notes for Next Session
+- BUG-4 (image gen) is highest priority — may be an OpenRouter API change
+- BUG-3 (think: passthrough) needs `TaskRequest` interface update
+- BUG-2 (DeepSeek tools) could be addressed with system prompt hints
+- BUG-1 and BUG-5 are UX polish items
+
+---
+
 ## Session: 2026-02-08 | Phase 1.3: Configurable Reasoning (Session: 01Wjud3VHKMfSRbvMTzFohGS)
 
 **AI:** Claude Opus 4.6
