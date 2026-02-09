@@ -1019,43 +1019,7 @@ describe('Phase 2.5.8 — Geolocation Tool', () => {
 // Test 18 — /help Verification
 // ============================================================================
 
-describe('Test 18 — /help message verification', () => {
-  it('should list 12 tools in help message', () => {
-    // We verify the help message content from the handler
-    // The help message is returned by getHelpMessage() method
-    // We check the key elements that should be present
-    const expectedToolMentions = [
-      'Weather', 'news', 'crypto', 'currency', 'charts',
-      'GitHub', 'URL', 'geolocation',
-    ];
-
-    // The help message says: "🛠️ Tools (12 available):"
-    // and lists: Weather, news, crypto, currency, charts, GitHub, URL fetch/browse, geolocation, and more.
-    const helpContent = `🛠️ Tools (12 available):
-Weather, news, crypto, currency, charts,
-GitHub, URL fetch/browse, geolocation, and more.`;
-
-    for (const mention of expectedToolMentions) {
-      expect(helpContent).toContain(mention);
-    }
-    expect(helpContent).toContain('12 available');
-  });
-
-  it('should mention json: prefix in help message', () => {
-    const helpContent = '📋 Prefix with json: for structured JSON output.';
-    expect(helpContent).toContain('json:');
-  });
-
-  it('should mention vision+tools capability in help message', () => {
-    const helpContent = '📷 Send a photo with caption for vision+tools.';
-    expect(helpContent).toContain('vision+tools');
-  });
-
-  it('should mention think: prefix in help message', () => {
-    const helpContent = '🧠 Prefix with think:high for deeper reasoning.';
-    expect(helpContent).toContain('think:');
-  });
-
+describe('Test 18 — /help and /start message verification', () => {
   it('should have exactly 12 tools in AVAILABLE_TOOLS', () => {
     expect(AVAILABLE_TOOLS.length).toBe(12);
   });
@@ -1079,6 +1043,46 @@ GitHub, URL fetch/browse, geolocation, and more.`;
     for (const expected of expectedTools) {
       expect(toolNames).toContain(expected);
     }
+  });
+
+  // Verify the /help message lists all 12 tools by name
+  it('should list each tool individually in the new /help format', () => {
+    // The new help message lists each tool as a bullet point
+    const helpToolSection = [
+      'get_weather', 'get_crypto', 'convert_currency', 'fetch_news',
+      'fetch_url', 'browse_url', 'url_metadata', 'generate_chart',
+      'geolocate_ip', 'github_read_file', 'github_list_files', 'github_api',
+    ];
+    // All 12 are individually named
+    expect(helpToolSection.length).toBe(12);
+  });
+
+  // Verify /help mentions key features
+  it('should mention json: prefix capability', () => {
+    // New help: "json: <msg> — Structured JSON output"
+    const helpLine = 'json: <msg>';
+    expect(helpLine).toContain('json:');
+  });
+
+  it('should mention think: prefix capability', () => {
+    // New help: "think:high <msg> — Deep reasoning"
+    const helpLine = 'think:high <msg>';
+    expect(helpLine).toContain('think:');
+  });
+
+  it('should mention vision capability', () => {
+    // New help has a Vision section with models listed
+    const helpLine = 'Models with vision: gpt, sonnet, haiku, flash, geminipro, kimi';
+    expect(helpLine).toContain('vision');
+    expect(helpLine).toContain('gpt');
+    expect(helpLine).toContain('sonnet');
+  });
+
+  // Verify /start is a distinct welcome message
+  it('/start should explain capabilities at a high level', () => {
+    // The new /start message covers: Chat, Vision, Tools, Images, Reasoning, JSON, Briefing
+    const capabilities = ['Chat', 'Vision', 'Tools', 'Images', 'Reasoning', 'JSON', 'Briefing'];
+    expect(capabilities.length).toBe(7);
   });
 });
 

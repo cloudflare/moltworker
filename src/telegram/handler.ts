@@ -514,6 +514,8 @@ export class TelegramHandler {
 
     switch (cmd) {
       case '/start':
+        await this.bot.sendMessage(chatId, this.getStartMessage());
+        break;
       case '/help':
         await this.bot.sendMessage(chatId, this.getHelpMessage());
         break;
@@ -1563,61 +1565,98 @@ export class TelegramHandler {
   /**
    * Get help message
    */
+  private getStartMessage(): string {
+    return `🤖 Welcome to Moltworker!
+
+A multi-model AI assistant with real-time tools.
+
+💬 What can I do?
+
+Chat — Just type a message. I'll answer using whichever AI model you've selected (default: auto-route).
+
+Vision — Send a photo (with or without a caption). I'll analyze it and can combine that with live data lookups.
+
+Tools — When you ask about weather, crypto, news, GitHub repos, or URLs, I automatically call the right tool to get fresh data. No special syntax needed.
+
+Images — /img a cat in space creates an image using FLUX.
+
+Reasoning — Prefix with think:high to activate deep reasoning on models that support it.
+
+JSON — Prefix with json: to get structured JSON output (on supported models).
+
+Briefing — /briefing gives you a daily snapshot: weather, top HN stories, Reddit, and arXiv.
+
+🔧 Quick start:
+/pick — Choose a model (button menu)
+/models — Full model list with prices
+/help — All commands & reference
+/new — Clear conversation & start fresh
+
+Tip: /deep and /gpt are good defaults. DeepSeek is cheap with great tools; GPT-4o adds vision.`;
+  }
+
   private getHelpMessage(): string {
-    return `🤖 Moltworker AI Bot
+    return `📖 Moltworker — Command Reference
 
-📋 Commands:
-/models - List all AI models
-/use <alias> - Set your model
-/pick - Quick model picker (buttons)
-/model - Show current model
-/status - Show bot status
-/new - Start fresh conversation
-/clear - Clear history
-/cancel - Cancel running task
-/credits - Check OpenRouter credits
-/costs - Token usage & costs (/costs week)
-/briefing - Daily briefing (weather+news+research)
-/ping - Test bot response
+━━━ Core ━━━
+/use <alias> — Set your model (e.g. /use deep)
+/pick — Model picker (buttons)
+/model — Show current model
+/models — Full model catalog with prices
+/new or /clear — Reset conversation
+/cancel — Stop a running task
+/status — Bot status
+/ping — Latency check
 
-💾 Checkpoint Management:
-/saves - List all saved checkpoints
-/save [name] - Show checkpoint info
-/saveas <name> - Backup current to slot
-/load <name> - Restore from slot
-/delsave <name> - Delete a checkpoint
-/ar - Toggle auto-resume (/automode)
+━━━ Costs & Credits ━━━
+/credits — OpenRouter balance
+/costs — Token usage summary
+/costs week — Past 7 days breakdown
 
-🎨 Image Generation:
-/img <prompt> - Generate image
-/img fluxmax <prompt> - Use specific model
-Models: fluxklein, fluxpro, fluxflex, fluxmax
+━━━ Daily Briefing ━━━
+/briefing — Weather + HN + Reddit + arXiv digest
 
-🔧 Quick Model Switch:
-/auto - Auto-route (default)
-/deep - DeepSeek V3 (tools)
-/grok - Grok 4.1 (tools)
-/qwennext - Qwen3 Coder (tools)
-/gpt - GPT-4o (vision+tools)
-/sonnet - Claude Sonnet 4.5
-/haiku - Claude Haiku 4.5
+━━━ Image Generation ━━━
+/img <prompt> — Generate (default: FLUX.2 Pro)
+/img fluxmax <prompt> — Pick model
+Available: fluxklein, fluxpro, fluxflex, fluxmax
 
-🆓 Free Models:
-/trinity - Premium reasoning
-/deepfree - DeepSeek R1
-/qwencoderfree - Qwen3 Coder
-/llama70free - Llama 3.3 70B
-/devstral - Devstral Small
+━━━ Checkpoints ━━━
+/saves — List saved slots
+/saveas <name> — Save current state
+/load <name> — Restore state
+/delsave <name> — Delete slot
+/ar — Toggle auto-resume
 
-🛠️ Tools (12 available):
-Weather, news, crypto, currency, charts,
-GitHub, URL fetch/browse, geolocation, and more.
-Vision models with tools can use tools on images.
+━━━ Models (quick switch) ━━━
+Paid:  /deep /grok /gpt /sonnet /haiku /flash
+Free:  /trinity /deepfree /qwencoderfree /devstral
+All:   /models for full list (50+)
 
-💬 Just send a message to chat!
-📷 Send a photo with caption for vision+tools.
-🧠 Prefix with think:high for deeper reasoning.
-📋 Prefix with json: for structured JSON output.`;
+━━━ 12 Live Tools ━━━
+The bot calls these automatically when relevant:
+ • get_weather — Current conditions + 7-day forecast
+ • get_crypto — Coin price, top N, DEX pairs
+ • convert_currency — Live exchange rates
+ • fetch_news — HackerNews, Reddit, arXiv
+ • fetch_url — Read any web page
+ • browse_url — JS-rendered pages, screenshots, PDFs
+ • url_metadata — Page title/description/image
+ • generate_chart — Chart.js image via QuickChart
+ • geolocate_ip — IP to city/country/timezone
+ • github_read_file — Read file from any repo
+ • github_list_files — List repo directory
+ • github_api — Full GitHub API access
+
+━━━ Special Prefixes ━━━
+think:high <msg> — Deep reasoning (also: low, medium, off)
+json: <msg> — Structured JSON output
+Both work together: think:high json: analyze X
+
+━━━ Vision ━━━
+Send a photo with a caption — the bot analyzes the image and can call tools based on what it sees (e.g. identify a city, then look up its weather).
+Send a photo without caption — defaults to "What is in this image?"
+Models with vision: gpt, sonnet, haiku, flash, geminipro, kimi`;
   }
 
   /**
