@@ -159,6 +159,11 @@ app.use('*', async (c, next) => {
     return next();
   }
 
+  // Skip validation for Telegram webhook (no auth needed, gateway validates internally)
+  if (url.pathname.startsWith('/telegram')) {
+    return next();
+  }
+
   // Skip validation in dev mode
   if (c.env.DEV_MODE === 'true') {
     return next();
@@ -189,6 +194,12 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  // Skip auth for Telegram webhook (no JWT needed, gateway validates internally)
+  const url = new URL(c.req.url);
+  if (url.pathname.startsWith('/telegram')) {
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
@@ -417,7 +428,7 @@ app.all('*', async (c) => {
 
 /**
  * Scheduled handler for cron triggers.
- * Syncs moltbot config/state from container to R2 for persistence.
+ * Ensures the gateway is running (restarts after container sleep) and syncs to R2.
  */
 async function scheduled(
   _event: ScheduledEvent,
@@ -426,6 +437,14 @@ async function scheduled(
 ): Promise<void> {
   const options = buildSandboxOptions(env);
   const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
+
+  // Ensure the gateway is running (wakes container if sleeping, restarts gateway if stopped)
+  try {
+    await ensureMoltbotGateway(sandbox, env);
+    console.log('[cron] Gateway is running');
+  } catch (error) {
+    console.error('[cron] Failed to ensure gateway:', error);
+  }
 
   console.log('[cron] Starting backup sync to R2...');
   const result = await syncToR2(sandbox, env);

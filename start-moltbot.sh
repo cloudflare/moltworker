@@ -1,5 +1,5 @@
 #!/bin/bash
-# Startup script for Moltbot in Cloudflare Sandbox
+# Startup script for Moltbot in Cloudflare Sandbox (v2026.02.08)
 # This script:
 # 1. Restores config from R2 backup if available
 # 2. Configures moltbot from environment variables
@@ -105,6 +105,17 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     fi
 fi
 
+# Restore credentials from R2 backup if available (only if R2 is newer)
+CREDENTIALS_DIR="/root/clawd/credentials"
+if [ -d "$BACKUP_DIR/credentials" ] && [ "$(ls -A $BACKUP_DIR/credentials 2>/dev/null)" ]; then
+    if should_restore_from_r2; then
+        echo "Restoring credentials from $BACKUP_DIR/credentials..."
+        mkdir -p "$CREDENTIALS_DIR"
+        cp -a "$BACKUP_DIR/credentials/." "$CREDENTIALS_DIR/"
+        echo "Restored credentials from R2 backup"
+    fi
+fi
+
 # If config file still doesn't exist, create from template
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, initializing from template..."
@@ -128,6 +139,27 @@ EOFCONFIG
     fi
 else
     echo "Using existing config"
+fi
+
+# ============================================================
+# SANITIZE CONFIG: Remove keys that clawdbot doesn't recognize
+# ============================================================
+if [ -f "$CONFIG_FILE" ]; then
+    node -e "
+const fs = require('fs');
+const config = JSON.parse(fs.readFileSync('$CONFIG_FILE', 'utf8'));
+let changed = false;
+// Remove gateway.env (not a valid clawdbot config key)
+if (config.gateway && config.gateway.env) {
+    delete config.gateway.env;
+    changed = true;
+    console.log('Removed invalid gateway.env from config');
+}
+if (changed) {
+    fs.writeFileSync('$CONFIG_FILE', JSON.stringify(config, null, 2));
+    console.log('Config sanitized');
+}
+"
 fi
 
 # ============================================================
@@ -273,10 +305,10 @@ if (isOpenAI) {
     config.agents.defaults.models['anthropic/claude-opus-4-5-20251101'] = { alias: 'Opus 4.5' };
     config.agents.defaults.models['anthropic/claude-sonnet-4-5-20250929'] = { alias: 'Sonnet 4.5' };
     config.agents.defaults.models['anthropic/claude-haiku-4-5-20251001'] = { alias: 'Haiku 4.5' };
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5-20251101';
+    config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5-20250929';
 } else {
     // Default to Anthropic without custom base URL (uses built-in pi-ai catalog)
-    config.agents.defaults.model.primary = 'anthropic/claude-opus-4-5';
+    config.agents.defaults.model.primary = 'anthropic/claude-sonnet-4-5';
 }
 
 // Write updated config
