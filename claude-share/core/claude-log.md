@@ -4,6 +4,71 @@
 
 ---
 
+## Session: 2026-02-09 | Phase 1.5: Structured Output Support (Session: 013wvC2kun5Mbr3J81KUPn99)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/daily-briefing-aggregator-NfHhi`
+**Status:** Completed
+
+### Summary
+Implemented Phase 1.5 (Structured Output Support). Users can now prefix messages with `json:` to request structured JSON output from compatible models. The `response_format: { type: "json_object" }` is injected into API requests for models with `structuredOutput: true` metadata. This completes all of Phase 1 (Tool-Calling Optimization).
+
+### Changes Made
+1. **`ResponseFormat` type** in `client.ts` — supports `text`, `json_object`, and `json_schema` (with name, strict, schema fields). Added `response_format` to `ChatCompletionRequest`.
+
+2. **`parseJsonPrefix()`** in `models.ts` — strips `json:` prefix from messages (case-insensitive), returns `{ requestJson, cleanMessage }`. Similar pattern to `parseReasoningOverride()` for `think:` prefix.
+
+3. **`supportsStructuredOutput()`** in `models.ts` — checks if a model alias has `structuredOutput: true` metadata. 7 models supported: gpt, mini, gptoss, deep, mistrallarge, flash, geminipro.
+
+4. **Client methods updated** — `responseFormat` option added to `chatCompletion()`, `chatCompletionWithTools()`, and `chatCompletionStreamingWithTools()`. Only injected when explicitly provided.
+
+5. **Handler integration** — `handleChat()` parses `json:` prefix after `think:` prefix, determines `responseFormat` based on model support, passes through DO TaskRequest and fallback paths. Updated `/help` with `json:` prefix hint.
+
+6. **DO passthrough** — `responseFormat` added to `TaskRequest` and `TaskState` interfaces. Persists across alarm auto-resume. Passed to both OpenRouter streaming and non-OpenRouter fetch paths.
+
+7. **22 new tests** in `structured-output.test.ts` — prefix parsing (8 tests), model support checks (3), ResponseFormat type (3), ChatCompletionRequest serialization (2), client integration (4), prefix combination with think: (2).
+
+### Files Modified
+- `src/openrouter/client.ts` (ResponseFormat type, response_format in request, all 3 methods)
+- `src/openrouter/models.ts` (parseJsonPrefix, supportsStructuredOutput)
+- `src/telegram/handler.ts` (json: prefix parsing, responseFormat injection, /help update)
+- `src/durable-objects/task-processor.ts` (responseFormat in TaskRequest/TaskState, streaming + fetch paths)
+- `src/openrouter/structured-output.test.ts` (NEW — 22 tests)
+- `claude-share/core/*.md` (all sync docs)
+
+### Test Results
+- 258 tests pass (22 new)
+- TypeScript: only pre-existing errors
+
+---
+
+## Session: 2026-02-09 | Phase 1.4: Vision + Tools + /help Update (Session: 013wvC2kun5Mbr3J81KUPn99)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/daily-briefing-aggregator-NfHhi`
+**Status:** Completed
+
+### Summary
+Implemented Phase 1.4 (Combine Vision + Tools). Vision messages now route through the tool-calling path for tool-supporting models, enabling models like GPT-4o to use all 12 tools while analyzing images. Also updated `/help` to reflect all current capabilities.
+
+### Changes Made
+1. **Unified vision+tools routing** in `handleVision()` — builds `ContentPart[]` message (text + image_url) and routes through DO or direct tool-calling path for tool-supporting models. Non-tool models still use simple `chatCompletionWithVision()`.
+
+2. **Updated `/help` command** — now shows all 12 tools, vision+tools capability, `think:` prefix hint, and correct model descriptions.
+
+3. **6 new tests** in `vision-tools.test.ts` — verifying multimodal message structure, JSON serialization, tools in request alongside vision content, and tool calls triggered by vision analysis.
+
+### Files Modified
+- `src/telegram/handler.ts` (vision+tools routing + /help update)
+- `src/openrouter/vision-tools.test.ts` (NEW — 6 tests)
+- `claude-share/core/*.md` (all sync docs)
+
+### Test Results
+- 236 tests pass (6 new)
+- TypeScript: only pre-existing errors
+
+---
+
 ## Session: 2026-02-08 | Phase 2.5.6+2.5.8: Crypto + Geolocation Tools (Session: 013wvC2kun5Mbr3J81KUPn99)
 
 **AI:** Claude Opus 4.6

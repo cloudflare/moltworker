@@ -2,8 +2,8 @@
 
 > Product vision, feature specifications, and technical requirements.
 
-**Last Updated:** 2026-02-08
-**Version:** 2.1 (post-implementation + free APIs)
+**Last Updated:** 2026-02-09
+**Version:** 2.2 (Phase 1 complete + structured output)
 
 ---
 
@@ -83,8 +83,24 @@ Provide a self-hosted, multi-model AI assistant that gets better with every inte
 - **Implementation:** `models.ts` (types + `getReasoningParam()`, `detectReasoningLevel()`, `parseReasoningOverride()`), `client.ts` (injection in 3 methods), `handler.ts` (prefix parsing). 36 tests in `reasoning.test.ts`.
 
 #### F1.4: Vision + Tools Combined
-- **Status:** 🔲 Planned
-- **Spec:** Unified method that accepts both image input and tool definitions. User sends screenshot + "fix this" → model sees image AND calls GitHub tools.
+- **Status:** ✅ Complete
+- **Spec:** Vision messages (photo + caption) now route through the tool-calling path for tool-supporting models. User sends photo + caption → model sees image AND can use all 12 tools (weather, GitHub, crypto, etc).
+- **Implementation:** `handleVision()` in `handler.ts` builds `ContentPart[]` message (text + image_url) and routes through DO/tool-calling path for tool-supporting models. Falls back to simple `chatCompletionWithVision()` for non-tool models. `/help` updated with all 12 tools and vision+tools capability. 6 tests in `vision-tools.test.ts`.
+
+#### F1.5: Structured Output Support
+- **Status:** ✅ Complete
+- **Spec:** Request structured JSON output from compatible models via `response_format: { type: "json_object" }`. Users prefix messages with `json:` to request JSON output. Only injected for models with `structuredOutput: true` metadata.
+- **User interface:** `json: list 5 capital cities` — model returns valid JSON. Can combine with reasoning: `think:high json: analyze this data`.
+- **Compatible models:** GPT-4o, GPT-4o Mini, GPT-OSS-120B, DeepSeek V3.2, Mistral Large 3, Gemini 3 Flash, Gemini 3 Pro (7 models).
+- **Graceful fallback:** Non-compatible models ignore the prefix and respond normally.
+- **Implementation:**
+  - `ResponseFormat` type in `client.ts` — `text | json_object | json_schema`
+  - `parseJsonPrefix()` in `models.ts` — strips `json:` prefix, case-insensitive
+  - `supportsStructuredOutput()` in `models.ts` — checks model capability flag
+  - `responseFormat` option added to all 3 client methods (`chatCompletion`, `chatCompletionWithTools`, `chatCompletionStreamingWithTools`)
+  - `responseFormat` field added to `TaskRequest` and `TaskState` in `task-processor.ts` for DO persistence
+  - Wired through handler → DO → streaming API call
+  - 22 tests in `structured-output.test.ts`
 
 ---
 

@@ -17,8 +17,11 @@ import {
   isImageGenModel,
   DEFAULT_MODEL,
   parseReasoningOverride,
+  parseJsonPrefix,
+  supportsStructuredOutput,
   type ReasoningLevel,
 } from '../openrouter/models';
+import type { ResponseFormat } from '../openrouter/client';
 
 // Telegram Types
 export interface TelegramUpdate {
@@ -1020,6 +1023,77 @@ export class TelegramHandler {
 
       const base64 = await this.bot.downloadFileBase64(file.file_path);
 
+      // Build multimodal user message with image + text
+      const visionMessage: ChatMessage = {
+        role: 'user',
+        content: [
+          { type: 'text', text: caption },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+        ],
+      };
+
+      // If model supports tools, route through tool-calling path (DO or fallback)
+      if (modelSupportsTools(modelAlias)) {
+        const history = await this.storage.getConversation(userId, 10);
+        const systemPrompt = await this.getSystemPrompt();
+        const toolHint = '\n\nYou have access to tools (web browsing, GitHub, weather, news, currency conversion, charts, etc). Use them proactively when a question could benefit from real-time data, external lookups, or verification.';
+
+        const messages: ChatMessage[] = [
+          { role: 'system', content: systemPrompt + toolHint },
+          ...history.map(msg => ({
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content,
+          })),
+          visionMessage,
+        ];
+
+        if (this.taskProcessor) {
+          // Route to Durable Object for vision + tools
+          const taskId = `${userId}-${Date.now()}`;
+          const autoResume = await this.storage.getUserAutoResume(userId);
+          const taskRequest: TaskRequest = {
+            taskId,
+            chatId,
+            userId,
+            modelAlias,
+            messages,
+            telegramToken: this.telegramToken,
+            openrouterKey: this.openrouterKey,
+            githubToken: this.githubToken,
+            dashscopeKey: this.dashscopeKey,
+            moonshotKey: this.moonshotKey,
+            deepseekKey: this.deepseekKey,
+            autoResume,
+          };
+
+          const doId = this.taskProcessor.idFromName(userId);
+          const doStub = this.taskProcessor.get(doId);
+          await doStub.fetch(new Request('https://do/process', {
+            method: 'POST',
+            body: JSON.stringify(taskRequest),
+          }));
+
+          await this.storage.addMessage(userId, 'user', `[Image] ${caption}`);
+          return;
+        }
+
+        // Fallback: direct tool-calling with vision
+        const { finalText, toolsUsed } = await this.openrouter.chatCompletionWithTools(
+          modelAlias, messages, {
+            maxToolCalls: 10,
+            maxTimeMs: 120000,
+            toolContext: { githubToken: this.githubToken, browser: this.browser },
+          }
+        );
+
+        await this.storage.addMessage(userId, 'user', `[Image] ${caption}`);
+        await this.storage.addMessage(userId, 'assistant', finalText);
+        const toolSuffix = toolsUsed.length > 0 ? `\n\n[Tools: ${toolsUsed.join(', ')}]` : '';
+        await this.bot.sendMessage(chatId, finalText + toolSuffix);
+        return;
+      }
+
+      // Non-tool model: use simple vision call
       const response = await this.openrouter.chatCompletionWithVision(
         modelAlias,
         caption,
@@ -1047,7 +1121,8 @@ export class TelegramHandler {
 
     // Parse optional think:LEVEL prefix (e.g., "think:high how do I ...")
     const { level: reasoningLevel, cleanMessage } = parseReasoningOverride(text);
-    const messageText = cleanMessage;
+    // Parse optional json: prefix (e.g., "json: list 5 cities")
+    const { requestJson, cleanMessage: messageText } = parseJsonPrefix(cleanMessage);
 
     // Get user's model and conversation history
     let modelAlias = await this.storage.getUserModel(userId);
@@ -1088,6 +1163,12 @@ export class TelegramHandler {
           // Route to Durable Object for long-running processing
           const taskId = `${userId}-${Date.now()}`;
           const autoResume = await this.storage.getUserAutoResume(userId);
+          // Determine responseFormat if json: prefix was used and model supports it
+          const responseFormat: ResponseFormat | undefined =
+            requestJson && supportsStructuredOutput(modelAlias)
+              ? { type: 'json_object' }
+              : undefined;
+
           const taskRequest: TaskRequest = {
             taskId,
             chatId,
@@ -1102,6 +1183,7 @@ export class TelegramHandler {
             deepseekKey: this.deepseekKey,
             autoResume,
             reasoningLevel: reasoningLevel ?? undefined,
+            responseFormat,
           };
 
           // Get or create DO instance for this user
@@ -1202,6 +1284,9 @@ export class TelegramHandler {
               browser: this.browser,
             },
             reasoningLevel: reasoningLevel ?? undefined,
+            responseFormat: requestJson && supportsStructuredOutput(modelAlias)
+              ? { type: 'json_object' }
+              : undefined,
           }
         );
 
@@ -1230,6 +1315,9 @@ export class TelegramHandler {
         // Regular chat completion without tools
         const response = await this.openrouter.chatCompletion(modelAlias, messages, {
           reasoningLevel: reasoningLevel ?? undefined,
+          responseFormat: requestJson && supportsStructuredOutput(modelAlias)
+            ? { type: 'json_object' }
+            : undefined,
         });
         responseText = extractTextResponse(response);
       }
@@ -1488,7 +1576,7 @@ export class TelegramHandler {
 /clear - Clear history
 /cancel - Cancel running task
 /credits - Check OpenRouter credits
-/costs - Your token usage and costs
+/costs - Token usage & costs (/costs week)
 /briefing - Daily briefing (weather+news+research)
 /ping - Test bot response
 
@@ -1507,7 +1595,7 @@ Models: fluxklein, fluxpro, fluxflex, fluxmax
 
 🔧 Quick Model Switch:
 /auto - Auto-route (default)
-/deep - DeepSeek V3
+/deep - DeepSeek V3 (tools)
 /grok - Grok 4.1 (tools)
 /qwennext - Qwen3 Coder (tools)
 /gpt - GPT-4o (vision+tools)
@@ -1521,11 +1609,15 @@ Models: fluxklein, fluxpro, fluxflex, fluxmax
 /llama70free - Llama 3.3 70B
 /devstral - Devstral Small
 
-🛠️ Tools:
-Models with tools can use GitHub, browse URLs, and more.
+🛠️ Tools (12 available):
+Weather, news, crypto, currency, charts,
+GitHub, URL fetch/browse, geolocation, and more.
+Vision models with tools can use tools on images.
 
 💬 Just send a message to chat!
-📷 Send a photo with caption for vision.`;
+📷 Send a photo with caption for vision+tools.
+🧠 Prefix with think:high for deeper reasoning.
+📋 Prefix with json: for structured JSON output.`;
   }
 
   /**

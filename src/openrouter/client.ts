@@ -32,7 +32,13 @@ export interface ChatCompletionRequest {
   tools?: ToolDefinition[];
   tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
   reasoning?: ReasoningParam;
+  response_format?: ResponseFormat;
 }
+
+export type ResponseFormat =
+  | { type: 'text' }
+  | { type: 'json_object' }
+  | { type: 'json_schema'; json_schema: { name: string; strict?: boolean; schema: Record<string, unknown> } };
 
 export interface ChatCompletionResponse {
   id: string;
@@ -112,6 +118,7 @@ export class OpenRouterClient {
       maxTokens?: number;
       temperature?: number;
       reasoningLevel?: ReasoningLevel;
+      responseFormat?: ResponseFormat;
     }
   ): Promise<ChatCompletionResponse> {
     const modelId = getModelId(modelAlias);
@@ -128,6 +135,11 @@ export class OpenRouterClient {
     const reasoning = getReasoningParam(modelAlias, level);
     if (reasoning) {
       request.reasoning = reasoning;
+    }
+
+    // Inject structured output format if requested
+    if (options?.responseFormat) {
+      request.response_format = options.responseFormat;
     }
 
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -160,6 +172,7 @@ export class OpenRouterClient {
       onIteration?: (iteration: number, totalTools: number) => void; // Callback for iteration progress
       toolContext?: ToolContext; // Context with secrets for tool execution
       reasoningLevel?: ReasoningLevel;
+      responseFormat?: ResponseFormat;
     }
   ): Promise<{ response: ChatCompletionResponse; finalText: string; toolsUsed: string[]; hitLimit: boolean }> {
     const modelId = getModelId(modelAlias);
@@ -206,6 +219,11 @@ export class OpenRouterClient {
       // Inject reasoning parameter for configurable models
       if (reasoningParam) {
         request.reasoning = reasoningParam;
+      }
+
+      // Inject structured output format if requested
+      if (options?.responseFormat) {
+        request.response_format = options.responseFormat;
       }
 
       const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
@@ -454,6 +472,7 @@ export class OpenRouterClient {
       idleTimeoutMs?: number;
       onProgress?: () => void; // Called when chunks received - use for heartbeat
       reasoningLevel?: ReasoningLevel;
+      responseFormat?: ResponseFormat;
     }
   ): Promise<ChatCompletionResponse> {
     const modelId = getModelId(modelAlias);
@@ -488,6 +507,9 @@ export class OpenRouterClient {
       };
       if (reasoning) {
         requestBody.reasoning = reasoning;
+      }
+      if (options?.responseFormat) {
+        requestBody.response_format = options.responseFormat;
       }
 
       const response = await fetch(url.toString(), {

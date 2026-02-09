@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-02-09
 
 ---
 
@@ -18,6 +18,8 @@
 
 | Task ID | Description | Assignee | Status | Branch |
 |---------|-------------|----------|--------|--------|
+| 1.5 | Structured output support (json: prefix) | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
+| 1.4 | Combine vision + tools + update /help | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | 2.5.6+2.5.8 | Crypto tool + Geolocation tool | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-1,2,5 | Fix all 3 remaining UX bugs | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | 2.1+2.2 | Token/cost tracking + /costs command | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
@@ -32,7 +34,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Phase 2.1+2.2 complete | `claude/daily-briefing-aggregator-NfHhi` | 2026-02-08 |
+| Claude | Phase 1.5 complete | `claude/daily-briefing-aggregator-NfHhi` | 2026-02-09 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -67,6 +69,8 @@
 | BUG-5 | Image-gen model fallback for text | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 | 2.5.6 | Crypto tool (CoinCap+CoinPaprika+DEX Screener) | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 | 2.5.8 | Geolocation from IP (ipapi.co) | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
+| 1.5 | Structured output support (json: prefix) | Claude Opus 4.6 | 2026-02-09 | `claude/daily-briefing-aggregator-NfHhi` |
+| 1.4 | Vision + tools unified + /help update | Claude Opus 4.6 | 2026-02-09 | `claude/daily-briefing-aggregator-NfHhi` |
 
 ---
 
@@ -92,9 +96,9 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 1.4** — Combine vision + tools into unified method
-2. **Phase 1.5** — Structured output support
-3. **Phase 2.5.9** — Additional free API tools (if any remain)
+1. **Phase 3.1** — Compound learning loop
+2. **Phase 3.2** — Structured task phases
+3. **Phase 2.5.9** — Holiday awareness (Nager.Date)
 
 ---
 
@@ -102,4 +106,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 27 | Phase 0 complete, Phase 1.1-1.3 complete, upstream sync complete, Phase 2.1+2.2 complete, Phase 2.5 COMPLETE (all 8 tools), ALL 5 bugs fixed, well ahead of plan |
+| Sprint 1 (current) | 8 | 29 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1+2.2 complete, Phase 2.5 COMPLETE (all 8 tools), ALL 5 bugs fixed, well ahead of plan |

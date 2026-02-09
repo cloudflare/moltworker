@@ -578,6 +578,14 @@ export function isImageGenModel(alias: string): boolean {
 }
 
 /**
+ * Check if a model supports structured output (JSON schema)
+ */
+export function supportsStructuredOutput(alias: string): boolean {
+  const model = getModel(alias);
+  return model?.structuredOutput || false;
+}
+
+/**
  * Parse cost string to get input cost for sorting
  * Formats: "$X/$Y" (per million), "FREE", "$X/megapixel"
  */
@@ -739,6 +747,22 @@ export function parseReasoningOverride(message: string): { level: ReasoningLevel
     };
   }
   return { level: null, cleanMessage: message };
+}
+
+/**
+ * Parse json: prefix from user message
+ * Format: "json: <message>" — requests JSON output from models that support it
+ * Returns { requestJson, cleanMessage } where requestJson is true if prefix found
+ */
+export function parseJsonPrefix(message: string): { requestJson: boolean; cleanMessage: string } {
+  const match = message.match(/^json:\s*/i);
+  if (match) {
+    return {
+      requestJson: true,
+      cleanMessage: message.slice(match[0].length),
+    };
+  }
+  return { requestJson: false, cleanMessage: message };
 }
 
 /** Minimal shape needed for reasoning detection (avoids importing ChatMessage) */

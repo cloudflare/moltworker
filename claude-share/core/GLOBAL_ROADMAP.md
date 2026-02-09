@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-02-09
 
 ---
 
@@ -57,8 +57,8 @@
 | 1.1 | Implement parallel tool execution (`Promise.all`) | ✅ | Claude | `client.ts` + `task-processor.ts` — concurrent execution of all tool_calls |
 | 1.2 | Enrich model capability metadata | ✅ | Claude | `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext` for all 30+ models |
 | 1.3 | Add configurable reasoning per model | ✅ | Claude | Auto-detect + `think:LEVEL` override; DeepSeek/Grok `{enabled}`, Gemini `{effort}` |
-| 1.4 | Combine vision + tools into unified method | 🔲 | Codex | Merge `chatCompletionWithVision` and `chatCompletionWithTools` |
-| 1.5 | Add structured output support | 🔲 | Claude | `response_format: { type: "json_schema" }` for compatible models |
+| 1.4 | Combine vision + tools into unified method | ✅ | Claude | Vision messages now route through tool-calling path (DO) for tool-supporting models |
+| 1.5 | Add structured output support | ✅ | Claude | `response_format: { type: "json_object" }` via `json:` prefix for compatible models |
 
 > 🧑 HUMAN CHECK 1.6: Test parallel tool execution with real API calls — ⏳ PENDING
 > 🧑 HUMAN CHECK 1.7: Verify reasoning control doesn't break existing models — ✅ TESTED (works but BUG-3: think: not passed through DO)
@@ -217,6 +217,8 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-09 | Claude Opus 4.6 (Session: 013wvC2kun5Mbr3J81KUPn99) | feat(client): structured output support + json: prefix — Phase 1.5 complete | src/openrouter/client.ts, src/openrouter/models.ts, src/telegram/handler.ts, src/durable-objects/task-processor.ts, src/openrouter/structured-output.test.ts
+2026-02-09 | Claude Opus 4.6 (Session: 013wvC2kun5Mbr3J81KUPn99) | feat(telegram): unify vision + tools + update /help — Phase 1.4 complete | src/telegram/handler.ts, src/openrouter/vision-tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 013wvC2kun5Mbr3J81KUPn99) | feat(tools): add get_crypto + geolocate_ip tools — Phase 2.5.6+2.5.8 complete, 12 tools total | src/openrouter/tools.ts, src/openrouter/tools.test.ts
 2026-02-08 | Claude Opus 4.6 (Session: 013wvC2kun5Mbr3J81KUPn99) | fix(ux): BUG-1 (Thinking... msg), BUG-2 (tool prompt hint), BUG-5 (image-gen fallback) — all 5 bugs now fixed | src/durable-objects/task-processor.ts, src/telegram/handler.ts
 2026-02-08 | Claude Opus 4.6 (Session: 013wvC2kun5Mbr3J81KUPn99) | feat(costs): per-request token/cost tracking + /costs command — Phase 2.1+2.2 complete | src/openrouter/costs.ts, src/openrouter/costs.test.ts, src/durable-objects/task-processor.ts, src/telegram/handler.ts
@@ -255,11 +257,12 @@ graph TD
     P5 --> P6[Phase 6: Platform Expansion]
     P25 --> P6
 
-    subgraph "Phase 1 (1.1-1.2 ✅)"
+    subgraph "Phase 1 (1.1-1.5 ✅)"
         P1_1[1.1 Parallel tools ✅]
         P1_2[1.2 Model metadata ✅]
         P1_3[1.3 Reasoning control ✅]
-        P1_4[1.4 Vision + tools 🔲]
+        P1_4[1.4 Vision + tools ✅]
+        P1_5[1.5 Structured output ✅]
     end
 
     subgraph "Phase 2.5: Free APIs ($0 cost)"

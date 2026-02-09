@@ -5,7 +5,7 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
-import { createOpenRouterClient, type ChatMessage } from '../openrouter/client';
+import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, type Provider, type ReasoningLevel } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
@@ -44,6 +44,8 @@ interface TaskState {
   autoResumeCount?: number; // Number of auto-resumes so far
   // Reasoning level override
   reasoningLevel?: ReasoningLevel;
+  // Structured output format
+  responseFormat?: ResponseFormat;
 }
 
 // Task request from the worker
@@ -64,6 +66,8 @@ export interface TaskRequest {
   autoResume?: boolean;    // If true, auto-resume on timeout
   // Reasoning level override (from think:LEVEL prefix)
   reasoningLevel?: ReasoningLevel;
+  // Structured output format (from json: prefix)
+  responseFormat?: ResponseFormat;
 }
 
 // DO environment with R2 binding
@@ -163,6 +167,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         deepseekKey: task.deepseekKey,
         autoResume: task.autoResume,
         reasoningLevel: task.reasoningLevel,
+        responseFormat: task.responseFormat,
       };
 
       // Use waitUntil to trigger resume without blocking alarm
@@ -483,6 +488,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     // Preserve auto-resume setting (and count if resuming)
     task.autoResume = request.autoResume;
     task.reasoningLevel = request.reasoningLevel;
+    task.responseFormat = request.responseFormat;
     // Keep existing autoResumeCount if resuming, otherwise start at 0
     const existingTask = await this.doState.storage.get<TaskState>('task');
     if (existingTask?.autoResumeCount !== undefined) {
@@ -661,6 +667,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   toolChoice: 'auto',
                   idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
                   reasoningLevel: request.reasoningLevel,
+                  responseFormat: request.responseFormat,
                   onProgress: () => {
                     progressCount++;
                     // Update watchdog every 50 chunks (~every few seconds)
@@ -691,17 +698,22 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   this.doState.storage.put('task', task).catch(() => {});
                 }, 10000);
 
-                const fetchPromise = fetch(providerConfig.baseUrl, {
-                  method: 'POST',
-                  headers,
-                  body: JSON.stringify({
+                const requestBody: Record<string, unknown> = {
                     model: modelId,
                     messages: conversationMessages,
                     max_tokens: 4096,
                     temperature: 0.7,
                     tools: TOOLS_WITHOUT_BROWSER,
                     tool_choice: 'auto',
-                  }),
+                  };
+                if (request.responseFormat) {
+                  requestBody.response_format = request.responseFormat;
+                }
+
+                const fetchPromise = fetch(providerConfig.baseUrl, {
+                  method: 'POST',
+                  headers,
+                  body: JSON.stringify(requestBody),
                 });
 
                 // 5 minute timeout per API call
