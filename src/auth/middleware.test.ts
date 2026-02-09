@@ -56,10 +56,7 @@ describe('isE2ETestMode', () => {
 
 describe('extractJWT', () => {
   // Helper to create a mock context
-  function createMockContext(options: {
-    jwtHeader?: string;
-    cookies?: string;
-  }): Context<AppEnv> {
+  function createMockContext(options: { jwtHeader?: string; cookies?: string }): Context<AppEnv> {
     const headers = new Headers();
     if (options.jwtHeader) {
       headers.set('CF-Access-JWT-Assertion', options.jwtHeader);
@@ -92,8 +89,8 @@ describe('extractJWT', () => {
 
   it('extracts JWT from CF_Authorization cookie with other cookies', () => {
     const jwt = 'cookie.payload.signature';
-    const c = createMockContext({ 
-      cookies: `other=value; CF_Authorization=${jwt}; another=test` 
+    const c = createMockContext({
+      cookies: `other=value; CF_Authorization=${jwt}; another=test`,
     });
     expect(extractJWT(c)).toBe(jwt);
   });
@@ -101,9 +98,9 @@ describe('extractJWT', () => {
   it('prefers header over cookie', () => {
     const headerJwt = 'header.jwt.token';
     const cookieJwt = 'cookie.jwt.token';
-    const c = createMockContext({ 
+    const c = createMockContext({
       jwtHeader: headerJwt,
-      cookies: `CF_Authorization=${cookieJwt}` 
+      cookies: `CF_Authorization=${cookieJwt}`,
     });
     expect(extractJWT(c)).toBe(headerJwt);
   });
@@ -140,7 +137,13 @@ describe('createAccessMiddleware', () => {
     env?: Partial<MoltbotEnv>;
     jwtHeader?: string;
     cookies?: string;
-  }): { c: Context<AppEnv>; jsonMock: ReturnType<typeof vi.fn>; htmlMock: ReturnType<typeof vi.fn>; redirectMock: ReturnType<typeof vi.fn>; setMock: ReturnType<typeof vi.fn> } {
+  }): {
+    c: Context<AppEnv>;
+    jsonMock: ReturnType<typeof vi.fn>;
+    htmlMock: ReturnType<typeof vi.fn>;
+    redirectMock: ReturnType<typeof vi.fn>;
+    setMock: ReturnType<typeof vi.fn>;
+  } {
     const headers = new Headers();
     if (options.jwtHeader) {
       headers.set('CF-Access-JWT-Assertion', options.jwtHeader);
@@ -177,7 +180,10 @@ describe('createAccessMiddleware', () => {
     await middleware(c, next);
 
     expect(next).toHaveBeenCalled();
-    expect(setMock).toHaveBeenCalledWith('accessUser', { email: 'dev@localhost', name: 'Dev User' });
+    expect(setMock).toHaveBeenCalledWith('accessUser', {
+      email: 'dev@localhost',
+      name: 'Dev User',
+    });
   });
 
   it('skips auth and sets dev user when E2E_TEST_MODE is true', async () => {
@@ -188,7 +194,10 @@ describe('createAccessMiddleware', () => {
     await middleware(c, next);
 
     expect(next).toHaveBeenCalled();
-    expect(setMock).toHaveBeenCalledWith('accessUser', { email: 'dev@localhost', name: 'Dev User' });
+    expect(setMock).toHaveBeenCalledWith('accessUser', {
+      email: 'dev@localhost',
+      name: 'Dev User',
+    });
   });
 
   it('returns 500 JSON error when CF Access not configured', async () => {
@@ -201,7 +210,7 @@ describe('createAccessMiddleware', () => {
     expect(next).not.toHaveBeenCalled();
     expect(jsonMock).toHaveBeenCalledWith(
       expect.objectContaining({ error: 'Cloudflare Access not configured' }),
-      500
+      500,
     );
   });
 
@@ -213,15 +222,12 @@ describe('createAccessMiddleware', () => {
     await middleware(c, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(htmlMock).toHaveBeenCalledWith(
-      expect.stringContaining('Admin UI Not Configured'),
-      500
-    );
+    expect(htmlMock).toHaveBeenCalledWith(expect.stringContaining('Admin UI Not Configured'), 500);
   });
 
   it('returns 401 JSON error when JWT is missing', async () => {
-    const { c, jsonMock } = createFullMockContext({ 
-      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' } 
+    const { c, jsonMock } = createFullMockContext({
+      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
     });
     const middleware = createAccessMiddleware({ type: 'json' });
     const next = vi.fn();
@@ -229,15 +235,12 @@ describe('createAccessMiddleware', () => {
     await middleware(c, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(jsonMock).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'Unauthorized' }),
-      401
-    );
+    expect(jsonMock).toHaveBeenCalledWith(expect.objectContaining({ error: 'Unauthorized' }), 401);
   });
 
   it('returns 401 HTML error when JWT is missing', async () => {
-    const { c, htmlMock } = createFullMockContext({ 
-      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' } 
+    const { c, htmlMock } = createFullMockContext({
+      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
     });
     const middleware = createAccessMiddleware({ type: 'html' });
     const next = vi.fn();
@@ -245,15 +248,12 @@ describe('createAccessMiddleware', () => {
     await middleware(c, next);
 
     expect(next).not.toHaveBeenCalled();
-    expect(htmlMock).toHaveBeenCalledWith(
-      expect.stringContaining('Unauthorized'),
-      401
-    );
+    expect(htmlMock).toHaveBeenCalledWith(expect.stringContaining('Unauthorized'), 401);
   });
 
   it('redirects when JWT is missing and redirectOnMissing is true', async () => {
-    const { c, redirectMock } = createFullMockContext({ 
-      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' } 
+    const { c, redirectMock } = createFullMockContext({
+      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud123' },
     });
     const middleware = createAccessMiddleware({ type: 'html', redirectOnMissing: true });
     const next = vi.fn();

@@ -4,7 +4,7 @@ import type { AppEnv } from '../types';
 /**
  * Admin UI routes
  * Serves the SPA from the ASSETS binding.
- * 
+ *
  * Note: Static assets (/_admin/assets/*) are handled by publicRoutes.
  * Auth is applied centrally in index.ts before this app is mounted.
  */

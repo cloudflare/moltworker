@@ -3,7 +3,6 @@ import { findExistingMoltbotProcess } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
 import { createMockSandbox } from '../test-utils';
 
-// Helper to create a full mock process (with methods needed for process tests)
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {
     id: 'test-id',
@@ -30,19 +29,20 @@ describe('findExistingMoltbotProcess', () => {
     const processes = [
       createFullMockProcess({ command: 'openclaw devices list --json', status: 'running' }),
       createFullMockProcess({ command: 'openclaw --version', status: 'completed' }),
+      createFullMockProcess({ command: 'openclaw onboard --non-interactive', status: 'running' }),
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue(processes);
-    
+
     const result = await findExistingMoltbotProcess(sandbox);
     expect(result).toBeNull();
   });
 
-  it('returns gateway process when running', async () => {
-    const gatewayProcess = createFullMockProcess({ 
+  it('returns gateway process when running (openclaw)', async () => {
+    const gatewayProcess = createFullMockProcess({
       id: 'gateway-1',
       command: 'openclaw gateway --port 18789',
-      status: 'running' 
+      status: 'running',
     });
     const processes = [
       createFullMockProcess({ command: 'openclaw devices list', status: 'completed' }),
@@ -50,61 +50,27 @@ describe('findExistingMoltbotProcess', () => {
     ];
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue(processes);
-    
+
     const result = await findExistingMoltbotProcess(sandbox);
     expect(result).toBe(gatewayProcess);
   });
 
-  it('returns gateway process when starting', async () => {
-    const gatewayProcess = createFullMockProcess({ 
-      id: 'gateway-1',
-      command: '/usr/local/bin/start-moltbot.sh', 
-      status: 'starting' 
-    });
-    const { sandbox, listProcessesMock } = createMockSandbox();
-    listProcessesMock.mockResolvedValue([gatewayProcess]);
-    
-    const result = await findExistingMoltbotProcess(sandbox);
-    expect(result).toBe(gatewayProcess);
-  });
-
-  it('ignores completed gateway processes', async () => {
-    const processes = [
-      createFullMockProcess({ command: 'openclaw gateway', status: 'completed' }),
-      createFullMockProcess({ command: 'start-moltbot.sh', status: 'failed' }),
-    ];
-    const { sandbox, listProcessesMock } = createMockSandbox();
-    listProcessesMock.mockResolvedValue(processes);
-    
-    const result = await findExistingMoltbotProcess(sandbox);
-    expect(result).toBeNull();
-  });
-
-  it('handles listProcesses errors gracefully', async () => {
-    const sandbox = {
-      listProcesses: vi.fn().mockRejectedValue(new Error('Network error')),
-    } as unknown as Sandbox;
-    
-    const result = await findExistingMoltbotProcess(sandbox);
-    expect(result).toBeNull();
-  });
-
-  it('matches start-moltbot.sh command', async () => {
-    const gatewayProcess = createFullMockProcess({ 
-      id: 'gateway-1',
-      command: '/usr/local/bin/start-moltbot.sh', 
-      status: 'running' 
-    });
-    const { sandbox, listProcessesMock } = createMockSandbox();
-    listProcessesMock.mockResolvedValue([gatewayProcess]);
-    
-    const result = await findExistingMoltbotProcess(sandbox);
-    expect(result).toBe(gatewayProcess);
-  });
-
-  it('returns legacy clawdbot gateway process when running', async () => {
+  it('returns gateway process when starting via startup script', async () => {
     const gatewayProcess = createFullMockProcess({
-      id: 'gateway-legacy',
+      id: 'gateway-1',
+      command: '/usr/local/bin/start-openclaw.sh',
+      status: 'starting',
+    });
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue([gatewayProcess]);
+
+    const result = await findExistingMoltbotProcess(sandbox);
+    expect(result).toBe(gatewayProcess);
+  });
+
+  it('matches legacy clawdbot gateway command (transition compat)', async () => {
+    const gatewayProcess = createFullMockProcess({
+      id: 'gateway-1',
       command: 'clawdbot gateway --port 18789',
       status: 'running',
     });
@@ -115,20 +81,54 @@ describe('findExistingMoltbotProcess', () => {
     expect(result).toBe(gatewayProcess);
   });
 
+  it('matches legacy start-moltbot.sh command (transition compat)', async () => {
+    const gatewayProcess = createFullMockProcess({
+      id: 'gateway-1',
+      command: '/usr/local/bin/start-moltbot.sh',
+      status: 'running',
+    });
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue([gatewayProcess]);
+
+    const result = await findExistingMoltbotProcess(sandbox);
+    expect(result).toBe(gatewayProcess);
+  });
+
+  it('ignores completed gateway processes', async () => {
+    const processes = [
+      createFullMockProcess({ command: 'openclaw gateway', status: 'completed' }),
+      createFullMockProcess({ command: 'start-openclaw.sh', status: 'failed' }),
+    ];
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue(processes);
+
+    const result = await findExistingMoltbotProcess(sandbox);
+    expect(result).toBeNull();
+  });
+
+  it('handles listProcesses errors gracefully', async () => {
+    const sandbox = {
+      listProcesses: vi.fn().mockRejectedValue(new Error('Network error')),
+    } as unknown as Sandbox;
+
+    const result = await findExistingMoltbotProcess(sandbox);
+    expect(result).toBeNull();
+  });
+
   it('returns first matching gateway process', async () => {
-    const firstGateway = createFullMockProcess({ 
+    const firstGateway = createFullMockProcess({
       id: 'gateway-1',
       command: 'openclaw gateway',
-      status: 'running' 
+      status: 'running',
     });
-    const secondGateway = createFullMockProcess({ 
+    const secondGateway = createFullMockProcess({
       id: 'gateway-2',
-      command: 'start-moltbot.sh', 
-      status: 'starting' 
+      command: 'start-openclaw.sh',
+      status: 'starting',
     });
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue([firstGateway, secondGateway]);
-    
+
     const result = await findExistingMoltbotProcess(sandbox);
     expect(result?.id).toBe('gateway-1');
   });

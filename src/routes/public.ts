@@ -5,7 +5,7 @@ import { findExistingMoltbotProcess } from '../gateway';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
- * 
+ *
  * These routes are mounted BEFORE the auth middleware is applied.
  * Includes: health checks, static assets, and public API endpoints.
  */
@@ -33,13 +33,13 @@ publicRoutes.get('/logo-small.png', (c) => {
 // GET /api/status - Public health check for gateway status (no auth required)
 publicRoutes.get('/api/status', async (c) => {
   const sandbox = c.get('sandbox');
-  
+
   try {
     const process = await findExistingMoltbotProcess(sandbox);
     if (!process) {
       return c.json({ ok: false, status: 'not_running' });
     }
-    
+
     // Process exists, check if it's actually responding
     // Try to reach the gateway with a short timeout
     try {
@@ -49,7 +49,11 @@ publicRoutes.get('/api/status', async (c) => {
       return c.json({ ok: false, status: 'not_responding', processId: process.id });
     }
   } catch (err) {
-    return c.json({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'Unknown error' });
+    return c.json({
+      ok: false,
+      status: 'error',
+      error: err instanceof Error ? err.message : 'Unknown error',
+    });
   }
 });
 

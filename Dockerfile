@@ -20,28 +20,22 @@ RUN ARCH="$(dpkg --print-architecture)" \
 # Install pnpm globally
 RUN npm install -g pnpm
 
-# Install OpenClaw
+# Install OpenClaw (formerly clawdbot/moltbot)
 # Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.2.2-3 \
+RUN npm install -g openclaw@2026.2.3 \
     && openclaw --version
 
-# Create directories
-# Keep both openclaw and clawdbot paths for backward compatibility.
+# Create OpenClaw directories
+# Legacy .clawdbot path is kept for backup migration compatibility.
 RUN mkdir -p /root/.openclaw \
-    && mkdir -p /root/.openclaw-templates \
     && mkdir -p /root/.clawdbot \
-    && mkdir -p /root/.clawdbot-templates \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-05-v27-openclaw-fallback
-COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
-RUN chmod +x /usr/local/bin/start-moltbot.sh
-
-# Copy default configuration template to both paths
-COPY moltbot.json.template /root/.openclaw-templates/moltbot.json.template
-RUN cp /root/.openclaw-templates/moltbot.json.template /root/.clawdbot-templates/moltbot.json.template
+# Build cache bust: 2026-02-09-v30-legacy-gateway-restore-fix
+COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
+RUN chmod +x /usr/local/bin/start-openclaw.sh
 
 # Copy custom skills
 COPY skills/ /root/clawd/skills/

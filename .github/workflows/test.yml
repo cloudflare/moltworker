@@ -23,6 +23,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
       - name: Type check
         run: npm run typecheck
 
@@ -50,6 +56,9 @@ jobs:
             env:
               DISCORD_BOT_TOKEN: "fake-discord-bot-token-for-e2e"
               DISCORD_DM_POLICY: "pairing"
+          - name: workers-ai
+            env:
+              CF_AI_GATEWAY_MODEL: "workers-ai/@cf/openai/gpt-oss-120b"
 
     name: e2e (${{ matrix.config.name }})
 
@@ -92,7 +101,11 @@ jobs:
           CF_ACCESS_TEAM_DOMAIN: ${{ secrets.E2E_CF_ACCESS_TEAM_DOMAIN }}
           R2_ACCESS_KEY_ID: ${{ secrets.E2E_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.E2E_R2_SECRET_ACCESS_KEY }}
-          # AI provider (optional, for chat tests)
+          # AI provider — Cloudflare AI Gateway (preferred)
+          CLOUDFLARE_AI_GATEWAY_API_KEY: ${{ secrets.CLOUDFLARE_AI_GATEWAY_API_KEY }}
+          CF_AI_GATEWAY_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
+          CF_AI_GATEWAY_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_GATEWAY_ID }}
+          # AI provider — legacy (still supported)
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_GATEWAY_BASE_URL: ${{ secrets.AI_GATEWAY_BASE_URL }}
           # Unique test run ID for parallel isolation
@@ -102,6 +115,7 @@ jobs:
           TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
           DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}
           DISCORD_DM_POLICY: ${{ matrix.config.env.DISCORD_DM_POLICY }}
+          CF_AI_GATEWAY_MODEL: ${{ matrix.config.env.CF_AI_GATEWAY_MODEL }}
         run: cctr -vv test/e2e
 
       - name: Convert video and generate thumbnail

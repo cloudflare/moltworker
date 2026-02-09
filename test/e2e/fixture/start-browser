@@ -4,16 +4,11 @@
 set -e
 
 SESSION_NAME="moltworker-e2e"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Support running directly (not via cctr)
 if [ -z "$CCTR_FIXTURE_DIR" ]; then
     CCTR_FIXTURE_DIR="/tmp/e2e-cloud-manual"
 fi
-
-# Stop and delete any existing session
-playwright-cli session-stop "$SESSION_NAME" >/dev/null 2>&1 || true
-playwright-cli session-delete "$SESSION_NAME" >/dev/null 2>&1 || true
 
 # Build the args
 GLOBAL_ARGS=("--session=$SESSION_NAME")
@@ -22,22 +17,25 @@ if [ "${PLAYWRIGHT_HEADED:-}" = "1" ] || [ "${PLAYWRIGHT_HEADED:-}" = "true" ]; 
     GLOBAL_ARGS+=("--headed")
 fi
 
-# Open the browser to a blank page first
-playwright-cli "${GLOBAL_ARGS[@]}" open "about:blank" >/dev/null 2>&1 &
-sleep 2
+# Open the browser to a blank page first (output to stderr to keep stdout clean for cctr)
+playwright-cli "${GLOBAL_ARGS[@]}" open "about:blank" >&2 &
+sleep 20
 
 # Read Access credentials
 CF_ACCESS_CLIENT_ID=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-id.txt" 2>/dev/null || echo "")
 CF_ACCESS_CLIENT_SECRET=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt" 2>/dev/null || echo "")
 
 if [ -n "$CF_ACCESS_CLIENT_ID" ] && [ -n "$CF_ACCESS_CLIENT_SECRET" ]; then
-    # Set extra HTTP headers for Access authentication
+    # Set extra HTTP headers for Access authentication (output to stderr).
+    # IMPORTANT: All subsequent navigation MUST use 'run-code page.goto()' instead of 'open',
+    # because 'open' creates a new browser process which loses these headers.
     playwright-cli "${GLOBAL_ARGS[@]}" run-code "async page => {
         await page.context().setExtraHTTPHeaders({
             'CF-Access-Client-Id': '$CF_ACCESS_CLIENT_ID',
             'CF-Access-Client-Secret': '$CF_ACCESS_CLIENT_SECRET'
         });
-    }" >/dev/null 2>&1
+    }" >&2
 fi
 
+sleep 1  # Let stderr flush before stdout
 echo "ready"

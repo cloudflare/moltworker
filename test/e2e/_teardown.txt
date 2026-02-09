@@ -1,4 +1,29 @@
 ===
+dump gateway logs for debugging
+===
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt" 2>/dev/null || echo "")
+if [ -n "$WORKER_URL" ]; then
+    PROCS=$(./curl-auth -s "$WORKER_URL/debug/processes" 2>/dev/null || echo "")
+    PROC_ID=$(echo "$PROCS" | jq -r '[.processes[] | select(.command | contains("start-openclaw"))][0].id // empty' 2>/dev/null)
+    if [ -n "$PROC_ID" ]; then
+        echo "=== Gateway process logs ($PROC_ID) ==="
+        LOGS=$(./curl-auth -s "$WORKER_URL/debug/logs?id=$PROC_ID" 2>/dev/null)
+        echo "$LOGS" | jq -r '"STATUS: \(.process_status)\nSTDOUT: \(.stdout)\nSTDERR: \(.stderr)"' 2>/dev/null || echo "Failed to parse logs"
+    else
+        echo "No start-openclaw.sh process found"
+        echo "Processes: $PROCS"
+    fi
+else
+    echo "No worker URL found"
+fi
+echo "dump complete"
+---
+{{ output }}
+---
+where
+* output contains "dump complete"
+
+===
 stop video recording
 ===
 ./pw --session=moltworker-e2e video-stop || true

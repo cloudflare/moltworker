@@ -12,17 +12,18 @@ export interface SyncResult {
 }
 
 /**
- * Sync moltbot config from container to R2 for persistence.
- * 
+ * Sync OpenClaw config and workspace from container to R2 for persistence.
+ *
  * This function:
  * 1. Mounts R2 if not already mounted
  * 2. Verifies source has critical files (prevents overwriting good backup with empty data)
- * 3. Runs rsync to copy config/workspace to R2
+ * 3. Runs rsync to copy config, workspace, and skills to R2
  * 4. Writes a timestamp file for tracking
- * 
- * @param sandbox - The sandbox instance
- * @param env - Worker environment bindings
- * @returns SyncResult with success status and optional error details
+ *
+ * Sync targets:
+ * - Config: /root/.openclaw/ (or /root/.clawdbot/) -> R2:/openclaw/
+ * - Workspace: /root/clawd/ -> R2:/workspace/ (primary), R2:/clawd/ (legacy compatibility)
+ * - Skills: /root/clawd/skills/ -> R2:/skills/
  */
 export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
   // Check if R2 is configured
@@ -36,68 +37,64 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     return { success: false, error: 'Failed to mount R2 storage' };
   }
 
-  // Sanity check: verify source has critical files before syncing
-  // This prevents accidentally overwriting a good backup with empty/corrupted data
+  // Determine which config directory exists (new path first)
+  let configDir = '/root/.openclaw';
   try {
-    const checkProc = await sandbox.startProcess(
-      'if [ -f /root/.openclaw/openclaw.json ] || [ -f /root/.openclaw/clawdbot.json ] || ' +
-      '[ -f /root/.clawdbot/openclaw.json ] || [ -f /root/.clawdbot/clawdbot.json ]; then echo "ok"; fi'
-    );
-    await waitForProcess(checkProc, 5000);
-    const checkLogs = await checkProc.getLogs();
-    if (!checkLogs.stdout?.includes('ok')) {
-      return { 
-        success: false, 
-        error: 'Sync aborted: source missing config json',
-        details: 'The local config directory is missing critical files. This could indicate corruption or an incomplete setup.',
-      };
+    const checkNew = await sandbox.startProcess('test -f /root/.openclaw/openclaw.json');
+    await waitForProcess(checkNew, 5000);
+
+    if (checkNew.exitCode !== 0) {
+      const checkLegacy = await sandbox.startProcess('test -f /root/.clawdbot/clawdbot.json');
+      await waitForProcess(checkLegacy, 5000);
+      if (checkLegacy.exitCode === 0) {
+        configDir = '/root/.clawdbot';
+      } else {
+        return {
+          success: false,
+          error: 'Sync aborted: no config file found',
+          details: 'Neither openclaw.json nor clawdbot.json found in config directory.',
+        };
+      }
     }
   } catch (err) {
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: 'Failed to verify source files',
       details: err instanceof Error ? err.message : 'Unknown error',
     };
   }
 
-  // Run rsync to backup config/workspace to R2
-  // Note: Use --no-times because s3fs doesn't support setting timestamps
+  // Use --no-times because s3fs does not support setting timestamps.
   const syncCmd =
-    `if [ -d /root/.openclaw ]; then ` +
-      `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.openclaw/ ${R2_MOUNT_PATH}/openclaw/; fi && ` +
-    `if [ -d /root/.clawdbot ]; then ` +
-      `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/; fi && ` +
-    `if [ -d /root/clawd ]; then ` +
-      `rsync -r --no-times --delete --exclude='skills/' /root/clawd/ ${R2_MOUNT_PATH}/clawd/; fi && ` +
-    `if [ -d /root/clawd/skills ]; then ` +
-      `rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/; fi && ` +
+    `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && ` +
+    `if [ -d /root/clawd ]; then rsync -r --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/; fi && ` +
+    `if [ -d /root/clawd ]; then rsync -r --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/clawd/; fi && ` +
+    `if [ -d /root/clawd/skills ]; then rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/; fi && ` +
     `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
-  
+
   try {
     const proc = await sandbox.startProcess(syncCmd);
-    await waitForProcess(proc, 30000); // 30 second timeout for sync
+    await waitForProcess(proc, 30000);
 
-    // Check for success by reading the timestamp file
-    // (process status may not update reliably in sandbox API)
-    // Note: backup structure is ${R2_MOUNT_PATH}/openclaw/, ${R2_MOUNT_PATH}/clawdbot/, ${R2_MOUNT_PATH}/clawd/ and ${R2_MOUNT_PATH}/skills/
+    // Verify success by reading the timestamp marker.
     const timestampProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync`);
     await waitForProcess(timestampProc, 5000);
     const timestampLogs = await timestampProc.getLogs();
     const lastSync = timestampLogs.stdout?.trim();
-    
+
     if (lastSync && lastSync.match(/^\d{4}-\d{2}-\d{2}/)) {
       return { success: true, lastSync };
-    } else {
-      const logs = await proc.getLogs();
-      return {
-        success: false,
-        error: 'Sync failed',
-        details: logs.stderr || logs.stdout || 'No timestamp file created',
-      };
     }
+
+    const logs = await proc.getLogs();
+    return {
+      success: false,
+      error: 'Sync failed',
+      details: logs.stderr || logs.stdout || 'No timestamp file created',
+    };
   } catch (err) {
-    return { 
-      success: false, 
+    return {
+      success: false,
       error: 'Sync error',
       details: err instanceof Error ? err.message : 'Unknown error',
     };
