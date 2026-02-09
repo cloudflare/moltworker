@@ -825,6 +825,17 @@ interface ChatMessageLike {
 }
 
 /**
+ * Get free models that support tool-calling, sorted by context window (largest first).
+ */
+export function getFreeToolModels(): string[] {
+  const all = getAllModels();
+  return Object.values(all)
+    .filter(m => m.isFree && m.supportsTools && !m.isImageGen)
+    .sort((a, b) => (b.maxContext || 0) - (a.maxContext || 0))
+    .map(m => m.alias);
+}
+
+/**
  * Default model alias
  */
 export const DEFAULT_MODEL = 'auto';

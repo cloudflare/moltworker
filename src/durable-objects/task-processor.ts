@@ -7,7 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
-import { getModelId, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, type Provider, type ReasoningLevel } from '../openrouter/models';
+import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, type Provider, type ReasoningLevel } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 
 // Max characters for a single tool result before truncation
@@ -512,8 +512,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     await this.doState.storage.put('task', task);
 
     const client = createOpenRouterClient(request.openrouterKey);
-    const modelId = getModelId(request.modelAlias);
     const toolContext: ToolContext = { githubToken: request.githubToken };
+
+    // Free model rotation: when a free model hits 429/503, rotate to the next one
+    const freeModels = getFreeToolModels();
+    let freeRotationCount = 0;
+    const MAX_FREE_ROTATIONS = freeModels.length; // Try each free model once
+    let emptyContentRetries = 0;
+    const MAX_EMPTY_RETRIES = 2;
 
     let conversationMessages: ChatMessage[] = [...request.messages];
     const maxIterations = 100; // Very high limit for complex tasks
@@ -589,9 +595,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Note: Checkpoint is saved after tool execution, not before API call
         // This reduces CPU usage from redundant JSON.stringify operations
 
-        // Determine which provider/API to use
-        const provider = getProvider(request.modelAlias);
-        const providerConfig = getProviderConfig(request.modelAlias);
+        // Determine which provider/API to use (uses task.modelAlias for rotation support)
+        const provider = getProvider(task.modelAlias);
+        const providerConfig = getProviderConfig(task.modelAlias);
 
         // Get the appropriate API key for the provider
         let apiKey: string;
@@ -658,7 +664,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               // Use streaming with progress callback for heartbeat
               let progressCount = 0;
               result = await client.chatCompletionStreamingWithTools(
-                request.modelAlias, // Pass alias - method will resolve to model ID
+                task.modelAlias, // Pass alias - method will resolve to model ID (supports rotation)
                 conversationMessages,
                 {
                   maxTokens: 4096,
@@ -699,7 +705,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 }, 10000);
 
                 const requestBody: Record<string, unknown> = {
-                    model: modelId,
+                    model: getModelId(task.modelAlias),
                     messages: conversationMessages,
                     max_tokens: 4096,
                     temperature: 0.7,
@@ -766,8 +772,46 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               await new Promise(r => setTimeout(r, 2000));
               continue;
             }
-            throw lastError;
+            // All retries exhausted — don't throw yet, try model rotation below
           }
+        }
+
+        // If API call failed after all retries, try rotating to another free model
+        if (!result && lastError) {
+          const isRateLimited = /429|503|rate.?limit|overloaded|capacity|busy/i.test(lastError.message);
+          const currentIsFree = getModel(task.modelAlias)?.isFree === true;
+
+          if (isRateLimited && currentIsFree && freeModels.length > 1 && freeRotationCount < MAX_FREE_ROTATIONS) {
+            // Find next free model (skip current one)
+            const currentIdx = freeModels.indexOf(task.modelAlias);
+            const nextIdx = (currentIdx + 1) % freeModels.length;
+            const nextAlias = freeModels[nextIdx];
+
+            if (nextAlias !== task.modelAlias) {
+              freeRotationCount++;
+              const prevAlias = task.modelAlias;
+              task.modelAlias = nextAlias;
+              task.lastUpdate = Date.now();
+              await this.doState.storage.put('task', task);
+
+              console.log(`[TaskProcessor] Rotating from /${prevAlias} to /${nextAlias} (rotation ${freeRotationCount}/${MAX_FREE_ROTATIONS})`);
+
+              // Notify user about model switch
+              if (statusMessageId) {
+                try {
+                  await this.editTelegramMessage(
+                    request.telegramToken, request.chatId, statusMessageId,
+                    `🔄 /${prevAlias} is busy. Switching to /${nextAlias}... (${task.iterations} iter)`
+                  );
+                } catch { /* non-fatal */ }
+              }
+
+              continue; // Retry the iteration with the new model
+            }
+          }
+
+          // Can't rotate — propagate the error
+          throw lastError;
         }
 
         if (!result || !result.choices || !result.choices[0]) {
@@ -780,7 +824,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         if (result.usage) {
           const iterationUsage = recordUsage(
             request.userId,
-            request.modelAlias,
+            task.modelAlias,
             result.usage.prompt_tokens,
             result.usage.completion_tokens
           );
@@ -884,7 +928,23 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           continue;
         }
 
-        // No more tool calls - we have the final response
+        // No more tool calls - check if we have actual content
+        if ((!choice.message.content || choice.message.content.trim() === '') && task.toolsUsed.length > 0 && emptyContentRetries < MAX_EMPTY_RETRIES) {
+          // Model returned empty after tool calls — nudge it to produce a response
+          emptyContentRetries++;
+          console.log(`[TaskProcessor] Empty content after ${task.toolsUsed.length} tools — retry ${emptyContentRetries}/${MAX_EMPTY_RETRIES}`);
+          conversationMessages.push({
+            role: 'assistant',
+            content: choice.message.content || '',
+          });
+          conversationMessages.push({
+            role: 'user',
+            content: '[Your last response was empty. Please provide your answer based on the tool results above.]',
+          });
+          continue; // Retry the iteration
+        }
+
+        // Final response (may still be empty after retries, but we tried)
         task.status = 'completed';
         task.result = choice.message.content || 'No response generated.';
         await this.doState.storage.put('task', task);
@@ -922,7 +982,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         const elapsed = Math.round((Date.now() - task.startTime) / 1000);
         finalResponse += `\n\n⏱️ Completed in ${elapsed}s (${task.iterations} iterations)`;
         if (totalUsage.totalTokens > 0) {
-          finalResponse += ` | ${formatCostFooter(totalUsage, request.modelAlias)}`;
+          finalResponse += ` | ${formatCostFooter(totalUsage, task.modelAlias)}`;
         }
 
         // Send final result (split if too long)

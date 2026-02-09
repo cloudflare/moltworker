@@ -23,6 +23,7 @@ import {
   registerDynamicModels,
   getDynamicModelCount,
   blockModels,
+  unblockModels,
   getBlockedAliases,
   type ModelInfo,
   type ReasoningLevel,
@@ -872,6 +873,18 @@ export class TelegramHandler {
       case '/sync':
         await this.handleSyncModelsCommand(chatId, userId);
         break;
+
+      case '/syncreset': {
+        // Clear all dynamic models and blocked list from R2
+        await this.storage.saveDynamicModels({}, []);
+        registerDynamicModels({});
+        const currentBlocked = getBlockedAliases();
+        if (currentBlocked.length > 0) {
+          unblockModels(currentBlocked);
+        }
+        await this.bot.sendMessage(chatId, '🗑️ Dynamic models and blocked list cleared.\nOnly static catalog models are available now.');
+        break;
+      }
 
       default:
         // Check if it's a model alias command (e.g., /deep, /gpt)
