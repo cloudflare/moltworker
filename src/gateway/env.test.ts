@@ -170,4 +170,49 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
     expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.ai.cloudflare.com/v1/123/my-gw/openai');
   });
+
+  it('passes OPENAI_BASE_URL for custom OpenAI-compatible endpoint', () => {
+    const env = createMockEnv({
+      OPENAI_API_KEY: 'dummy',
+      OPENAI_BASE_URL: 'https://openclaw-brain.my-subdomain.workers.dev/v1',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_API_KEY).toBe('dummy');
+    expect(result.OPENAI_BASE_URL).toBe('https://openclaw-brain.my-subdomain.workers.dev/v1');
+    expect(result.AI_GATEWAY_BASE_URL).toBeUndefined();
+    expect(result.ANTHROPIC_BASE_URL).toBeUndefined();
+  });
+
+  it('strips trailing slash from OPENAI_BASE_URL', () => {
+    const env = createMockEnv({
+      OPENAI_API_KEY: 'dummy',
+      OPENAI_BASE_URL: 'https://openclaw-brain.my-subdomain.workers.dev/v1/',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_BASE_URL).toBe('https://openclaw-brain.my-subdomain.workers.dev/v1');
+  });
+
+  it('AI_GATEWAY_BASE_URL takes precedence over OPENAI_BASE_URL', () => {
+    const env = createMockEnv({
+      AI_GATEWAY_API_KEY: 'gateway-key',
+      AI_GATEWAY_BASE_URL: 'https://gateway.example.com/openai',
+      OPENAI_API_KEY: 'direct-key',
+      OPENAI_BASE_URL: 'https://openclaw-brain.workers.dev/v1',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_API_KEY).toBe('gateway-key');
+    expect(result.OPENAI_BASE_URL).toBe('https://gateway.example.com/openai');
+    expect(result.AI_GATEWAY_BASE_URL).toBe('https://gateway.example.com/openai');
+  });
+
+  it('OPENAI_BASE_URL takes precedence over ANTHROPIC_BASE_URL', () => {
+    const env = createMockEnv({
+      OPENAI_API_KEY: 'openai-key',
+      OPENAI_BASE_URL: 'https://openclaw-brain.workers.dev/v1',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_BASE_URL).toBe('https://openclaw-brain.workers.dev/v1');
+    expect(result.ANTHROPIC_BASE_URL).toBeUndefined();
+  });
 });

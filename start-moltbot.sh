@@ -222,23 +222,29 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     config.channels.slack.enabled = true;
 }
 
-// Base URL override (e.g., for Cloudflare AI Gateway)
-// Usage: Set AI_GATEWAY_BASE_URL or ANTHROPIC_BASE_URL to your endpoint like:
-//   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
-//   https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/openai
-const baseUrl = (process.env.AI_GATEWAY_BASE_URL || process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
-const isOpenAI = baseUrl.endsWith('/openai');
+// Base URL override (e.g., for Cloudflare AI Gateway or custom OpenAI-compatible endpoint)
+// Usage: Set OPENAI_BASE_URL for OpenAI-compatible endpoints (e.g., openclaw-brain worker)
+//        Set AI_GATEWAY_BASE_URL for Cloudflare AI Gateway (auto-detects provider by URL suffix)
+//        Set ANTHROPIC_BASE_URL for direct Anthropic endpoint override
+const openaiBaseUrl = (process.env.OPENAI_BASE_URL || '').replace(/\/+$/, '');
+const gatewayBaseUrl = (process.env.AI_GATEWAY_BASE_URL || '').replace(/\/+$/, '');
+const anthropicBaseUrl = (process.env.ANTHROPIC_BASE_URL || '').replace(/\/+$/, '');
+const isOpenAI = openaiBaseUrl || gatewayBaseUrl.endsWith('/openai');
+const baseUrl = openaiBaseUrl || gatewayBaseUrl || anthropicBaseUrl;
 
 if (isOpenAI) {
     // Create custom openai provider config with baseUrl override
+    // Uses openaiBaseUrl if set directly, otherwise the AI Gateway URL
+    const effectiveBaseUrl = openaiBaseUrl || gatewayBaseUrl;
     // Omit apiKey so moltbot falls back to OPENAI_API_KEY env var
-    console.log('Configuring OpenAI provider with base URL:', baseUrl);
+    console.log('Configuring OpenAI provider with base URL:', effectiveBaseUrl);
     config.models = config.models || {};
     config.models.providers = config.models.providers || {};
     config.models.providers.openai = {
-        baseUrl: baseUrl,
-        api: 'openai-responses',
+        baseUrl: effectiveBaseUrl,
+        api: 'openai-chat',
         models: [
+            { id: '@cf/meta/llama-3.2-3b-instruct', name: 'Llama 3.2 3B', contextWindow: 8192 },
             { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 200000 },
             { id: 'gpt-5', name: 'GPT-5', contextWindow: 200000 },
             { id: 'gpt-4.5-preview', name: 'GPT-4.5 Preview', contextWindow: 128000 },
@@ -246,10 +252,14 @@ if (isOpenAI) {
     };
     // Add models to the allowlist so they appear in /models
     config.agents.defaults.models = config.agents.defaults.models || {};
+    config.agents.defaults.models['openai/@cf/meta/llama-3.2-3b-instruct'] = { alias: 'Llama 3.2 3B' };
     config.agents.defaults.models['openai/gpt-5.2'] = { alias: 'GPT-5.2' };
     config.agents.defaults.models['openai/gpt-5'] = { alias: 'GPT-5' };
     config.agents.defaults.models['openai/gpt-4.5-preview'] = { alias: 'GPT-4.5' };
-    config.agents.defaults.model.primary = 'openai/gpt-5.2';
+    // Default to Llama 3.2 when using a custom OpenAI-compatible endpoint
+    config.agents.defaults.model.primary = openaiBaseUrl
+        ? 'openai/@cf/meta/llama-3.2-3b-instruct'
+        : 'openai/gpt-5.2';
 } else if (baseUrl) {
     console.log('Configuring Anthropic provider with base URL:', baseUrl);
     config.models = config.models || {};

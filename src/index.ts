@@ -72,15 +72,21 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
     }
   }
 
-  // Check for AI Gateway or direct Anthropic configuration
+  // Check for AI provider configuration
+  // Supported configurations:
+  // 1. AI Gateway: AI_GATEWAY_API_KEY + AI_GATEWAY_BASE_URL
+  // 2. Direct Anthropic: ANTHROPIC_API_KEY
+  // 3. OpenAI-compatible endpoint: OPENAI_API_KEY + OPENAI_BASE_URL (e.g., openclaw-brain)
   if (env.AI_GATEWAY_API_KEY) {
     // AI Gateway requires both API key and base URL
     if (!env.AI_GATEWAY_BASE_URL) {
       missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
     }
+  } else if (env.OPENAI_API_KEY && env.OPENAI_BASE_URL) {
+    // OpenAI-compatible endpoint is fully configured
   } else if (!env.ANTHROPIC_API_KEY) {
-    // Direct Anthropic access requires API key
-    missing.push('ANTHROPIC_API_KEY or AI_GATEWAY_API_KEY');
+    // No valid AI provider configuration found
+    missing.push('ANTHROPIC_API_KEY, AI_GATEWAY_API_KEY, or OPENAI_API_KEY + OPENAI_BASE_URL');
   }
 
   return missing;

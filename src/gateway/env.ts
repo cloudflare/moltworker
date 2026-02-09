@@ -40,6 +40,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
     } else {
       envVars.ANTHROPIC_BASE_URL = normalizedBaseUrl;
     }
+  } else if (env.OPENAI_BASE_URL) {
+    // Direct OpenAI-compatible endpoint (e.g., openclaw-brain worker)
+    envVars.OPENAI_BASE_URL = env.OPENAI_BASE_URL.replace(/\/+$/, '');
   } else if (env.ANTHROPIC_BASE_URL) {
     envVars.ANTHROPIC_BASE_URL = env.ANTHROPIC_BASE_URL;
   }
