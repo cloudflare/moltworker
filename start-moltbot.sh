@@ -112,8 +112,16 @@ should_restore_from_r2() {
     fi
 }
 
+# Decide once whether this startup should restore from R2.
+# Re-evaluating after copying .last-sync causes later restore steps
+# (workspace/skills) to be skipped unintentionally.
+RESTORE_FROM_R2="false"
+if should_restore_from_r2; then
+    RESTORE_FROM_R2="true"
+fi
+
 if [ -f "$BACKUP_DIR/openclaw/openclaw.json" ] || [ -f "$BACKUP_DIR/openclaw/clawdbot.json" ]; then
-    if should_restore_from_r2; then
+    if [ "$RESTORE_FROM_R2" = "true" ]; then
         echo "Restoring from R2 backup at $BACKUP_DIR/openclaw..."
         cp -a "$BACKUP_DIR/openclaw/." "$OPENCLAW_CONFIG_DIR/"
         # Copy the sync timestamp to local so we know what version we have
@@ -121,7 +129,7 @@ if [ -f "$BACKUP_DIR/openclaw/openclaw.json" ] || [ -f "$BACKUP_DIR/openclaw/cla
         echo "Restored openclaw config from R2 backup"
     fi
 elif [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ] || [ -f "$BACKUP_DIR/clawdbot/openclaw.json" ]; then
-    if should_restore_from_r2; then
+    if [ "$RESTORE_FROM_R2" = "true" ]; then
         echo "Restoring from R2 backup at $BACKUP_DIR/clawdbot..."
         cp -a "$BACKUP_DIR/clawdbot/." "$CLAWDBOT_CONFIG_DIR/"
         # Copy the sync timestamp to local so we know what version we have
@@ -130,7 +138,7 @@ elif [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ] || [ -f "$BACKUP_DIR/clawdbot/o
     fi
 elif [ -f "$BACKUP_DIR/openclaw.json" ] || [ -f "$BACKUP_DIR/clawdbot.json" ]; then
     # Legacy backup format (flat structure)
-    if should_restore_from_r2; then
+    if [ "$RESTORE_FROM_R2" = "true" ]; then
         echo "Restoring from legacy R2 backup at $BACKUP_DIR..."
         cp -a "$BACKUP_DIR/." "$OPENCLAW_CONFIG_DIR/"
         cp -f "$BACKUP_DIR/.last-sync" "$OPENCLAW_CONFIG_DIR/.last-sync" 2>/dev/null || true
@@ -147,7 +155,7 @@ select_config_path
 # Restore workspace from R2 backup if available (only if R2 is newer)
 CLAWD_DIR="/root/clawd"
 if [ -d "$BACKUP_DIR/clawd" ] && [ "$(ls -A $BACKUP_DIR/clawd 2>/dev/null)" ]; then
-    if should_restore_from_r2; then
+    if [ "$RESTORE_FROM_R2" = "true" ]; then
         echo "Restoring workspace from $BACKUP_DIR/clawd..."
         mkdir -p "$CLAWD_DIR"
         rsync -r --no-times --exclude='skills/' "$BACKUP_DIR/clawd/." "$CLAWD_DIR/"
@@ -158,7 +166,7 @@ fi
 # Restore skills from R2 backup if available (only if R2 is newer)
 SKILLS_DIR="/root/clawd/skills"
 if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ]; then
-    if should_restore_from_r2; then
+    if [ "$RESTORE_FROM_R2" = "true" ]; then
         echo "Restoring skills from $BACKUP_DIR/skills..."
         mkdir -p "$SKILLS_DIR"
         cp -a "$BACKUP_DIR/skills/." "$SKILLS_DIR/"
