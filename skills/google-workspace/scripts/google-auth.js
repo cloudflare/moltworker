@@ -11,6 +11,13 @@
  *   const calendar = getCalendar();
  */
 
+// Ensure globally-installed npm packages are resolvable
+// (sandbox startProcess does not inherit Dockerfile ENV vars)
+if (!process.env.NODE_PATH) {
+  process.env.NODE_PATH = '/usr/local/lib/node_modules';
+  require('module').Module._initPaths();
+}
+
 const { google } = require('googleapis');
 
 function getAuth() {

@@ -21,6 +21,8 @@ RUN ARCH="$(dpkg --print-architecture)" \
 RUN npm install -g pnpm
 
 # Install Google APIs client (for Google Workspace skill)
+# NODE_PATH ensures globally installed modules are found by require()
+ENV NODE_PATH=/usr/local/lib/node_modules
 RUN npm install -g googleapis google-auth-library
 
 # Install OpenClaw (formerly clawdbot/moltbot)
@@ -35,7 +37,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-09-v30-google-workspace
+# Build cache bust: 2026-02-09-v32-script-node-path
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
