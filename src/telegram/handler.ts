@@ -393,7 +393,7 @@ export class TelegramBot {
 }
 
 /**
- * Sync session state for interactive /syncmodels picker
+ * Sync session state for interactive /syncmodels picker (persisted in R2)
  */
 interface SyncModelCandidate {
   alias: string;
@@ -406,8 +406,8 @@ interface SyncModelCandidate {
 interface SyncSession {
   newModels: SyncModelCandidate[];
   staleModels: SyncModelCandidate[];
-  selectedAdd: Set<string>;
-  selectedRemove: Set<string>;
+  selectedAdd: string[];
+  selectedRemove: string[];
   chatId: number;
   messageId: number;
 }
@@ -432,8 +432,7 @@ export class TelegramHandler {
   private dashscopeKey?: string;
   private moonshotKey?: string;
   private deepseekKey?: string;
-  // Interactive sync sessions (keyed by userId)
-  private syncSessions = new Map<string, SyncSession>();
+  // (sync sessions now persisted in R2 via storage.saveSyncSession)
 
   constructor(
     telegramToken: string,
@@ -1700,17 +1699,17 @@ export class TelegramHandler {
   /**
    * Build the sync picker message text from session state.
    */
-  private buildSyncMessage(session: SyncSession, totalFree: number, totalApi: number): string {
+  private buildSyncMessage(session: SyncSession): string {
     const currentModels = getAllModels();
     const catalogCount = Object.values(currentModels).filter(m => m.isFree && !m.isImageGen).length;
 
-    let msg = `🔄 OpenRouter Free Models Sync\n\n`;
-    msg += `📊 ${totalFree} free text models on API, ${catalogCount} in catalog\n`;
+    let msg = `🔄 OpenRouter Free Models Sync\n`;
+    msg += `📊 ${catalogCount} free models in catalog\n`;
 
     if (session.newModels.length > 0) {
       msg += `\n━━━ New (can add) ━━━\n`;
       for (const m of session.newModels) {
-        const sel = session.selectedAdd.has(m.alias) ? '☑' : '☐';
+        const sel = session.selectedAdd.includes(m.alias) ? '☑' : '☐';
         const vis = m.vision ? ' [vision]' : '';
         msg += `${sel} /${m.alias} — ${m.name}${vis}\n`;
         msg += `   ${m.contextK}K ctx | ${m.modelId}\n`;
@@ -1720,7 +1719,7 @@ export class TelegramHandler {
     if (session.staleModels.length > 0) {
       msg += `\n━━━ Stale (can remove) ━━━\n`;
       for (const m of session.staleModels) {
-        const sel = session.selectedRemove.has(m.alias) ? '☑' : '☐';
+        const sel = session.selectedRemove.includes(m.alias) ? '☑' : '☐';
         msg += `${sel} /${m.alias} — ${m.name}\n`;
         msg += `   No longer free on OpenRouter\n`;
       }
@@ -1729,8 +1728,8 @@ export class TelegramHandler {
     if (session.newModels.length === 0 && session.staleModels.length === 0) {
       msg += `\n✅ Catalog is up to date — no changes needed.`;
     } else {
-      const addCount = session.selectedAdd.size;
-      const rmCount = session.selectedRemove.size;
+      const addCount = session.selectedAdd.length;
+      const rmCount = session.selectedRemove.length;
       msg += `\nTap models to select, then Validate.`;
       if (addCount > 0 || rmCount > 0) {
         msg += ` (${addCount} to add, ${rmCount} to remove)`;
@@ -1751,7 +1750,7 @@ export class TelegramHandler {
       const row: InlineKeyboardButton[] = [];
       for (let j = i; j < Math.min(i + 2, session.newModels.length); j++) {
         const m = session.newModels[j];
-        const sel = session.selectedAdd.has(m.alias) ? '☑' : '☐';
+        const sel = session.selectedAdd.includes(m.alias) ? '☑' : '☐';
         row.push({ text: `${sel} ${m.alias}`, callback_data: `s:a:${m.alias}` });
       }
       buttons.push(row);
@@ -1762,15 +1761,15 @@ export class TelegramHandler {
       const row: InlineKeyboardButton[] = [];
       for (let j = i; j < Math.min(i + 2, session.staleModels.length); j++) {
         const m = session.staleModels[j];
-        const sel = session.selectedRemove.has(m.alias) ? '☑' : '☐';
+        const sel = session.selectedRemove.includes(m.alias) ? '☑' : '☐';
         row.push({ text: `${sel} ✕ ${m.alias}`, callback_data: `s:r:${m.alias}` });
       }
       buttons.push(row);
     }
 
     // Bottom row: Validate + Cancel
-    const addCount = session.selectedAdd.size;
-    const rmCount = session.selectedRemove.size;
+    const addCount = session.selectedAdd.length;
+    const rmCount = session.selectedRemove.length;
     const total = addCount + rmCount;
     buttons.push([
       { text: `✓ Validate${total > 0 ? ` (${total})` : ''}`, callback_data: 's:ok' },
@@ -1869,14 +1868,14 @@ export class TelegramHandler {
       const session: SyncSession = {
         newModels,
         staleModels,
-        selectedAdd: new Set(),
-        selectedRemove: new Set(),
+        selectedAdd: [],
+        selectedRemove: [],
         chatId,
-        messageId: 0, // Set after sending
+        messageId: 0,
       };
 
       // 5. Build message + buttons and send
-      const text = this.buildSyncMessage(session, freeApiModels.length, allApiModels.length);
+      const text = this.buildSyncMessage(session);
       const buttons = this.buildSyncButtons(session);
 
       if (newModels.length === 0 && staleModels.length === 0) {
@@ -1886,7 +1885,9 @@ export class TelegramHandler {
 
       const sent = await this.bot.sendMessageWithButtons(chatId, text, buttons);
       session.messageId = sent.message_id;
-      this.syncSessions.set(userId, session);
+
+      // Persist session to R2 (Workers are stateless — in-memory state lost between requests)
+      await this.storage.saveSyncSession(userId, session);
 
     } catch (error) {
       await this.bot.sendMessage(chatId, `Sync failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1902,7 +1903,8 @@ export class TelegramHandler {
     userId: string,
     chatId: number
   ): Promise<void> {
-    const session = this.syncSessions.get(userId);
+    // Load session from R2 (persists across Worker instances)
+    const session = await this.storage.loadSyncSession(userId);
     if (!session) {
       await this.bot.answerCallbackQuery(query.id, { text: 'Session expired. Run /syncmodels again.' });
       return;
@@ -1912,27 +1914,28 @@ export class TelegramHandler {
     const alias = parts[2];
 
     switch (subAction) {
-      case 'a': // Toggle add selection
-        if (session.selectedAdd.has(alias)) {
-          session.selectedAdd.delete(alias);
+      case 'a': { // Toggle add selection
+        const idx = session.selectedAdd.indexOf(alias);
+        if (idx >= 0) {
+          session.selectedAdd.splice(idx, 1);
         } else {
-          session.selectedAdd.add(alias);
+          session.selectedAdd.push(alias);
         }
         break;
+      }
 
-      case 'r': // Toggle remove selection
-        if (session.selectedRemove.has(alias)) {
-          session.selectedRemove.delete(alias);
+      case 'r': { // Toggle remove selection
+        const idx = session.selectedRemove.indexOf(alias);
+        if (idx >= 0) {
+          session.selectedRemove.splice(idx, 1);
         } else {
-          session.selectedRemove.add(alias);
+          session.selectedRemove.push(alias);
         }
         break;
+      }
 
       case 'ok': { // Validate — apply changes
-        const addCount = session.selectedAdd.size;
-        const rmCount = session.selectedRemove.size;
-
-        if (addCount === 0 && rmCount === 0) {
+        if (session.selectedAdd.length === 0 && session.selectedRemove.length === 0) {
           await this.bot.answerCallbackQuery(query.id, { text: 'No models selected!' });
           return;
         }
@@ -1967,7 +1970,6 @@ export class TelegramHandler {
           if (!blockedList.includes(rmAlias)) {
             blockedList.push(rmAlias);
           }
-          // Also remove from dynamic models if present
           delete dynamicModels[rmAlias];
           removedNames.push(rmAlias);
         }
@@ -1992,20 +1994,21 @@ export class TelegramHandler {
         }
         result += '\nChanges are active now and persist across deploys.';
 
-        // Update message, remove buttons
+        // Update message, remove buttons, clean up session
         await this.bot.editMessageWithButtons(chatId, session.messageId, result, null);
-        this.syncSessions.delete(userId);
+        await this.storage.deleteSyncSession(userId);
         return;
       }
 
       case 'x': // Cancel
         await this.bot.editMessageWithButtons(chatId, session.messageId, '🔄 Sync cancelled.', null);
-        this.syncSessions.delete(userId);
+        await this.storage.deleteSyncSession(userId);
         return;
     }
 
-    // Re-render the message with updated selections
-    const text = this.buildSyncMessage(session, 0, 0);
+    // Save updated session to R2 and re-render the message
+    await this.storage.saveSyncSession(userId, session);
+    const text = this.buildSyncMessage(session);
     const buttons = this.buildSyncButtons(session);
     await this.bot.editMessageWithButtons(chatId, session.messageId, text, buttons);
   }

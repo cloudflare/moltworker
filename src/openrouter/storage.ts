@@ -333,6 +333,51 @@ export class UserStorage {
   // === Dynamic Models (synced from OpenRouter API) ===
 
   private static readonly DYNAMIC_MODELS_KEY = 'sync/dynamic-models.json';
+  private static readonly SYNC_SESSION_PREFIX = 'sync/session-';
+
+  /**
+   * Save a sync picker session to R2 (persists across Worker invocations).
+   */
+  async saveSyncSession(userId: string, session: {
+    newModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean }>;
+    staleModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean }>;
+    selectedAdd: string[];
+    selectedRemove: string[];
+    chatId: number;
+    messageId: number;
+  }): Promise<void> {
+    const key = `${UserStorage.SYNC_SESSION_PREFIX}${userId}.json`;
+    await this.bucket.put(key, JSON.stringify(session));
+  }
+
+  /**
+   * Load a sync picker session from R2.
+   */
+  async loadSyncSession(userId: string): Promise<{
+    newModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean }>;
+    staleModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean }>;
+    selectedAdd: string[];
+    selectedRemove: string[];
+    chatId: number;
+    messageId: number;
+  } | null> {
+    const key = `${UserStorage.SYNC_SESSION_PREFIX}${userId}.json`;
+    const obj = await this.bucket.get(key);
+    if (!obj) return null;
+    try {
+      return await obj.json();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Delete a sync picker session from R2.
+   */
+  async deleteSyncSession(userId: string): Promise<void> {
+    const key = `${UserStorage.SYNC_SESSION_PREFIX}${userId}.json`;
+    await this.bucket.delete(key);
+  }
 
   /**
    * Save dynamically discovered models and blocked list to R2.
