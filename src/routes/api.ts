@@ -1,7 +1,15 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
-import { buildCliCommand, ensureMoltbotGateway, findExistingMoltbotProcess, mountR2Storage, shellEscapeArg, syncToR2, waitForProcess } from '../gateway';
+import {
+  buildCliCommand,
+  ensureMoltbotGateway,
+  findExistingMoltbotProcess,
+  mountR2Storage,
+  shellEscapeArg,
+  syncToR2,
+  waitForProcess,
+} from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
@@ -98,7 +106,12 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
 
     // Run moltbot CLI to approve the device (prefer openclaw, fallback to clawdbot)
     const proc = await sandbox.startProcess(
-      buildCliCommand(withGatewayToken(`devices approve ${shellEscapeArg(requestId)} --url ws://localhost:18789`, c.env)),
+      buildCliCommand(
+        withGatewayToken(
+          `devices approve ${shellEscapeArg(requestId)} --url ws://localhost:18789`,
+          c.env,
+        ),
+      ),
     );
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
@@ -161,7 +174,12 @@ adminApi.post('/devices/approve-all', async (c) => {
     for (const device of pending) {
       try {
         const approveProc = await sandbox.startProcess(
-          buildCliCommand(withGatewayToken(`devices approve ${shellEscapeArg(device.requestId)} --url ws://localhost:18789`, c.env)),
+          buildCliCommand(
+            withGatewayToken(
+              `devices approve ${shellEscapeArg(device.requestId)} --url ws://localhost:18789`,
+              c.env,
+            ),
+          ),
         );
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 

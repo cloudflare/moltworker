@@ -349,7 +349,11 @@ debug.get('/env', async (c) => {
   return c.json({
     has_anthropic_key: !!c.env.ANTHROPIC_API_KEY,
     has_openai_key: !!c.env.OPENAI_API_KEY,
-    has_gateway_token: !!(c.env.OPENCLAW_GATEWAY_TOKEN || c.env.MOLTBOT_GATEWAY_TOKEN || c.env.CLAWDBOT_GATEWAY_TOKEN),
+    has_gateway_token: !!(
+      c.env.OPENCLAW_GATEWAY_TOKEN ||
+      c.env.MOLTBOT_GATEWAY_TOKEN ||
+      c.env.CLAWDBOT_GATEWAY_TOKEN
+    ),
     has_openclaw_gateway_token: !!c.env.OPENCLAW_GATEWAY_TOKEN,
     has_r2_access_key: !!c.env.R2_ACCESS_KEY_ID,
     has_r2_secret_key: !!c.env.R2_SECRET_ACCESS_KEY,
@@ -369,10 +373,10 @@ debug.get('/container-config', async (c) => {
   try {
     const proc = await sandbox.startProcess(
       'if [ -f /root/.openclaw/openclaw.json ]; then cat /root/.openclaw/openclaw.json; ' +
-      'elif [ -f /root/.openclaw/clawdbot.json ]; then cat /root/.openclaw/clawdbot.json; ' +
-      'elif [ -f /root/.clawdbot/openclaw.json ]; then cat /root/.clawdbot/openclaw.json; ' +
-      'elif [ -f /root/.clawdbot/clawdbot.json ]; then cat /root/.clawdbot/clawdbot.json; ' +
-      'else echo "No config file found" >&2; exit 1; fi'
+        'elif [ -f /root/.openclaw/clawdbot.json ]; then cat /root/.openclaw/clawdbot.json; ' +
+        'elif [ -f /root/.clawdbot/openclaw.json ]; then cat /root/.clawdbot/openclaw.json; ' +
+        'elif [ -f /root/.clawdbot/clawdbot.json ]; then cat /root/.clawdbot/clawdbot.json; ' +
+        'else echo "No config file found" >&2; exit 1; fi',
     );
     let attempts = 0;
     while (attempts < 10) {

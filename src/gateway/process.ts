@@ -60,7 +60,12 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   // Check if gateway is already running or starting
   const existingProcess = await findExistingMoltbotProcess(sandbox);
   if (existingProcess) {
-    console.log('Found existing gateway process:', existingProcess.id, 'status:', existingProcess.status);
+    console.log(
+      'Found existing gateway process:',
+      existingProcess.id,
+      'status:',
+      existingProcess.status,
+    );
 
     try {
       console.log('Waiting for gateway on port', MOLTBOT_PORT, 'timeout:', STARTUP_TIMEOUT_MS);
