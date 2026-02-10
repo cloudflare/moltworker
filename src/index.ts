@@ -26,7 +26,7 @@ import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, ensureCronJobs } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -395,18 +395,21 @@ async function scheduled(
 
   // Health check: ensure the gateway is running and responding
   console.log('[cron] Running health check...');
+  let gatewayHealthy = false;
   try {
     const process = await findExistingMoltbotProcess(sandbox);
     if (!process) {
       console.log('[cron] Gateway not running, starting it...');
       await ensureMoltbotGateway(sandbox, env);
       console.log('[cron] Gateway started successfully');
+      gatewayHealthy = true;
     } else {
       console.log('[cron] Gateway process found:', process.id, 'status:', process.status);
       // Try to ensure it's actually responding
       try {
         await process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: 10000 });
         console.log('[cron] Gateway is healthy and responding');
+        gatewayHealthy = true;
       } catch (e) {
         console.log('[cron] Gateway not responding, restarting...');
         try {
@@ -416,10 +419,17 @@ async function scheduled(
         }
         await ensureMoltbotGateway(sandbox, env);
         console.log('[cron] Gateway restarted successfully');
+        gatewayHealthy = true;
       }
     }
   } catch (e) {
     console.error('[cron] Health check failed:', e);
+  }
+
+  // Ensure cron jobs are registered (recover if lost after gateway restart)
+  if (gatewayHealthy) {
+    console.log('[cron] Checking cron jobs...');
+    await ensureCronJobs(sandbox, env);
   }
 
   // Backup sync to R2
