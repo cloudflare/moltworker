@@ -197,6 +197,15 @@ if (process.env.OPENCLAW_MODEL) {
     console.log('Model override:', process.env.OPENCLAW_MODEL);
 }
 
+// Reduce concurrency to avoid Anthropic API rate limits
+// Default is maxConcurrent=4 + subagents=8 which can fire 12 parallel requests
+config.agents = config.agents || {};
+config.agents.defaults = config.agents.defaults || {};
+config.agents.defaults.maxConcurrent = 1;
+config.agents.defaults.subagents = config.agents.defaults.subagents || {};
+config.agents.defaults.subagents.maxConcurrent = 2;
+console.log('Concurrency: maxConcurrent=1, subagents.maxConcurrent=2');
+
 // Legacy AI Gateway base URL override:
 // ANTHROPIC_BASE_URL is picked up natively by the Anthropic SDK,
 // so we don't need to patch the provider config. Writing a provider
