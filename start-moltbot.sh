@@ -211,9 +211,9 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
             echo "[STUDY] Registering autonomous study cron job..."
             openclaw cron add \
               --name "auto-study" \
-              --every "6h" \
+              --every "12h" \
               --session isolated \
-              --message "Run autonomous study session: execute node /root/clawd/skills/web-researcher/scripts/study-session.js and summarize the output. Save key findings to your memory." \
+              --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js — summarize output, save to memory." \
               2>/dev/null || echo "[WARN] Study cron registration failed"
             echo "[STUDY] Study cron registered (every 6 hours)"
           else

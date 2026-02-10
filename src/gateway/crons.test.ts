@@ -85,7 +85,7 @@ describe('ensureCronJobs', () => {
       const addCall = startProcessMock.mock.calls[3][0];
       expect(addCall).toContain('openclaw cron add');
       expect(addCall).toContain('--name "auto-study"');
-      expect(addCall).toContain('--every "6h"');
+      expect(addCall).toContain('--every "12h"');
       expect(addCall).toContain('--session isolated');
     });
 

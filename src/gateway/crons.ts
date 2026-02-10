@@ -3,7 +3,7 @@ import type { MoltbotEnv } from '../types';
 import { waitForProcess } from './utils';
 
 const RESTORE_CRONS_SCRIPT = '/root/clawd/clawd-memory/scripts/restore-crons.js';
-const AUTO_STUDY_CRON_MESSAGE = 'Run autonomous study session: execute node /root/clawd/skills/web-researcher/scripts/study-session.js and summarize the output. Save key findings to your memory.';
+const AUTO_STUDY_CRON_MESSAGE = 'Run: node /root/clawd/skills/web-researcher/scripts/study-session.js — summarize output, save to memory.';
 
 /**
  * Ensure cron jobs are registered in the gateway.
@@ -60,7 +60,7 @@ export async function ensureCronJobs(sandbox: Sandbox, env: MoltbotEnv): Promise
       if (!(recheckLogs.stdout || '').includes('auto-study')) {
         console.log('[cron-recovery] Registering auto-study cron...');
         const addProc = await sandbox.startProcess(
-          `openclaw cron add --name "auto-study" --every "6h" --session isolated --message "${AUTO_STUDY_CRON_MESSAGE}"`
+          `openclaw cron add --name "auto-study" --every "12h" --session isolated --message "${AUTO_STUDY_CRON_MESSAGE}"`
         );
         await waitForProcess(addProc, 15000);
         const addLogs = await addProc.getLogs();
