@@ -522,9 +522,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     task.autoResume = request.autoResume;
     task.reasoningLevel = request.reasoningLevel;
     task.responseFormat = request.responseFormat;
-    // Keep existing autoResumeCount if resuming, otherwise start at 0
+    // Keep existing autoResumeCount only if resuming the SAME task
     const existingTask = await this.doState.storage.get<TaskState>('task');
-    if (existingTask?.autoResumeCount !== undefined) {
+    if (existingTask?.taskId === request.taskId && existingTask?.autoResumeCount !== undefined) {
       task.autoResumeCount = existingTask.autoResumeCount;
     }
     await this.doState.storage.put('task', task);

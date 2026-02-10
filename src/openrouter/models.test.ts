@@ -123,11 +123,17 @@ describe('detectToolIntent', () => {
   });
 });
 
-// --- GLM supportsTools flag ---
+// --- GLM free model does NOT support tools ---
 
 describe('GLM model tools support', () => {
-  it('glmfree has supportsTools enabled', () => {
+  it('glmfree does NOT have supportsTools (free tier lacks function calling)', () => {
     const model = getModel('glmfree');
+    expect(model).toBeDefined();
+    expect(model!.supportsTools).toBeUndefined();
+  });
+
+  it('glm47 (paid) has supportsTools enabled', () => {
+    const model = getModel('glm47');
     expect(model).toBeDefined();
     expect(model!.supportsTools).toBe(true);
   });

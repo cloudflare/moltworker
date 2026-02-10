@@ -95,7 +95,6 @@ export const MODELS: Record<string, ModelInfo> = {
     score: 'Solid MMMU/general',
     cost: 'FREE',
     supportsVision: true,
-    supportsTools: true,
     isFree: true,
   },
   stepfree: {
