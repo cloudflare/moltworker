@@ -58,7 +58,7 @@
     "vite": "^7.3.1",
     "vitest": "^4.0.18",
     "wrangler": "^4.64.0",
-    "zod": "^3.25.76"
+    "zod": "3.25.76"
   },
   "author": "",
   "license": "Apache-2.0",
