@@ -225,7 +225,6 @@ if (cfAiGatewayModels) {
     // Compat options for non-native providers (strips OpenAI-specific params)
     const compatOptions = {
         supportsStore: false,
-        supportsStrictMode: false,
         supportsDeveloperRole: false,
         supportsReasoningEffort: false,
     };
