@@ -36,6 +36,16 @@ export interface LearningHistory {
   updatedAt: number;
 }
 
+// Brief summary of last completed task (for cross-task context)
+export interface LastTaskSummary {
+  taskSummary: string;     // First 200 chars of user message
+  category: TaskCategory;
+  toolsUsed: string[];
+  success: boolean;
+  modelAlias: string;
+  completedAt: number;
+}
+
 // Max learnings to keep per user
 const MAX_LEARNINGS = 50;
 // Max learnings to inject into prompt
@@ -259,4 +269,60 @@ export function formatLearningsForPrompt(learnings: TaskLearning[]): string {
   lines.push('Use similar tool strategies for similar requests.');
 
   return lines.join('\n');
+}
+
+/**
+ * Store a brief summary of the last completed task for cross-task context.
+ * Overwrites the previous summary (only keeps the latest).
+ */
+export async function storeLastTaskSummary(
+  r2: R2Bucket,
+  userId: string,
+  learning: TaskLearning
+): Promise<void> {
+  const summary: LastTaskSummary = {
+    taskSummary: learning.taskSummary,
+    category: learning.category,
+    toolsUsed: learning.uniqueTools,
+    success: learning.success,
+    modelAlias: learning.modelAlias,
+    completedAt: learning.timestamp,
+  };
+  const key = `learnings/${userId}/last-task.json`;
+  await r2.put(key, JSON.stringify(summary));
+}
+
+/**
+ * Load the last task summary for cross-task context injection.
+ * Returns null if no previous task or on error.
+ */
+export async function loadLastTaskSummary(
+  r2: R2Bucket,
+  userId: string
+): Promise<LastTaskSummary | null> {
+  const key = `learnings/${userId}/last-task.json`;
+  try {
+    const obj = await r2.get(key);
+    if (!obj) return null;
+    const summary = await obj.json() as LastTaskSummary;
+    // Skip if older than 1 hour (stale context)
+    if (Date.now() - summary.completedAt > 3600000) return null;
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Format the last task summary for system prompt injection.
+ * Kept very concise (1-2 lines) to minimize token overhead.
+ */
+export function formatLastTaskForPrompt(summary: LastTaskSummary | null): string {
+  if (!summary) return '';
+
+  const tools = summary.toolsUsed.length > 0 ? summary.toolsUsed.join(', ') : 'none';
+  const outcome = summary.success ? 'completed' : 'failed';
+  const age = Math.round((Date.now() - summary.completedAt) / 60000);
+
+  return `\n\n[Previous task (${age}min ago, ${outcome}): "${summary.taskSummary.substring(0, 100)}" — tools: ${tools}]`;
 }

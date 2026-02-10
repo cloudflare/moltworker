@@ -10,9 +10,13 @@ import {
   loadLearnings,
   getRelevantLearnings,
   formatLearningsForPrompt,
+  storeLastTaskSummary,
+  loadLastTaskSummary,
+  formatLastTaskForPrompt,
   type TaskLearning,
   type LearningHistory,
   type TaskCategory,
+  type LastTaskSummary,
 } from './learnings';
 
 // --- categorizeTask ---
@@ -856,5 +860,181 @@ describe('formatLearningsForPrompt', () => {
 
     const result = formatLearningsForPrompt(learnings);
     expect(result).toContain('0s');
+  });
+});
+
+// --- storeLastTaskSummary ---
+
+describe('storeLastTaskSummary', () => {
+  it('stores summary to correct R2 key', async () => {
+    const mockBucket = { put: vi.fn().mockResolvedValue(undefined) };
+    const learning: TaskLearning = {
+      taskId: 't1',
+      timestamp: Date.now(),
+      modelAlias: 'deep',
+      category: 'github',
+      toolsUsed: ['github_read_file', 'github_list_files'],
+      uniqueTools: ['github_read_file', 'github_list_files'],
+      iterations: 5,
+      durationMs: 30000,
+      success: true,
+      taskSummary: 'Analyze the megaengage repo',
+    };
+
+    await storeLastTaskSummary(mockBucket as unknown as R2Bucket, 'user1', learning);
+
+    expect(mockBucket.put).toHaveBeenCalledWith(
+      'learnings/user1/last-task.json',
+      expect.any(String)
+    );
+
+    const stored = JSON.parse(mockBucket.put.mock.calls[0][1]);
+    expect(stored.taskSummary).toBe('Analyze the megaengage repo');
+    expect(stored.category).toBe('github');
+    expect(stored.toolsUsed).toEqual(['github_read_file', 'github_list_files']);
+    expect(stored.success).toBe(true);
+    expect(stored.modelAlias).toBe('deep');
+  });
+});
+
+// --- loadLastTaskSummary ---
+
+describe('loadLastTaskSummary', () => {
+  it('returns null when no summary exists', async () => {
+    const mockBucket = { get: vi.fn().mockResolvedValue(null) };
+    const result = await loadLastTaskSummary(mockBucket as unknown as R2Bucket, 'user1');
+    expect(result).toBeNull();
+  });
+
+  it('returns summary when recent (< 1 hour)', async () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'Fetch homepage',
+      category: 'web_search',
+      toolsUsed: ['fetch_url'],
+      success: true,
+      modelAlias: 'gpt',
+      completedAt: Date.now() - 30 * 60000, // 30 min ago
+    };
+    const mockBucket = {
+      get: vi.fn().mockResolvedValue({
+        json: () => Promise.resolve(summary),
+      }),
+    };
+
+    const result = await loadLastTaskSummary(mockBucket as unknown as R2Bucket, 'user1');
+    expect(result).not.toBeNull();
+    expect(result!.taskSummary).toBe('Fetch homepage');
+  });
+
+  it('returns null when summary is stale (> 1 hour)', async () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'Old task',
+      category: 'simple_chat',
+      toolsUsed: [],
+      success: true,
+      modelAlias: 'gpt',
+      completedAt: Date.now() - 2 * 3600000, // 2 hours ago
+    };
+    const mockBucket = {
+      get: vi.fn().mockResolvedValue({
+        json: () => Promise.resolve(summary),
+      }),
+    };
+
+    const result = await loadLastTaskSummary(mockBucket as unknown as R2Bucket, 'user1');
+    expect(result).toBeNull();
+  });
+
+  it('returns null on R2 error', async () => {
+    const mockBucket = {
+      get: vi.fn().mockRejectedValue(new Error('R2 down')),
+    };
+
+    const result = await loadLastTaskSummary(mockBucket as unknown as R2Bucket, 'user1');
+    expect(result).toBeNull();
+  });
+});
+
+// --- formatLastTaskForPrompt ---
+
+describe('formatLastTaskForPrompt', () => {
+  it('returns empty string for null summary', () => {
+    expect(formatLastTaskForPrompt(null)).toBe('');
+  });
+
+  it('formats completed task with tools', () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'Analyze the megaengage repo',
+      category: 'github',
+      toolsUsed: ['github_read_file', 'github_list_files'],
+      success: true,
+      modelAlias: 'deep',
+      completedAt: Date.now() - 5 * 60000, // 5 min ago
+    };
+
+    const result = formatLastTaskForPrompt(summary);
+    expect(result).toContain('Previous task');
+    expect(result).toContain('5min ago');
+    expect(result).toContain('completed');
+    expect(result).toContain('Analyze the megaengage repo');
+    expect(result).toContain('github_read_file, github_list_files');
+  });
+
+  it('formats failed task', () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'Create a PR',
+      category: 'github',
+      toolsUsed: ['github_create_pr'],
+      success: false,
+      modelAlias: 'qwencoderfree',
+      completedAt: Date.now() - 60000,
+    };
+
+    const result = formatLastTaskForPrompt(summary);
+    expect(result).toContain('failed');
+  });
+
+  it('shows "none" for tasks without tools', () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'Simple question',
+      category: 'simple_chat',
+      toolsUsed: [],
+      success: true,
+      modelAlias: 'auto',
+      completedAt: Date.now(),
+    };
+
+    const result = formatLastTaskForPrompt(summary);
+    expect(result).toContain('tools: none');
+  });
+
+  it('starts with double newline for prompt separation', () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'Test',
+      category: 'simple_chat',
+      toolsUsed: [],
+      success: true,
+      modelAlias: 'auto',
+      completedAt: Date.now(),
+    };
+
+    const result = formatLastTaskForPrompt(summary);
+    expect(result.startsWith('\n\n')).toBe(true);
+  });
+
+  it('truncates long task summaries to 100 chars', () => {
+    const summary: LastTaskSummary = {
+      taskSummary: 'A'.repeat(200),
+      category: 'simple_chat',
+      toolsUsed: [],
+      success: true,
+      modelAlias: 'auto',
+      completedAt: Date.now(),
+    };
+
+    const result = formatLastTaskForPrompt(summary);
+    const match = result.match(/"(A+)"/);
+    expect(match).toBeTruthy();
+    expect(match![1].length).toBe(100);
   });
 });
