@@ -99,4 +99,35 @@ describe('ops routes', () => {
       stderr: '',
     });
   });
+
+  it('GET /_ops/devices/list returns device data', async () => {
+    const sandbox = {
+      startProcess: vi.fn().mockResolvedValue({
+        status: 'completed',
+        exitCode: 0,
+        getLogs: vi.fn().mockResolvedValue({
+          stdout: JSON.stringify({ pending: [{ requestId: 'req-1' }], paired: [] }),
+          stderr: '',
+        }),
+      }),
+    };
+
+    vi.mocked(ensureMoltbotGateway).mockResolvedValue({ id: 'proc-4', status: 'running' } as never);
+
+    const app = buildApp(sandbox);
+    const res = await app.request('http://localhost/_ops/devices/list', {}, env);
+    const body = await res.json();
+
+    expect(body).toEqual({ pending: [{ requestId: 'req-1' }], paired: [] });
+  });
+
+  it('POST /_ops/devices/approve returns error when id missing', async () => {
+    const sandbox = {};
+    const app = buildApp(sandbox);
+    const res = await app.request('http://localhost/_ops/devices/approve', { method: 'POST' }, env);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('id is required');
+  });
 });

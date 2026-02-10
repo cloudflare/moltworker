@@ -205,3 +205,84 @@ ops.post('/config/set', async (c) => {
     return c.json({ error: message }, 500);
   }
 });
+
+ops.get('/devices/list', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    const token = c.env.MOLTBOT_GATEWAY_TOKEN;
+    const tokenArg = token ? ` --token ${token}` : '';
+    const proc = await sandbox.startProcess(
+      `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
+    );
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+
+    try {
+      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const data = JSON.parse(jsonMatch[0]);
+        return c.json(data);
+      }
+
+      return c.json({
+        pending: [],
+        paired: [],
+        raw: stdout,
+        stderr,
+      });
+    } catch {
+      return c.json({
+        pending: [],
+        paired: [],
+        raw: stdout,
+        stderr,
+        parseError: 'Failed to parse CLI output',
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: message }, 500);
+  }
+});
+
+ops.post('/devices/approve', async (c) => {
+  const sandbox = c.get('sandbox');
+  const requestId = c.req.query('id');
+
+  if (!requestId) {
+    return c.json({ error: 'id is required' }, 400);
+  }
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    const token = c.env.MOLTBOT_GATEWAY_TOKEN;
+    const tokenArg = token ? ` --token ${token}` : '';
+    const proc = await sandbox.startProcess(
+      `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
+    );
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+
+    const logs = await proc.getLogs();
+    const stdout = logs.stdout || '';
+    const stderr = logs.stderr || '';
+    const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
+
+    return c.json({
+      success,
+      requestId,
+      message: success ? 'Device approved' : 'Approval may have failed',
+      stdout,
+      stderr,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: message }, 500);
+  }
+});

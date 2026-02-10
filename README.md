@@ -138,6 +138,34 @@ npm run deploy
 
 Now visit `/_admin/` and you'll be prompted to authenticate via Cloudflare Access before accessing the admin UI.
 
+## Ops Endpoints
+
+This deployment also exposes a Cloudflare Access-protected ops surface under `/_ops/*`. These endpoints are intended for operational recovery (status, logs, restart, device approval) without enabling debug routes.
+
+Examples:
+
+```bash
+# Status + process info
+curl -H "CF-Access-JWT-Assertion: <jwt>" https://your-worker.workers.dev/_ops/status
+
+# Process list (sanitized)
+curl -H "CF-Access-JWT-Assertion: <jwt>" https://your-worker.workers.dev/_ops/processes
+
+# Logs (by process id or current gateway)
+curl -H "CF-Access-JWT-Assertion: <jwt>" https://your-worker.workers.dev/_ops/logs?id=<process_id>
+
+# Restart gateway
+curl -X POST -H "CF-Access-JWT-Assertion: <jwt>" https://your-worker.workers.dev/_ops/restart
+
+# Config get/set (allowlisted paths only)
+curl -H "CF-Access-JWT-Assertion: <jwt>" "https://your-worker.workers.dev/_ops/config/get?path=agents.defaults.model.primary"
+curl -X POST -H "CF-Access-JWT-Assertion: <jwt>" "https://your-worker.workers.dev/_ops/config/set?path=agents.defaults.model.primary&value=provider/model"
+
+# Devices
+curl -H "CF-Access-JWT-Assertion: <jwt>" https://your-worker.workers.dev/_ops/devices/list
+curl -X POST -H "CF-Access-JWT-Assertion: <jwt>" "https://your-worker.workers.dev/_ops/devices/approve?id=<request_id>"
+```
+
 ### Alternative: Manual Access Application
 
 If you prefer more control, you can manually create an Access application:
