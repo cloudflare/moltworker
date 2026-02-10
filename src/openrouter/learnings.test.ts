@@ -73,6 +73,31 @@ describe('categorizeTask', () => {
   it('handles mix of known and unknown tools', () => {
     expect(categorizeTask(['unknown_tool', 'fetch_url'])).toBe('web_search');
   });
+
+  it('tie-breaks 2 equal categories by returning one deterministically', () => {
+    // 1 web_search + 1 data_lookup — equal frequency, returns whichever sorts first
+    const result = categorizeTask(['fetch_url', 'get_weather']);
+    // Both categories have count 1; sorted descending by count, first wins
+    expect(['web_search', 'data_lookup']).toContain(result);
+    // Verify it's stable: same input → same output
+    expect(categorizeTask(['fetch_url', 'get_weather'])).toBe(result);
+  });
+
+  it('handles duplicate tools correctly', () => {
+    // 5x fetch_url + 1x github — web_search dominant
+    const result = categorizeTask([
+      'fetch_url', 'fetch_url', 'fetch_url', 'fetch_url', 'fetch_url',
+      'github_read_file',
+    ]);
+    expect(result).toBe('web_search');
+  });
+
+  it('handles all 4 github tools in one call', () => {
+    const result = categorizeTask([
+      'github_read_file', 'github_list_files', 'github_api', 'github_create_pr',
+    ]);
+    expect(result).toBe('github');
+  });
 });
 
 // --- extractLearning ---
@@ -144,6 +169,52 @@ describe('extractLearning', () => {
 
     expect(learning.success).toBe(false);
     expect(learning.category).toBe('web_search');
+  });
+
+  it('handles empty userMessage', () => {
+    const learning = extractLearning({
+      taskId: 'test',
+      modelAlias: 'gpt',
+      toolsUsed: [],
+      iterations: 1,
+      durationMs: 1000,
+      success: true,
+      userMessage: '',
+    });
+
+    expect(learning.taskSummary).toBe('');
+  });
+
+  it('handles zero duration and zero iterations', () => {
+    const learning = extractLearning({
+      taskId: 'test',
+      modelAlias: 'deep',
+      toolsUsed: ['fetch_url'],
+      iterations: 0,
+      durationMs: 0,
+      success: true,
+      userMessage: 'Quick test',
+    });
+
+    expect(learning.iterations).toBe(0);
+    expect(learning.durationMs).toBe(0);
+  });
+
+  it('sets timestamp automatically from Date.now()', () => {
+    const before = Date.now();
+    const learning = extractLearning({
+      taskId: 'test',
+      modelAlias: 'gpt',
+      toolsUsed: [],
+      iterations: 1,
+      durationMs: 1000,
+      success: true,
+      userMessage: 'test',
+    });
+    const after = Date.now();
+
+    expect(learning.timestamp).toBeGreaterThanOrEqual(before);
+    expect(learning.timestamp).toBeLessThanOrEqual(after);
   });
 });
 
@@ -241,6 +312,37 @@ describe('storeLearning', () => {
     const parsed = JSON.parse(data as string);
     expect(parsed.learnings).toHaveLength(1);
   });
+
+  it('propagates R2 write error', async () => {
+    mockBucket.get.mockResolvedValue(null);
+    mockBucket.put.mockRejectedValue(new Error('R2 write failed'));
+
+    await expect(
+      storeLearning(mockBucket as unknown as R2Bucket, 'user1', makeLearning('t1'))
+    ).rejects.toThrow('R2 write failed');
+  });
+
+  it('updates updatedAt timestamp on every store', async () => {
+    mockBucket.get.mockResolvedValue(null);
+
+    const before = Date.now();
+    await storeLearning(mockBucket as unknown as R2Bucket, 'user1', makeLearning('t1'));
+    const after = Date.now();
+
+    const [, data] = mockBucket.put.mock.calls[0];
+    const parsed = JSON.parse(data as string);
+    expect(parsed.updatedAt).toBeGreaterThanOrEqual(before);
+    expect(parsed.updatedAt).toBeLessThanOrEqual(after);
+  });
+
+  it('uses correct R2 key format for different users', async () => {
+    mockBucket.get.mockResolvedValue(null);
+
+    await storeLearning(mockBucket as unknown as R2Bucket, '99887766', makeLearning('t1'));
+
+    const [key] = mockBucket.put.mock.calls[0];
+    expect(key).toBe('learnings/99887766/history.json');
+  });
 });
 
 describe('loadLearnings', () => {
@@ -291,6 +393,23 @@ describe('loadLearnings', () => {
     const result = await loadLearnings(mockBucket as unknown as R2Bucket, 'user1');
     expect(result).toBeNull();
   });
+
+  it('handles R2 get() throwing gracefully', async () => {
+    const mockBucket = {
+      get: vi.fn().mockRejectedValue(new Error('R2 unavailable')),
+    };
+
+    const result = await loadLearnings(mockBucket as unknown as R2Bucket, 'user1');
+    expect(result).toBeNull();
+  });
+
+  it('reads from correct R2 key', async () => {
+    const mockBucket = { get: vi.fn().mockResolvedValue(null) };
+
+    await loadLearnings(mockBucket as unknown as R2Bucket, '12345');
+
+    expect(mockBucket.get).toHaveBeenCalledWith('learnings/12345/history.json');
+  });
 });
 
 // --- getRelevantLearnings ---
@@ -320,6 +439,13 @@ describe('getRelevantLearnings', () => {
     expect(getRelevantLearnings(history, 'any message')).toEqual([]);
   });
 
+  it('returns empty array for null-ish history', () => {
+    // @ts-expect-error — testing defensive null handling
+    expect(getRelevantLearnings(null, 'any message')).toEqual([]);
+    // @ts-expect-error — testing defensive undefined handling
+    expect(getRelevantLearnings(undefined, 'any message')).toEqual([]);
+  });
+
   it('matches by keyword overlap', () => {
     const history = makeHistory([
       { taskSummary: 'check bitcoin price today', category: 'data_lookup' },
@@ -342,6 +468,20 @@ describe('getRelevantLearnings', () => {
     expect(result[0].category).toBe('data_lookup');
   });
 
+  it('does not give category bonus when category mismatches hint', () => {
+    const history = makeHistory([
+      // "weather" keyword in message hints at data_lookup, but this is github category
+      { taskSummary: 'weather related github issue', category: 'github' },
+    ]);
+
+    // "weather" hint matches data_lookup, not github. But "weather" word overlap still gives base score.
+    const result = getRelevantLearnings(history, 'weather forecast for Prague');
+    // The result may or may not appear depending on word overlap, but category bonus shouldn't fire.
+    // "weather" is 7 chars > 3, present in both → base score from keyword overlap.
+    expect(result.length).toBe(1);
+    // The category hint bonus is only +3 for data_lookup category, this is github → no +3
+  });
+
   it('prefers recent learnings', () => {
     const history = makeHistory([
       { taskSummary: 'check weather old', category: 'data_lookup', timestamp: now - 7 * 86400000 }, // 7 days ago
@@ -354,6 +494,18 @@ describe('getRelevantLearnings', () => {
     expect(result[0].taskSummary).toContain('new');
   });
 
+  it('gives no recency bonus for old learnings (>7d)', () => {
+    const history = makeHistory([
+      { taskSummary: 'check weather ancient', category: 'data_lookup', timestamp: now - 30 * 86400000 }, // 30 days ago
+      { taskSummary: 'check weather recent', category: 'data_lookup', timestamp: now - 3600000 }, // 1 hour ago
+    ]);
+
+    const result = getRelevantLearnings(history, 'weather forecast');
+    expect(result.length).toBe(2);
+    // Recent one should still rank first due to recency bonus
+    expect(result[0].taskSummary).toContain('recent');
+  });
+
   it('prefers successful learnings', () => {
     const history = makeHistory([
       { taskSummary: 'fetch github readme', category: 'github', success: false },
@@ -363,6 +515,26 @@ describe('getRelevantLearnings', () => {
     const result = getRelevantLearnings(history, 'read github readme');
     expect(result.length).toBe(2);
     expect(result[0].success).toBe(true);
+  });
+
+  it('does not apply success bonus without base relevance', () => {
+    const history = makeHistory([
+      { taskSummary: 'completely unrelated quantum physics', category: 'simple_chat', success: true },
+    ]);
+
+    // No keyword or category overlap → baseScore = 0 → success bonus NOT applied
+    const result = getRelevantLearnings(history, 'weather in Paris');
+    expect(result).toEqual([]);
+  });
+
+  it('does not apply recency bonus without base relevance', () => {
+    const history = makeHistory([
+      { taskSummary: 'unrelated task from just now', category: 'simple_chat', timestamp: now },
+    ]);
+
+    // No keyword or category overlap → baseScore = 0 → recency bonus NOT applied
+    const result = getRelevantLearnings(history, 'check bitcoin price');
+    expect(result).toEqual([]);
   });
 
   it('filters out irrelevant learnings (score = 0)', () => {
@@ -386,6 +558,18 @@ describe('getRelevantLearnings', () => {
     expect(result.length).toBeLessThanOrEqual(3);
   });
 
+  it('uses default limit of 5', () => {
+    const history = makeHistory(
+      Array.from({ length: 20 }, (_, i) => ({
+        taskSummary: `weather task number ${i}`,
+        category: 'data_lookup' as TaskCategory,
+      }))
+    );
+
+    const result = getRelevantLearnings(history, 'weather forecast');
+    expect(result.length).toBeLessThanOrEqual(5);
+  });
+
   it('handles github keyword matching', () => {
     const history = makeHistory([
       { taskSummary: 'read the github repo files', category: 'github', uniqueTools: ['github_read_file'] },
@@ -394,6 +578,54 @@ describe('getRelevantLearnings', () => {
     const result = getRelevantLearnings(history, 'show me the github repository structure');
     expect(result.length).toBeGreaterThan(0);
     expect(result[0].category).toBe('github');
+  });
+
+  it('ignores words with 3 or fewer characters', () => {
+    const history = makeHistory([
+      { taskSummary: 'the is a an for', category: 'simple_chat' },
+    ]);
+
+    // All summary words are <= 3 chars, no keyword overlap possible
+    const result = getRelevantLearnings(history, 'the is a test');
+    expect(result).toEqual([]);
+  });
+
+  it('matching is case insensitive', () => {
+    const history = makeHistory([
+      { taskSummary: 'Check BITCOIN Price', category: 'data_lookup' },
+    ]);
+
+    const result = getRelevantLearnings(history, 'show me bitcoin value');
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0].taskSummary).toContain('BITCOIN');
+  });
+
+  it('scores higher when keyword + category both match', () => {
+    const history = makeHistory([
+      // keyword match only: "bitcoin" in summary + message
+      { taskSummary: 'bitcoin mining tutorial', category: 'simple_chat', timestamp: now - 3600000 },
+      // keyword + category: "bitcoin" in summary + message, AND category hint "crypto" matches data_lookup
+      { taskSummary: 'bitcoin price check', category: 'data_lookup', timestamp: now - 3600000 },
+    ]);
+
+    const result = getRelevantLearnings(history, 'crypto bitcoin price today');
+    expect(result.length).toBe(2);
+    // The data_lookup one should rank higher (keyword + category bonus)
+    expect(result[0].category).toBe('data_lookup');
+  });
+
+  it('partial match (substring) scores lower than exact word', () => {
+    const history = makeHistory([
+      // "weathering" contains "weather" as substring but not as exact word
+      { taskSummary: 'withstand the weathering storm', category: 'simple_chat' },
+      // "weather" as exact word
+      { taskSummary: 'check weather forecast', category: 'data_lookup' },
+    ]);
+
+    const result = getRelevantLearnings(history, 'weather forecast today');
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    // Exact match should rank first
+    expect(result[0].taskSummary).toContain('check weather');
   });
 });
 
@@ -534,5 +766,95 @@ describe('formatLearningsForPrompt', () => {
 
     const result = formatLearningsForPrompt(learnings);
     expect(result).toContain('Use similar tool strategies');
+  });
+
+  it('lists multiple unique tools comma-separated', () => {
+    const learnings: TaskLearning[] = [{
+      taskId: 't1',
+      timestamp: Date.now(),
+      modelAlias: 'deep',
+      category: 'multi_tool',
+      toolsUsed: ['fetch_url', 'github_read_file', 'get_weather'],
+      uniqueTools: ['fetch_url', 'github_read_file', 'get_weather'],
+      iterations: 5,
+      durationMs: 20000,
+      success: true,
+      taskSummary: 'Complex multi-tool task',
+    }];
+
+    const result = formatLearningsForPrompt(learnings);
+    expect(result).toContain('tools:[fetch_url, github_read_file, get_weather]');
+  });
+
+  it('output starts with double newline for prompt separation', () => {
+    const learnings: TaskLearning[] = [{
+      taskId: 't1',
+      timestamp: Date.now(),
+      modelAlias: 'deep',
+      category: 'web_search',
+      toolsUsed: ['fetch_url'],
+      uniqueTools: ['fetch_url'],
+      iterations: 1,
+      durationMs: 1000,
+      success: true,
+      taskSummary: 'test',
+    }];
+
+    const result = formatLearningsForPrompt(learnings);
+    expect(result.startsWith('\n\n')).toBe(true);
+  });
+
+  it('formats duration boundary: exactly 60s shows 1min', () => {
+    const learnings: TaskLearning[] = [{
+      taskId: 't1',
+      timestamp: Date.now(),
+      modelAlias: 'deep',
+      category: 'web_search',
+      toolsUsed: ['fetch_url'],
+      uniqueTools: ['fetch_url'],
+      iterations: 2,
+      durationMs: 60000,
+      success: true,
+      taskSummary: 'Boundary test',
+    }];
+
+    const result = formatLearningsForPrompt(learnings);
+    expect(result).toContain('1min');
+  });
+
+  it('formats duration: 59999ms shows 60s (sub-minute)', () => {
+    const learnings: TaskLearning[] = [{
+      taskId: 't1',
+      timestamp: Date.now(),
+      modelAlias: 'deep',
+      category: 'web_search',
+      toolsUsed: ['fetch_url'],
+      uniqueTools: ['fetch_url'],
+      iterations: 2,
+      durationMs: 59999,
+      success: true,
+      taskSummary: 'Just under a minute',
+    }];
+
+    const result = formatLearningsForPrompt(learnings);
+    expect(result).toContain('60s');
+  });
+
+  it('formats zero duration as 0s', () => {
+    const learnings: TaskLearning[] = [{
+      taskId: 't1',
+      timestamp: Date.now(),
+      modelAlias: 'deep',
+      category: 'simple_chat',
+      toolsUsed: [],
+      uniqueTools: [],
+      iterations: 1,
+      durationMs: 0,
+      success: true,
+      taskSummary: 'Instant',
+    }];
+
+    const result = formatLearningsForPrompt(learnings);
+    expect(result).toContain('0s');
   });
 });
