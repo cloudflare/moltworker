@@ -4,6 +4,29 @@
 
 ---
 
+## Session: 2026-02-10 | Bug Fixes from Live Testing (Session: 018gmCDcuBJqs9ffrrDHHBBd)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/extract-task-metadata-8lMCM`
+**Status:** Completed
+
+### Summary
+Fixed 2 bugs discovered during live Telegram testing of the 6 bot improvements.
+
+### Changes Made
+1. **Auto-resume counter bug** — Counter persisted across different tasks (went 18→22 on a new task). Fixed by checking `taskId` match before inheriting `autoResumeCount` from DO storage.
+2. **GLM free tool flag reverted** — Live testing confirmed GLM 4.5 Air free tier doesn't actually generate tool_calls (logged `simple_chat, 0 unique tools`). Removed `supportsTools: true` from `glmfree`. Paid GLM 4.7 still has tools enabled.
+
+### Files Modified
+- `src/durable-objects/task-processor.ts` (taskId check for counter reset)
+- `src/openrouter/models.ts` (revert GLM free supportsTools)
+- `src/openrouter/models.test.ts` (updated GLM tests)
+
+### Tests
+448 total (all passing)
+
+---
+
 ## Session: 2026-02-10 | 6 Bot Improvements from Telegram Analysis (Session: 018gmCDcuBJqs9ffrrDHHBBd)
 
 **AI:** Claude Opus 4.6
@@ -14,7 +37,7 @@
 Analyzed real Telegram conversation logs and implemented 6 targeted bot improvements addressing tool-use reliability, error handling, cross-task context, runaway task prevention, and prompt quality.
 
 ### Changes Made
-1. **GLM `supportsTools` flag** — Added missing `supportsTools: true` to `glmfree` model so it uses real tools instead of hallucinating tool calls.
+1. **GLM `supportsTools` flag** — Added missing `supportsTools: true` to `glmfree` model (later reverted — see next session).
 2. **402 error handling** — Fail fast on quota exceeded (HTTP 402), auto-rotate to a free model, show helpful user-facing message.
 3. **Cross-task context** — Store last task summary in R2 after completion, inject into next task's system prompt with 1-hour TTL for continuity.
 4. **Elapsed time cap** — 15 min for free models, 30 min for paid. Prevents runaway auto-resume loops in Durable Objects.

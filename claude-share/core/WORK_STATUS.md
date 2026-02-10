@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-10 (bot improvements)
+**Last Updated:** 2026-02-10 (live testing bug fixes)
 
 ---
 
@@ -29,6 +29,7 @@
 | BUG-4 | Fix /img image generation | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | 3.1+3.4 | Compound learning loop + prompt injection | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 | — | 6 bot improvements (GLM tools, 402, cross-task ctx, time cap, tool-intent, parallel prompt) | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
+| BUG-12 | Fix auto-resume counter persistence + revert GLM free tool flag | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 
 ---
 
@@ -36,7 +37,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | 6 bot improvements complete | `claude/extract-task-metadata-8lMCM` | 2026-02-10 |
+| Claude | Live testing bug fixes complete | `claude/extract-task-metadata-8lMCM` | 2026-02-10 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -75,6 +76,7 @@
 | 1.4 | Vision + tools unified + /help update | Claude Opus 4.6 | 2026-02-09 | `claude/daily-briefing-aggregator-NfHhi` |
 | 3.1+3.4 | Compound learning loop + prompt injection | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
 | — | 6 bot improvements from Telegram analysis | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
+| BUG-12 | Auto-resume counter fix + GLM free flag revert | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
 
 ---
 
