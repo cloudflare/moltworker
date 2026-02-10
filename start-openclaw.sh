@@ -189,6 +189,23 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
+// Agent model override (OPENCLAW_MODEL=anthropic/claude-sonnet-4-5)
+if (process.env.OPENCLAW_MODEL) {
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: process.env.OPENCLAW_MODEL };
+    console.log('Model override:', process.env.OPENCLAW_MODEL);
+}
+
+// Reduce concurrency to avoid Anthropic API rate limits
+// Default is maxConcurrent=4 + subagents=8 which can fire 12 parallel requests
+config.agents = config.agents || {};
+config.agents.defaults = config.agents.defaults || {};
+config.agents.defaults.maxConcurrent = 1;
+config.agents.defaults.subagents = config.agents.defaults.subagents || {};
+config.agents.defaults.subagents.maxConcurrent = 2;
+console.log('Concurrency: maxConcurrent=1, subagents.maxConcurrent=2');
+
 // Legacy AI Gateway base URL override:
 // ANTHROPIC_BASE_URL is picked up natively by the Anthropic SDK,
 // so we don't need to patch the provider config. Writing a provider
@@ -283,6 +300,37 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
+
+# ============================================================
+# CONFIGURE GOGCLI (Google Workspace CLI)
+# ============================================================
+if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
+    echo "Configuring gogcli..."
+
+    # Use file-based keyring with a fixed password (no TTY in container)
+    export GOG_KEYRING_PASSWORD="moltbot-container"
+    gog auth keyring file
+
+    # Write credentials.json in Google Cloud Console "installed" format and import
+    GOG_CREDS_FILE="/tmp/gog-credentials.json"
+    cat > "$GOG_CREDS_FILE" <<EOFCREDS
+{"installed":{"client_id":"$GOOGLE_CLIENT_ID","client_secret":"$GOOGLE_CLIENT_SECRET"}}
+EOFCREDS
+    gog auth credentials set "$GOG_CREDS_FILE" --no-input 2>&1 || true
+    rm -f "$GOG_CREDS_FILE"
+
+    # Write token file and import
+    GOG_TOKEN_FILE="/tmp/gog-token.json"
+    cat > "$GOG_TOKEN_FILE" <<EOFTOKEN
+{"email":"nick@culturetocash.com","client":"default","services":["calendar","gmail"],"scopes":["email","https://www.googleapis.com/auth/calendar","https://www.googleapis.com/auth/gmail.modify","https://www.googleapis.com/auth/gmail.settings.basic","https://www.googleapis.com/auth/gmail.settings.sharing","https://www.googleapis.com/auth/userinfo.email","openid"],"refresh_token":"$GOOGLE_REFRESH_TOKEN"}
+EOFTOKEN
+    gog auth tokens import "$GOG_TOKEN_FILE" --no-input 2>&1 || true
+    rm -f "$GOG_TOKEN_FILE"
+
+    echo "gogcli configured for nick@culturetocash.com"
+else
+    echo "GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN not set, skipping gogcli setup"
+fi
 
 # ============================================================
 # START GATEWAY
