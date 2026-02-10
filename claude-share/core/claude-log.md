@@ -4,6 +4,64 @@
 
 ---
 
+## Session: 2026-02-10 | Phase 3.1: Compound Learning Loop (Session: 018gmCDcuBJqs9ffrrDHHBBd)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/extract-task-metadata-8lMCM`
+**Status:** Completed
+
+### Summary
+Implemented Phase 3.1 (Compound Learning Loop). After each completed Durable Object task, structured metadata (tools used, model, iterations, success/failure, category, duration) is extracted and stored in R2. Before new tasks, relevant past patterns are retrieved and injected into the system prompt to improve future tool selection and execution strategy.
+
+### Changes Made
+1. **`src/openrouter/learnings.ts`** (NEW) — Complete learning extraction, storage, and retrieval module:
+   - `TaskCategory` type (7 categories: web_search, github, data_lookup, chart_gen, code_exec, multi_tool, simple_chat)
+   - `TaskLearning` interface — structured metadata per task
+   - `LearningHistory` interface — per-user history stored in R2
+   - `categorizeTask()` — Categorizes tasks based on tools used, with dominant-category logic for mixed tool usage
+   - `extractLearning()` — Extracts structured metadata from completed task parameters
+   - `storeLearning()` — Stores to R2 at `learnings/{userId}/history.json`, caps at 50 entries
+   - `loadLearnings()` — Loads user's learning history from R2
+   - `getRelevantLearnings()` — Scores past learnings by keyword overlap, category hints, recency, and success; only applies bonuses when base relevance exists
+   - `formatLearningsForPrompt()` — Concise prompt format with tool strategies
+
+2. **`src/durable-objects/task-processor.ts`** — Learning extraction on task completion:
+   - After successful completion: extracts learning with `success: true` and stores to R2
+   - After failure (with iterations > 0): extracts learning with `success: false` and stores to R2
+   - Both paths are failure-safe (try/catch, non-blocking)
+
+3. **`src/telegram/handler.ts`** — Learning injection before new tasks:
+   - Added `r2Bucket` property to TelegramHandler for direct R2 access
+   - Added `getLearningsHint()` helper method — loads history, finds relevant patterns, formats for prompt
+   - Injects learnings into system prompt in `handleChat()` (text messages)
+   - Injects learnings into system prompt in `handleVision()` (image + tool path)
+
+4. **`src/openrouter/learnings.test.ts`** (NEW) — 36 comprehensive tests:
+   - `categorizeTask` (10 tests): all categories, mixed tools, unknown tools
+   - `extractLearning` (4 tests): correct fields, truncation, simple chat, failure
+   - `storeLearning` (4 tests): new history, append, cap at 50, R2 error handling
+   - `loadLearnings` (3 tests): null, parsed, JSON error
+   - `getRelevantLearnings` (7 tests): empty, keyword match, category hints, recency, success, filtering, limits
+   - `formatLearningsForPrompt` (8 tests): empty, single, failed, multiple, truncation, no-tools, strategy hint
+
+### Files Modified
+- `src/openrouter/learnings.ts` (NEW — learning extraction, storage, retrieval)
+- `src/openrouter/learnings.test.ts` (NEW — 36 tests)
+- `src/durable-objects/task-processor.ts` (learning extraction on completion/failure)
+- `src/telegram/handler.ts` (learning injection into system prompt)
+- `claude-share/core/*.md` (all sync docs)
+
+### Tests
+- [x] 388 tests pass (36 new)
+- [x] TypeScript: only pre-existing errors
+
+### Notes for Next Session
+- Phase 3.2 (Structured task phases) is next
+- Consider adding `/learnings` Telegram command (Phase 3.3) to view past patterns
+- Learning data quality should be reviewed after 20+ tasks (Human Checkpoint 3.5)
+
+---
+
 ## Session: 2026-02-09 | Phase 1.5: Structured Output Support (Session: 013wvC2kun5Mbr3J81KUPn99)
 
 **AI:** Claude Opus 4.6

@@ -95,6 +95,7 @@ export const MODELS: Record<string, ModelInfo> = {
     score: 'Solid MMMU/general',
     cost: 'FREE',
     supportsVision: true,
+    supportsTools: true,
     isFree: true,
   },
   stepfree: {
@@ -834,6 +835,37 @@ export function getFreeToolModels(): string[] {
     .filter(m => m.isFree && m.supportsTools && !m.isImageGen)
     .sort((a, b) => (b.maxContext || 0) - (a.maxContext || 0))
     .map(m => m.alias);
+}
+
+/**
+ * Detect if a user message likely requires tool usage.
+ * Uses conservative keyword matching to avoid false positives.
+ * Only triggers on strong, unambiguous tool signals.
+ */
+export function detectToolIntent(message: string): { needsTools: boolean; reason: string } {
+  const lower = message.toLowerCase();
+
+  // Strong GitHub signals (explicit repo/PR references)
+  if (/\b(create\s+(a\s+)?pr|pull\s+request|modify\s+(the\s+)?repo|push\s+to\s+github|read\s+file\s+from\s+github|github\.com\/\w+\/\w+)\b/i.test(lower)) {
+    return { needsTools: true, reason: 'GitHub operations require tools (🔧)' };
+  }
+
+  // Strong URL/fetch signals (explicit URLs or fetch commands)
+  if (/\b(fetch|scrape|browse|read)\s+(https?:\/\/|the\s+(url|page|site|website))/i.test(lower) || /https?:\/\/\S+/.test(message)) {
+    return { needsTools: true, reason: 'Web fetching requires tools (🔧)' };
+  }
+
+  // Strong data lookup signals (explicit real-time data requests)
+  if (/\b(what('?s| is)\s+the\s+(weather|bitcoin|btc|eth|crypto)\s+(in|price|for|at))\b/i.test(lower)) {
+    return { needsTools: true, reason: 'Real-time data lookups require tools (🔧)' };
+  }
+
+  // Strong code execution signals
+  if (/\b(run\s+this\s+(code|script|command)|execute\s+(in\s+)?sandbox)\b/i.test(lower)) {
+    return { needsTools: true, reason: 'Code execution requires tools (🔧)' };
+  }
+
+  return { needsTools: false, reason: '' };
 }
 
 /**

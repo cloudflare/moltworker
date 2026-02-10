@@ -9,6 +9,7 @@ import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '.
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, type Provider, type ReasoningLevel } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
+import { extractLearning, storeLearning, storeLastTaskSummary } from '../openrouter/learnings';
 
 // Max characters for a single tool result before truncation
 const MAX_TOOL_RESULT_LENGTH = 8000; // ~2K tokens (reduced for CPU)
@@ -84,6 +85,9 @@ const CHECKPOINT_EVERY_N_TOOLS = 3;
 // Max auto-resume attempts before requiring manual intervention
 const MAX_AUTO_RESUMES_DEFAULT = 10;
 const MAX_AUTO_RESUMES_FREE = 50;
+// Max total elapsed time before stopping (15min for free, 30min for paid)
+const MAX_ELAPSED_FREE_MS = 15 * 60 * 1000;
+const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
 
 /** Get the auto-resume limit based on model cost */
 function getAutoResumeLimit(modelAlias: string): number {
@@ -140,7 +144,28 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
     const resumeCount = task.autoResumeCount ?? 0;
     const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+    const elapsedMs = Date.now() - task.startTime;
     const maxResumes = getAutoResumeLimit(task.modelAlias);
+    const isFreeModel = getModel(task.modelAlias)?.isFree === true;
+    const maxElapsedMs = isFreeModel ? MAX_ELAPSED_FREE_MS : MAX_ELAPSED_PAID_MS;
+
+    // Check elapsed time cap (prevents runaway tasks)
+    if (elapsedMs > maxElapsedMs) {
+      console.log(`[TaskProcessor] Elapsed time cap reached: ${elapsed}s > ${maxElapsedMs / 1000}s`);
+      task.status = 'failed';
+      task.error = `Task exceeded time limit (${Math.round(maxElapsedMs / 60000)}min). Progress saved.`;
+      await this.doState.storage.put('task', task);
+
+      if (task.telegramToken) {
+        await this.sendTelegramMessageWithButtons(
+          task.telegramToken,
+          task.chatId,
+          `⏰ Task exceeded ${Math.round(maxElapsedMs / 60000)}min time limit (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\n💡 Progress saved. Tap Resume to continue from checkpoint.`,
+          [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
+        );
+      }
+      return;
+    }
 
     // Check if auto-resume is enabled and under limit
     if (task.autoResume && resumeCount < maxResumes && task.telegramToken && task.openrouterKey) {
@@ -781,6 +806,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           } catch (apiError) {
             lastError = apiError instanceof Error ? apiError : new Error(String(apiError));
             console.log(`[TaskProcessor] API call failed (attempt ${attempt}): ${lastError.message}`);
+
+            // 402 = payment required / quota exceeded — fail fast, don't retry
+            if (/\b402\b/.test(lastError.message)) {
+              console.log('[TaskProcessor] 402 Payment Required — failing fast');
+              break;
+            }
+
             if (attempt < MAX_API_RETRIES) {
               console.log(`[TaskProcessor] Retrying in 2 seconds...`);
               await new Promise(r => setTimeout(r, 2000));
@@ -793,9 +825,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // If API call failed after all retries, try rotating to another free model
         if (!result && lastError) {
           const isRateLimited = /429|503|rate.?limit|overloaded|capacity|busy/i.test(lastError.message);
+          const isQuotaExceeded = /\b402\b/.test(lastError.message);
           const currentIsFree = getModel(task.modelAlias)?.isFree === true;
 
-          if (isRateLimited && currentIsFree && freeModels.length > 1 && freeRotationCount < MAX_FREE_ROTATIONS) {
+          if ((isRateLimited || isQuotaExceeded) && currentIsFree && freeModels.length > 1 && freeRotationCount < MAX_FREE_ROTATIONS) {
             // Find next free model (skip current one)
             const currentIdx = freeModels.indexOf(task.modelAlias);
             const nextIdx = (currentIdx + 1) % freeModels.length;
@@ -824,7 +857,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             }
           }
 
-          // Can't rotate — propagate the error
+          // Can't rotate — provide helpful message for 402
+          if (isQuotaExceeded) {
+            throw new Error(`API key quota exceeded (402). Try a free model: /qwencoderfree, /pony, or /gptoss`);
+          }
           throw lastError;
         }
 
@@ -981,6 +1017,28 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           );
         }
 
+        // Extract and store learning (non-blocking, failure-safe)
+        if (this.r2) {
+          try {
+            const userMsg = request.messages.find(m => m.role === 'user');
+            const userMessage = typeof userMsg?.content === 'string' ? userMsg.content : '';
+            const learning = extractLearning({
+              taskId: task.taskId,
+              modelAlias: task.modelAlias,
+              toolsUsed: task.toolsUsed,
+              iterations: task.iterations,
+              durationMs: Date.now() - task.startTime,
+              success: true,
+              userMessage,
+            });
+            await storeLearning(this.r2, task.userId, learning);
+            await storeLastTaskSummary(this.r2, task.userId, learning);
+            console.log(`[TaskProcessor] Learning stored: ${learning.category}, ${learning.uniqueTools.length} unique tools`);
+          } catch (learnErr) {
+            console.error('[TaskProcessor] Failed to store learning:', learnErr);
+          }
+        }
+
         // Delete status message
         if (statusMessageId) {
           await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
@@ -1030,6 +1088,27 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
       // Cancel watchdog alarm - we're handling the error here
       await this.doState.storage.deleteAlarm();
+
+      // Store failure learning (only if task made progress)
+      if (this.r2 && task.iterations > 0) {
+        try {
+          const userMsg = request.messages.find(m => m.role === 'user');
+          const userMessage = typeof userMsg?.content === 'string' ? userMsg.content : '';
+          const learning = extractLearning({
+            taskId: task.taskId,
+            modelAlias: task.modelAlias,
+            toolsUsed: task.toolsUsed,
+            iterations: task.iterations,
+            durationMs: Date.now() - task.startTime,
+            success: false,
+            userMessage,
+          });
+          await storeLearning(this.r2, task.userId, learning);
+          console.log(`[TaskProcessor] Failure learning stored: ${learning.category}`);
+        } catch (learnErr) {
+          console.error('[TaskProcessor] Failed to store failure learning:', learnErr);
+        }
+      }
 
       // Save checkpoint so we can resume later
       if (this.r2 && task.iterations > 0) {

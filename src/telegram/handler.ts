@@ -7,6 +7,7 @@ import { OpenRouterClient, createOpenRouterClient, extractTextResponse, type Cha
 import { UserStorage, createUserStorage, SkillStorage, createSkillStorage } from '../openrouter/storage';
 import { modelSupportsTools, generateDailyBriefing, type SandboxLike } from '../openrouter/tools';
 import { getUsage, getUsageRange, formatUsageSummary, formatWeekSummary } from '../openrouter/costs';
+import { loadLearnings, getRelevantLearnings, formatLearningsForPrompt, loadLastTaskSummary, formatLastTaskForPrompt } from '../openrouter/learnings';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import {
   MODELS,
@@ -25,6 +26,7 @@ import {
   blockModels,
   unblockModels,
   getBlockedAliases,
+  detectToolIntent,
   type ModelInfo,
   type ReasoningLevel,
 } from '../openrouter/models';
@@ -420,6 +422,7 @@ export class TelegramHandler {
   private openrouter: OpenRouterClient;
   private storage: UserStorage;
   private skills: SkillStorage;
+  private r2Bucket: R2Bucket;
   private defaultSkill: string;
   private cachedSkillPrompt: string | null = null;
   private allowedUsers: Set<string> | null = null; // null = allow all, Set = allowlist
@@ -454,6 +457,7 @@ export class TelegramHandler {
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
     this.storage = createUserStorage(r2Bucket);
     this.skills = createSkillStorage(r2Bucket);
+    this.r2Bucket = r2Bucket;
     this.defaultSkill = defaultSkill;
     this.githubToken = githubToken;
     this.telegramToken = telegramToken;
@@ -518,6 +522,34 @@ export class TelegramHandler {
 
     // Fallback default prompt
     return 'You are a helpful AI assistant. Be concise but thorough. Use markdown formatting when appropriate.';
+  }
+
+  /**
+   * Get relevant past learnings formatted for system prompt injection.
+   * Returns empty string if no relevant learnings found or on error.
+   */
+  private async getLearningsHint(userId: string, userMessage: string): Promise<string> {
+    try {
+      const history = await loadLearnings(this.r2Bucket, userId);
+      if (!history) return '';
+      const relevant = getRelevantLearnings(history, userMessage);
+      return formatLearningsForPrompt(relevant);
+    } catch {
+      return ''; // Non-fatal: skip learnings on error
+    }
+  }
+
+  /**
+   * Get the last completed task summary for cross-task context.
+   * Returns empty string if no recent task or on error.
+   */
+  private async getLastTaskHint(userId: string): Promise<string> {
+    try {
+      const summary = await loadLastTaskSummary(this.r2Bucket, userId);
+      return formatLastTaskForPrompt(summary);
+    } catch {
+      return ''; // Non-fatal: skip on error
+    }
   }
 
   /**
@@ -1159,10 +1191,16 @@ export class TelegramHandler {
       if (modelSupportsTools(modelAlias)) {
         const history = await this.storage.getConversation(userId, 10);
         const systemPrompt = await this.getSystemPrompt();
-        const toolHint = '\n\nYou have access to tools (web browsing, GitHub, weather, news, currency conversion, charts, etc). Use them proactively when a question could benefit from real-time data, external lookups, or verification.';
+        const visionModelInfo = getModel(modelAlias);
+        const visionParallelHint = visionModelInfo?.parallelCalls
+          ? ' Call multiple tools in parallel when possible.'
+          : '';
+        const toolHint = `\n\nYou have access to tools (web browsing, GitHub, weather, news, currency conversion, charts, code execution, etc). Use them proactively — don't guess when you can look up real data.${visionParallelHint} Tools are fast and free; prefer using them over making assumptions.`;
+        const learningsHint = await this.getLearningsHint(userId, caption);
+        const lastTaskHint = await this.getLastTaskHint(userId);
 
         const messages: ChatMessage[] = [
-          { role: 'system', content: systemPrompt + toolHint },
+          { role: 'system', content: systemPrompt + toolHint + learningsHint + lastTaskHint },
           ...history.map(msg => ({
             role: msg.role as 'user' | 'assistant',
             content: msg.content,
@@ -1259,15 +1297,36 @@ export class TelegramHandler {
     const systemPrompt = await this.getSystemPrompt();
 
     // Augment system prompt with tool hints for tool-supporting models
-    const toolHint = modelSupportsTools(modelAlias)
-      ? '\n\nYou have access to tools (web browsing, GitHub, weather, news, currency conversion, charts, etc). Use them proactively when a question could benefit from real-time data, external lookups, or verification. Don\'t hesitate to call tools — they are fast and free.'
+    const hasTools = modelSupportsTools(modelAlias);
+    const modelInfo = getModel(modelAlias);
+    const parallelHint = modelInfo?.parallelCalls
+      ? ' Call multiple tools in parallel when possible (e.g., read multiple files at once, fetch multiple URLs simultaneously).'
       : '';
+    const toolHint = hasTools
+      ? `\n\nYou have access to tools (web browsing, GitHub, weather, news, currency conversion, charts, code execution, etc). Use them proactively — don't guess when you can look up real data.${parallelHint} Tools are fast and free; prefer using them over making assumptions.`
+      : '';
+
+    // Warn user if message needs tools but model doesn't support them
+    if (!hasTools) {
+      const intent = detectToolIntent(messageText);
+      if (intent.needsTools) {
+        await this.bot.sendMessage(
+          chatId,
+          `⚠️ ${intent.reason}\nModel /${modelAlias} doesn't support tools. Switch to a tool model:\n/qwencoderfree /pony /gptoss (free)\n/deep /grok /gpt (paid)\n\nSending your message anyway — the model will try its best without tools.`
+        );
+      }
+    }
+
+    // Inject relevant past learnings into system prompt
+    const learningsHint = await this.getLearningsHint(userId, messageText);
+    // Inject last completed task summary for cross-task context
+    const lastTaskHint = await this.getLastTaskHint(userId);
 
     // Build messages array
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: systemPrompt + toolHint,
+        content: systemPrompt + toolHint + learningsHint + lastTaskHint,
       },
       ...history.map(msg => ({
         role: msg.role as 'user' | 'assistant',

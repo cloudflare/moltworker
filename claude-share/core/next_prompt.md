@@ -3,26 +3,30 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-09
+**Last Updated:** 2026-02-10
 
 ---
 
-## Current Task: Phase 3.1 — Compound Learning Loop
+## Current Task: Phase 3.2 — Structured Task Phases
 
-### Phase 3.1: Implement Compound Learning Loop
+### Phase 3.2: Add Structured Task Phases (Plan → Work → Review)
 
-After each completed Durable Object task, extract structured metadata (tools used, model, iterations, success/failure, category) and store in R2. Before new tasks, inject relevant past patterns into the system prompt to improve future performance.
+Add phase tracking to TaskState so Durable Object tasks go through structured phases:
+1. **Plan** — Analyze the request, identify tools/strategy
+2. **Work** — Execute the plan (tool calling loop)
+3. **Review** — Validate results, check for completeness
 
-#### Files to Create/Modify
-1. **`src/openrouter/learnings.ts`** (NEW) — Learning extraction, storage, retrieval
-2. **`src/durable-objects/task-processor.ts`** — After task completion, call learning extractor
-3. **`src/telegram/handler.ts`** — Inject relevant learnings into system prompt before tasks
-4. **Tests** — Add tests for learning extraction and injection
+Phase-aware prompts guide the model through each phase. Phase transitions tracked in TaskState.
+
+#### Files to Modify
+1. **`src/durable-objects/task-processor.ts`** — Phase tracking in TaskState, phase-aware system prompts
+2. **`src/telegram/handler.ts`** — Surface phase info in progress updates
+3. **Tests** — Add tests for phase transitions
 
 #### Success Criteria
-- [ ] Structured metadata extracted after each completed DO task
-- [ ] Learnings stored in R2 (`learnings/{userId}/history.json`)
-- [ ] Before new tasks, relevant past patterns injected into system prompt
+- [ ] TaskState tracks current phase
+- [ ] Phase-aware prompts injected at each stage
+- [ ] Progress updates show current phase
 - [ ] Tests added
 - [ ] `npm test` passes
 - [ ] `npm run typecheck` passes (pre-existing errors OK)
@@ -33,8 +37,8 @@ After each completed Durable Object task, extract structured metadata (tools use
 
 | Priority | Task | Effort |
 |----------|------|--------|
-| Next | 3.1: Compound learning loop | High |
-| Then | 3.2: Structured task phases | High |
+| Next | 3.2: Structured task phases | High |
+| Then | 3.3: /learnings Telegram command | Medium |
 | Then | 2.5.9: Holiday awareness (Nager.Date) | Low |
 
 ---
@@ -43,6 +47,7 @@ After each completed Durable Object task, extract structured metadata (tools use
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-10 | Phase 3.1+3.4: Compound learning loop + prompt injection | Claude Opus 4.6 | 018gmCDcuBJqs9ffrrDHHBBd |
 | 2026-02-09 | Phase 1.5: Structured output support (json: prefix) | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
 | 2026-02-09 | Phase 1.4: Vision + tools unified + /help update | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
 | 2026-02-08 | Phase 2.5.6+2.5.8: Crypto + Geolocation tools | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |

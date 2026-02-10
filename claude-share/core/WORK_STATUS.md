@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-09
+**Last Updated:** 2026-02-10
 
 ---
 
@@ -27,6 +27,7 @@
 | 2.5.7 | Daily briefing aggregator | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-3 | Pass think: override through DO path | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
 | BUG-4 | Fix /img image generation | Claude Opus 4.6 | ✅ Complete | `claude/daily-briefing-aggregator-NfHhi` |
+| 3.1+3.4 | Compound learning loop + prompt injection | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 
 ---
 
@@ -34,7 +35,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Phase 1.5 complete | `claude/daily-briefing-aggregator-NfHhi` | 2026-02-09 |
+| Claude | Phase 3.1 complete | `claude/extract-task-metadata-8lMCM` | 2026-02-10 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -71,6 +72,7 @@
 | 2.5.8 | Geolocation from IP (ipapi.co) | Claude Opus 4.6 | 2026-02-08 | `claude/daily-briefing-aggregator-NfHhi` |
 | 1.5 | Structured output support (json: prefix) | Claude Opus 4.6 | 2026-02-09 | `claude/daily-briefing-aggregator-NfHhi` |
 | 1.4 | Vision + tools unified + /help update | Claude Opus 4.6 | 2026-02-09 | `claude/daily-briefing-aggregator-NfHhi` |
+| 3.1+3.4 | Compound learning loop + prompt injection | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
 
 ---
 
