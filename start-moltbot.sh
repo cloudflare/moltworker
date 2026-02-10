@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v62 - Fix cron registration syntax
-# Cache bust: 2026-02-08-v62-cron-fix
+# OpenClaw Startup Script v63 - Explicit channel plugin enable
+# Cache bust: 2026-02-10-v63-channel-fix
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -165,6 +165,24 @@ if [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$DISCORD_BOT_TOKEN" ] || [ -n "$SLACK_B
 else
   echo "No channel tokens set, skipping doctor"
 fi
+
+# Explicitly enable channel plugins and add accounts (doctor --fix no longer auto-enables)
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+  openclaw plugins enable telegram 2>/dev/null || true
+  openclaw channels add --channel telegram --use-env 2>/dev/null || true
+  echo "Telegram channel configured"
+fi
+if [ -n "$DISCORD_BOT_TOKEN" ]; then
+  openclaw plugins enable discord 2>/dev/null || true
+  openclaw channels add --channel discord --use-env 2>/dev/null || true
+  echo "Discord channel configured"
+fi
+if [ -n "$SLACK_BOT_TOKEN" ]; then
+  openclaw plugins enable slack 2>/dev/null || true
+  openclaw channels add --channel slack --use-env 2>/dev/null || true
+  echo "Slack channel configured"
+fi
+log_timing "Channels configured"
 
 # Set model AFTER doctor (doctor wipes model config)
 openclaw models set anthropic/claude-sonnet-4-5 2>/dev/null || true
