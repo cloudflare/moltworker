@@ -1020,8 +1020,8 @@ describe('Phase 2.5.8 — Geolocation Tool', () => {
 // ============================================================================
 
 describe('Test 18 — /help and /start message verification', () => {
-  it('should have exactly 12 tools in AVAILABLE_TOOLS', () => {
-    expect(AVAILABLE_TOOLS.length).toBe(12);
+  it('should have exactly 14 tools in AVAILABLE_TOOLS', () => {
+    expect(AVAILABLE_TOOLS.length).toBe(14);
   });
 
   it('should list all expected tools', () => {
@@ -1039,22 +1039,25 @@ describe('Test 18 — /help and /start message verification', () => {
       'get_crypto',
       'geolocate_ip',
       'browse_url',
+      'github_create_pr',
+      'sandbox_exec',
     ];
     for (const expected of expectedTools) {
       expect(toolNames).toContain(expected);
     }
   });
 
-  // Verify the /help message lists all 12 tools by name
+  // Verify the /help message lists all 14 tools by name
   it('should list each tool individually in the new /help format', () => {
     // The new help message lists each tool as a bullet point
     const helpToolSection = [
       'get_weather', 'get_crypto', 'convert_currency', 'fetch_news',
       'fetch_url', 'browse_url', 'url_metadata', 'generate_chart',
       'geolocate_ip', 'github_read_file', 'github_list_files', 'github_api',
+      'github_create_pr', 'sandbox_exec',
     ];
-    // All 12 are individually named
-    expect(helpToolSection.length).toBe(12);
+    // All 14 are individually named
+    expect(helpToolSection.length).toBe(14);
   });
 
   // Verify /help mentions key features

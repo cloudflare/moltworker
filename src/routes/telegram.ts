@@ -52,6 +52,9 @@ telegram.post('/webhook/:token', async (c) => {
       ? env.TELEGRAM_ALLOWED_USERS.split(',').map((id: string) => id.trim())
       : undefined;
 
+    // Get sandbox from Hono context if available (set by middleware in index.ts)
+    const sandbox = c.get('sandbox' as never) as import('../openrouter/tools').SandboxLike | undefined;
+
     const handler = createTelegramHandler(
       env.TELEGRAM_BOT_TOKEN,
       env.OPENROUTER_API_KEY,
@@ -64,7 +67,8 @@ telegram.post('/webhook/:token', async (c) => {
       env.BROWSER, // Pass browser binding for browse_url tool
       env.DASHSCOPE_API_KEY, // DashScope for Qwen
       env.MOONSHOT_API_KEY, // Moonshot for Kimi
-      env.DEEPSEEK_API_KEY // DeepSeek for DeepSeek Coder
+      env.DEEPSEEK_API_KEY, // DeepSeek for DeepSeek Coder
+      sandbox // Sandbox container for sandbox_exec tool
     );
 
     // Process update asynchronously

@@ -5,7 +5,7 @@
 
 import { OpenRouterClient, createOpenRouterClient, extractTextResponse, type ChatMessage } from '../openrouter/client';
 import { UserStorage, createUserStorage, SkillStorage, createSkillStorage } from '../openrouter/storage';
-import { modelSupportsTools, generateDailyBriefing } from '../openrouter/tools';
+import { modelSupportsTools, generateDailyBriefing, type SandboxLike } from '../openrouter/tools';
 import { getUsage, getUsageRange, formatUsageSummary, formatWeekSummary } from '../openrouter/costs';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import {
@@ -428,6 +428,7 @@ export class TelegramHandler {
   private openrouterKey: string; // Store for DO
   private taskProcessor?: DurableObjectNamespace<TaskProcessor>; // For long-running tasks
   private browser?: Fetcher; // Browser binding for browse_url tool
+  private sandbox?: SandboxLike; // Sandbox container for sandbox_exec tool
   // Direct API keys
   private dashscopeKey?: string;
   private moonshotKey?: string;
@@ -446,7 +447,8 @@ export class TelegramHandler {
     browser?: Fetcher, // Browser binding for browse_url tool
     dashscopeKey?: string, // DashScope API key (Qwen)
     moonshotKey?: string, // Moonshot API key (Kimi)
-    deepseekKey?: string // DeepSeek API key
+    deepseekKey?: string, // DeepSeek API key
+    sandbox?: SandboxLike // Sandbox container for code execution
   ) {
     this.bot = new TelegramBot(telegramToken);
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
@@ -458,6 +460,7 @@ export class TelegramHandler {
     this.openrouterKey = openrouterKey;
     this.taskProcessor = taskProcessor;
     this.browser = browser;
+    this.sandbox = sandbox;
     this.dashscopeKey = dashscopeKey;
     this.moonshotKey = moonshotKey;
     this.deepseekKey = deepseekKey;
@@ -658,14 +661,16 @@ export class TelegramHandler {
         const statusAutoResume = await this.storage.getUserAutoResume(userId);
         const hasGithub = !!this.githubToken;
         const hasBrowser = !!this.browser;
+        const hasSandbox = !!this.sandbox;
         await this.bot.sendMessage(
           chatId,
           `📊 Bot Status\n\n` +
           `Model: ${statusModelInfo?.name || statusModel}\n` +
           `Conversation: ${statusHistory.length} messages\n` +
           `Auto-resume: ${statusAutoResume ? `✓ Enabled (${statusModelInfo?.isFree ? '50x free' : '10x paid'})` : '✗ Disabled'}\n` +
-          `GitHub Tools: ${hasGithub ? '✓ Configured' : '✗ Not configured'}\n` +
+          `GitHub Tools: ${hasGithub ? '✓ Configured (read + PR creation)' : '✗ Not configured'}\n` +
           `Browser Tools: ${hasBrowser ? '✓ Configured' : '✗ Not configured'}\n` +
+          `Sandbox: ${hasSandbox ? '✓ Available (code execution)' : '✗ Not available'}\n` +
           `Skill: ${this.defaultSkill}\n\n` +
           `Use /automode to toggle auto-resume\n` +
           `Use /clear to reset conversation\n` +
@@ -1200,7 +1205,7 @@ export class TelegramHandler {
           modelAlias, messages, {
             maxToolCalls: 10,
             maxTimeMs: 120000,
-            toolContext: { githubToken: this.githubToken, browser: this.browser },
+            toolContext: { githubToken: this.githubToken, browser: this.browser, sandbox: this.sandbox },
           }
         );
 
@@ -1393,6 +1398,7 @@ export class TelegramHandler {
             toolContext: {
               githubToken: this.githubToken,
               browser: this.browser,
+              sandbox: this.sandbox,
             },
             reasoningLevel: reasoningLevel ?? undefined,
             responseFormat: requestJson && supportsStructuredOutput(modelAlias)
@@ -2078,7 +2084,7 @@ Free:  /trinity /deepfree /qwencoderfree /devstral
 All:   /models for full list
 /syncmodels — Fetch latest free models from OpenRouter
 
-━━━ 12 Live Tools ━━━
+━━━ 14 Live Tools ━━━
 The bot calls these automatically when relevant:
  • get_weather — Current conditions + 7-day forecast
  • get_crypto — Coin price, top N, DEX pairs
@@ -2092,6 +2098,8 @@ The bot calls these automatically when relevant:
  • github_read_file — Read file from any repo
  • github_list_files — List repo directory
  • github_api — Full GitHub API access
+ • github_create_pr — Create PR with file changes
+ • sandbox_exec — Run commands in sandbox container
 
 ━━━ Special Prefixes ━━━
 think:high <msg> — Deep reasoning (also: low, medium, off)
@@ -2127,7 +2135,8 @@ export function createTelegramHandler(
   browser?: Fetcher,
   dashscopeKey?: string,
   moonshotKey?: string,
-  deepseekKey?: string
+  deepseekKey?: string,
+  sandbox?: SandboxLike
 ): TelegramHandler {
   return new TelegramHandler(
     telegramToken,
@@ -2141,6 +2150,7 @@ export function createTelegramHandler(
     browser,
     dashscopeKey,
     moonshotKey,
-    deepseekKey
+    deepseekKey,
+    sandbox
   );
 }

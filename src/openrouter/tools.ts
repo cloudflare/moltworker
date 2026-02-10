@@ -38,11 +38,31 @@ export interface ToolResult {
 }
 
 /**
+ * Minimal interface for sandbox process results.
+ * Avoids direct dependency on @cloudflare/sandbox in this module.
+ */
+export interface SandboxProcess {
+  id: string;
+  status: string;
+  getLogs(): Promise<{ stdout?: string; stderr?: string }>;
+  kill(): Promise<void>;
+}
+
+/**
+ * Minimal interface for sandbox container operations.
+ * Matches the subset of @cloudflare/sandbox Sandbox we need.
+ */
+export interface SandboxLike {
+  startProcess(command: string, options?: { env?: Record<string, string> }): Promise<SandboxProcess>;
+}
+
+/**
  * Context for tool execution (holds secrets like GitHub token)
  */
 export interface ToolContext {
   githubToken?: string;
   browser?: Fetcher; // Cloudflare Browser Rendering binding
+  sandbox?: SandboxLike; // Sandbox container for code execution
 }
 
 /**
@@ -327,6 +347,68 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'github_create_pr',
+      description: 'Create a GitHub Pull Request with file changes. Creates a branch, commits file changes (create/update/delete), and opens a PR. Authentication is handled automatically. Use for simple multi-file changes (up to ~10 files, 1MB total).',
+      parameters: {
+        type: 'object',
+        properties: {
+          owner: {
+            type: 'string',
+            description: 'Repository owner (username or organization)',
+          },
+          repo: {
+            type: 'string',
+            description: 'Repository name',
+          },
+          title: {
+            type: 'string',
+            description: 'Pull request title',
+          },
+          branch: {
+            type: 'string',
+            description: 'New branch name to create (will be prefixed with bot/ automatically)',
+          },
+          base: {
+            type: 'string',
+            description: 'Base branch (default: main)',
+          },
+          changes: {
+            type: 'string',
+            description: 'JSON array of file changes: [{"path":"file.ts","content":"...","action":"create|update|delete"}]',
+          },
+          body: {
+            type: 'string',
+            description: 'PR description in markdown (optional)',
+          },
+        },
+        required: ['owner', 'repo', 'title', 'branch', 'changes'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'sandbox_exec',
+      description: 'Execute shell commands in a sandbox container for complex code tasks. Use for multi-file refactors, build/test workflows, or tasks that need git CLI. The container has git, node, npm, and common dev tools. Commands run sequentially. Use github_create_pr for simple file changes instead.',
+      parameters: {
+        type: 'object',
+        properties: {
+          commands: {
+            type: 'string',
+            description: 'JSON array of shell commands to run sequentially, e.g. ["git clone https://github.com/owner/repo.git", "cd repo && npm install", "npm test"]',
+          },
+          timeout: {
+            type: 'string',
+            description: 'Timeout per command in seconds (default: 120, max: 300)',
+          },
+        },
+        required: ['commands'],
+      },
+    },
+  },
 ];
 
 /**
@@ -390,6 +472,21 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'browse_url':
         result = await browseUrl(args.url, args.action as 'extract_text' | 'screenshot' | 'pdf' | undefined, args.wait_for, context?.browser);
+        break;
+      case 'github_create_pr':
+        result = await githubCreatePr(
+          args.owner,
+          args.repo,
+          args.title,
+          args.branch,
+          args.changes,
+          args.base,
+          args.body,
+          githubToken
+        );
+        break;
+      case 'sandbox_exec':
+        result = await sandboxExec(args.commands, args.timeout, context?.sandbox, githubToken);
         break;
       default:
         result = `Error: Unknown tool: ${name}`;
@@ -572,6 +669,392 @@ async function githubApi(
   } catch {
     return responseText;
   }
+}
+
+/**
+ * File change in a github_create_pr call
+ */
+interface FileChange {
+  path: string;
+  content?: string;
+  action: 'create' | 'update' | 'delete';
+}
+
+/**
+ * GitHub Git API response types
+ */
+interface GitRefResponse {
+  object: { sha: string };
+}
+
+interface GitBlobResponse {
+  sha: string;
+}
+
+interface GitTreeResponse {
+  sha: string;
+}
+
+interface GitCommitResponse {
+  sha: string;
+}
+
+interface GitCreateRefResponse {
+  ref: string;
+}
+
+interface GitPullResponse {
+  html_url: string;
+  number: number;
+}
+
+/**
+ * Create a GitHub PR with file changes using the Git Data API.
+ *
+ * Steps:
+ * 1. GET base ref SHA
+ * 2. Create blobs for each file change
+ * 3. Create a tree with all changes
+ * 4. Create a commit pointing to that tree
+ * 5. Create a branch ref pointing to the commit
+ * 6. Open a pull request
+ */
+async function githubCreatePr(
+  owner: string,
+  repo: string,
+  title: string,
+  branch: string,
+  changesJson: string,
+  base?: string,
+  body?: string,
+  token?: string
+): Promise<string> {
+  // --- Validation ---
+  if (!token) {
+    throw new Error('GitHub token is required for creating PRs. Configure GITHUB_TOKEN in the bot settings.');
+  }
+
+  // Validate owner/repo format
+  if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) {
+    throw new Error(`Invalid owner/repo format: "${owner}/${repo}". Must contain only alphanumeric characters, dots, hyphens, and underscores.`);
+  }
+
+  // Validate branch name (no spaces, no .., no control chars)
+  if (!/^[a-zA-Z0-9_/.@-]+$/.test(branch) || branch.includes('..')) {
+    throw new Error(`Invalid branch name: "${branch}". Use alphanumeric characters, hyphens, underscores, and forward slashes only.`);
+  }
+
+  // Auto-prefix with bot/ to avoid conflicts
+  const fullBranch = branch.startsWith('bot/') ? branch : `bot/${branch}`;
+  const baseBranch = base || 'main';
+
+  // Parse changes
+  let changes: FileChange[];
+  try {
+    changes = JSON.parse(changesJson);
+  } catch {
+    throw new Error('Invalid changes JSON. Expected: [{"path":"file.ts","content":"...","action":"create|update|delete"}]');
+  }
+
+  if (!Array.isArray(changes) || changes.length === 0) {
+    throw new Error('Changes must be a non-empty array of file changes.');
+  }
+
+  if (changes.length > 20) {
+    throw new Error(`Too many file changes (${changes.length}). Maximum is 20 files per PR.`);
+  }
+
+  // Validate each change and check total content size
+  let totalContentSize = 0;
+  for (const change of changes) {
+    if (!change.path || typeof change.path !== 'string') {
+      throw new Error('Each change must have a "path" string.');
+    }
+    if (change.path.includes('..') || change.path.startsWith('/')) {
+      throw new Error(`Invalid file path: "${change.path}". Paths must be relative and cannot contain "..".`);
+    }
+    if (!['create', 'update', 'delete'].includes(change.action)) {
+      throw new Error(`Invalid action "${change.action}" for path "${change.path}". Must be "create", "update", or "delete".`);
+    }
+    if (change.action !== 'delete' && (change.content === undefined || change.content === null)) {
+      throw new Error(`Missing content for ${change.action} action on "${change.path}".`);
+    }
+    if (change.content) {
+      totalContentSize += change.content.length;
+    }
+  }
+
+  if (totalContentSize > 1_000_000) {
+    throw new Error(`Total content size (${(totalContentSize / 1024).toFixed(0)}KB) exceeds 1MB limit.`);
+  }
+
+  const headers: Record<string, string> = {
+    'User-Agent': 'MoltworkerBot/1.0',
+    'Accept': 'application/vnd.github.v3+json',
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+
+  const apiBase = `https://api.github.com/repos/${owner}/${repo}`;
+
+  // --- Step 1: Get base branch SHA ---
+  const refResponse = await fetch(`${apiBase}/git/ref/heads/${baseBranch}`, { headers });
+  if (!refResponse.ok) {
+    const err = await refResponse.text();
+    throw new Error(`Failed to get base branch "${baseBranch}": ${refResponse.status} ${err}`);
+  }
+  const refData = await refResponse.json() as GitRefResponse;
+  const baseSha = refData.object.sha;
+
+  // --- Step 2: Create blobs for each file ---
+  const treeItems: Array<{
+    path: string;
+    mode: string;
+    type: string;
+    sha: string | null;
+  }> = [];
+
+  for (const change of changes) {
+    if (change.action === 'delete') {
+      // For deletions, set sha to null with mode 100644
+      treeItems.push({
+        path: change.path,
+        mode: '100644',
+        type: 'blob',
+        sha: null,
+      });
+    } else {
+      // Create blob for create/update
+      const blobResponse = await fetch(`${apiBase}/git/blobs`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          content: change.content,
+          encoding: 'utf-8',
+        }),
+      });
+
+      if (!blobResponse.ok) {
+        const err = await blobResponse.text();
+        throw new Error(`Failed to create blob for "${change.path}": ${blobResponse.status} ${err}`);
+      }
+
+      const blobData = await blobResponse.json() as GitBlobResponse;
+      treeItems.push({
+        path: change.path,
+        mode: '100644',
+        type: 'blob',
+        sha: blobData.sha,
+      });
+    }
+  }
+
+  // --- Step 3: Create tree ---
+  const treeResponse = await fetch(`${apiBase}/git/trees`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      base_tree: baseSha,
+      tree: treeItems,
+    }),
+  });
+
+  if (!treeResponse.ok) {
+    const err = await treeResponse.text();
+    throw new Error(`Failed to create tree: ${treeResponse.status} ${err}`);
+  }
+
+  const treeData = await treeResponse.json() as GitTreeResponse;
+
+  // --- Step 4: Create commit ---
+  const commitResponse = await fetch(`${apiBase}/git/commits`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      message: title,
+      tree: treeData.sha,
+      parents: [baseSha],
+    }),
+  });
+
+  if (!commitResponse.ok) {
+    const err = await commitResponse.text();
+    throw new Error(`Failed to create commit: ${commitResponse.status} ${err}`);
+  }
+
+  const commitData = await commitResponse.json() as GitCommitResponse;
+
+  // --- Step 5: Create branch ref ---
+  const createRefResponse = await fetch(`${apiBase}/git/refs`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      ref: `refs/heads/${fullBranch}`,
+      sha: commitData.sha,
+    }),
+  });
+
+  if (!createRefResponse.ok) {
+    const err = await createRefResponse.text();
+    throw new Error(`Failed to create branch "${fullBranch}": ${createRefResponse.status} ${err}`);
+  }
+
+  // --- Step 6: Create pull request ---
+  const prResponse = await fetch(`${apiBase}/pulls`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      title,
+      head: fullBranch,
+      base: baseBranch,
+      body: body || `Automated PR created by Moltworker bot.\n\nChanges:\n${changes.map(c => `- ${c.action}: ${c.path}`).join('\n')}`,
+    }),
+  });
+
+  if (!prResponse.ok) {
+    const err = await prResponse.text();
+    throw new Error(`Failed to create PR: ${prResponse.status} ${err}`);
+  }
+
+  const prData = await prResponse.json() as GitPullResponse;
+
+  // Build summary
+  const summary = [
+    `✅ Pull Request created successfully!`,
+    ``,
+    `PR: ${prData.html_url}`,
+    `Branch: ${fullBranch} → ${baseBranch}`,
+    `Changes: ${changes.length} file(s)`,
+    ...changes.map(c => `  - ${c.action}: ${c.path}`),
+  ];
+
+  return summary.join('\n');
+}
+
+/**
+ * Execute shell commands in a sandbox container.
+ *
+ * Runs commands sequentially, collecting stdout/stderr from each.
+ * The container has git, node, npm, and common dev tools.
+ * GitHub token is injected as GH_TOKEN env var for git/gh CLI authentication.
+ */
+async function sandboxExec(
+  commandsJson: string,
+  timeoutStr?: string,
+  sandbox?: SandboxLike,
+  githubToken?: string
+): Promise<string> {
+  if (!sandbox) {
+    throw new Error('Sandbox container is not available. This tool requires a sandbox-enabled environment. Use github_create_pr for simple file changes instead.');
+  }
+
+  // Parse commands
+  let commands: string[];
+  try {
+    commands = JSON.parse(commandsJson);
+  } catch {
+    throw new Error('Invalid commands JSON. Expected: ["cmd1", "cmd2", ...]');
+  }
+
+  if (!Array.isArray(commands) || commands.length === 0) {
+    throw new Error('Commands must be a non-empty array of shell command strings.');
+  }
+
+  if (commands.length > 20) {
+    throw new Error(`Too many commands (${commands.length}). Maximum is 20 per call.`);
+  }
+
+  // Validate commands — block dangerous patterns
+  for (const cmd of commands) {
+    if (typeof cmd !== 'string' || cmd.trim().length === 0) {
+      throw new Error('Each command must be a non-empty string.');
+    }
+    // Block commands that could escape the sandbox or cause damage
+    const blocked = ['rm -rf /', 'mkfs', 'dd if=', ':(){', 'fork bomb'];
+    for (const pattern of blocked) {
+      if (cmd.includes(pattern)) {
+        throw new Error(`Blocked command pattern: "${pattern}"`);
+      }
+    }
+  }
+
+  const timeoutSec = Math.min(Math.max(parseInt(timeoutStr || '120', 10), 5), 300);
+
+  // Build env vars — inject GitHub token for git/gh CLI
+  const env: Record<string, string> = {};
+  if (githubToken) {
+    env['GH_TOKEN'] = githubToken;
+    env['GITHUB_TOKEN'] = githubToken;
+  }
+
+  const results: string[] = [];
+  results.push(`🖥️ Sandbox Execution (${commands.length} command(s), ${timeoutSec}s timeout each)\n`);
+
+  for (let i = 0; i < commands.length; i++) {
+    const cmd = commands[i];
+    results.push(`--- Command ${i + 1}/${commands.length}: ${cmd} ---`);
+
+    try {
+      // Wrap command in bash with timeout
+      const wrappedCmd = `timeout ${timeoutSec} bash -c ${JSON.stringify(cmd)}`;
+      const process = await sandbox.startProcess(wrappedCmd, {
+        env: Object.keys(env).length > 0 ? env : undefined,
+      });
+
+      // Wait for the process to finish (poll getLogs until we get output or timeout)
+      const startTime = Date.now();
+      const maxWaitMs = (timeoutSec + 10) * 1000; // Extra 10s buffer
+      let logs: { stdout?: string; stderr?: string } = {};
+
+      while (Date.now() - startTime < maxWaitMs) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        logs = await process.getLogs();
+
+        // Check if process is done by checking if status changed
+        // The process.getLogs() returns accumulated output
+        if (process.status === 'completed' || process.status === 'failed') {
+          break;
+        }
+      }
+
+      // Collect final logs
+      logs = await process.getLogs();
+
+      if (logs.stdout) {
+        const stdout = logs.stdout.length > 10000
+          ? logs.stdout.slice(0, 10000) + '\n[stdout truncated]'
+          : logs.stdout;
+        results.push(`stdout:\n${stdout}`);
+      }
+      if (logs.stderr) {
+        const stderr = logs.stderr.length > 5000
+          ? logs.stderr.slice(0, 5000) + '\n[stderr truncated]'
+          : logs.stderr;
+        results.push(`stderr:\n${stderr}`);
+      }
+      if (!logs.stdout && !logs.stderr) {
+        results.push('(no output)');
+      }
+
+      results.push('');
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
+      results.push(`Error: ${errMsg}\n`);
+
+      // Stop on first error (fail-fast)
+      results.push(`⚠️ Stopped at command ${i + 1} due to error.`);
+      break;
+    }
+  }
+
+  const output = results.join('\n');
+
+  // Truncate if too long
+  if (output.length > 50000) {
+    return output.slice(0, 50000) + '\n\n[Output truncated - exceeded 50KB]';
+  }
+
+  return output;
 }
 
 /**
@@ -1637,10 +2120,10 @@ export function clearBriefingCache(): void {
 }
 
 /**
- * Tools available without browser binding (for Durable Objects)
+ * Tools available without browser/sandbox bindings (for Durable Objects)
  */
 export const TOOLS_WITHOUT_BROWSER: ToolDefinition[] = AVAILABLE_TOOLS.filter(
-  tool => tool.function.name !== 'browse_url'
+  tool => tool.function.name !== 'browse_url' && tool.function.name !== 'sandbox_exec'
 );
 
 /**

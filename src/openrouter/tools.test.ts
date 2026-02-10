@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache } from './tools';
+import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache, type SandboxLike, type SandboxProcess } from './tools';
 
 describe('url_metadata tool', () => {
   beforeEach(() => {
@@ -1789,5 +1789,770 @@ describe('geolocate_ip tool', () => {
 
     expect(result.content).toContain('2001:4860:4860::8888');
     expect(result.content).toContain('Mountain View');
+  });
+});
+
+describe('github_create_pr tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'github_create_pr');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['owner', 'repo', 'title', 'branch', 'changes']);
+  });
+
+  it('should be included in TOOLS_WITHOUT_BROWSER (available in DOs)', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'github_create_pr');
+    expect(tool).toBeDefined();
+  });
+
+  it('should fail without a GitHub token', async () => {
+    const result = await executeTool({
+      id: 'call_pr_1',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[{"path":"test.ts","content":"hello","action":"create"}]',
+        }),
+      },
+    });
+
+    expect(result.content).toContain('GitHub token is required');
+  });
+
+  it('should fail with invalid owner/repo format', async () => {
+    const result = await executeTool({
+      id: 'call_pr_2',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'invalid owner!',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[{"path":"test.ts","content":"hello","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Invalid owner/repo format');
+  });
+
+  it('should fail with invalid branch name containing ..', async () => {
+    const result = await executeTool({
+      id: 'call_pr_3',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'evil/../branch',
+          changes: '[{"path":"test.ts","content":"hello","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Invalid branch name');
+  });
+
+  it('should fail with invalid changes JSON', async () => {
+    const result = await executeTool({
+      id: 'call_pr_4',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: 'not valid json',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Invalid changes JSON');
+  });
+
+  it('should fail with empty changes array', async () => {
+    const result = await executeTool({
+      id: 'call_pr_5',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('non-empty array');
+  });
+
+  it('should fail with path traversal in file path', async () => {
+    const result = await executeTool({
+      id: 'call_pr_6',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[{"path":"../etc/passwd","content":"evil","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Invalid file path');
+  });
+
+  it('should fail with absolute file path', async () => {
+    const result = await executeTool({
+      id: 'call_pr_6b',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[{"path":"/etc/passwd","content":"evil","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Invalid file path');
+  });
+
+  it('should fail when total content exceeds 1MB', async () => {
+    const bigContent = 'x'.repeat(1_000_001);
+    const result = await executeTool({
+      id: 'call_pr_7',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: JSON.stringify([{ path: 'big.ts', content: bigContent, action: 'create' }]),
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('exceeds 1MB limit');
+  });
+
+  it('should fail when too many files', async () => {
+    const changes = Array.from({ length: 21 }, (_, i) => ({
+      path: `file${i}.ts`,
+      content: 'test',
+      action: 'create',
+    }));
+
+    const result = await executeTool({
+      id: 'call_pr_8',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Too many file changes');
+  });
+
+  it('should fail with missing content for create action', async () => {
+    const result = await executeTool({
+      id: 'call_pr_9',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[{"path":"test.ts","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Missing content');
+  });
+
+  it('should fail with invalid action type', async () => {
+    const result = await executeTool({
+      id: 'call_pr_10',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Test PR',
+          branch: 'test-branch',
+          changes: '[{"path":"test.ts","content":"hello","action":"rename"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Invalid action');
+  });
+
+  it('should create a PR successfully with all API calls', async () => {
+    let fetchCallIndex = 0;
+    const mockFetch = vi.fn().mockImplementation(() => {
+      fetchCallIndex++;
+      switch (fetchCallIndex) {
+        case 1: // GET ref
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ object: { sha: 'base-sha-123' } }),
+          });
+        case 2: // POST blob for file1
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sha: 'blob-sha-1' }),
+          });
+        case 3: // POST blob for file2
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sha: 'blob-sha-2' }),
+          });
+        case 4: // POST tree
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sha: 'tree-sha-456' }),
+          });
+        case 5: // POST commit
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ sha: 'commit-sha-789' }),
+          });
+        case 6: // POST ref (create branch)
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ref: 'refs/heads/bot/test-branch' }),
+          });
+        case 7: // POST pull request
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ html_url: 'https://github.com/testowner/testrepo/pull/42', number: 42 }),
+          });
+        default:
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'src/new-file.ts', content: 'export const hello = "world";', action: 'create' },
+      { path: 'README.md', content: '# Updated README', action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_pr_11',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'testowner',
+          repo: 'testrepo',
+          title: 'Add new feature',
+          branch: 'test-branch',
+          base: 'main',
+          changes: JSON.stringify(changes),
+          body: 'This PR adds a new feature.',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.role).toBe('tool');
+    expect(result.content).toContain('Pull Request created successfully');
+    expect(result.content).toContain('https://github.com/testowner/testrepo/pull/42');
+    expect(result.content).toContain('bot/test-branch');
+    expect(result.content).toContain('2 file(s)');
+
+    // Verify API calls were made
+    expect(mockFetch).toHaveBeenCalledTimes(7);
+
+    // Verify the ref GET call
+    const firstCall = mockFetch.mock.calls[0];
+    expect(firstCall[0]).toContain('/git/ref/heads/main');
+
+    // Verify blob creation calls
+    const blobCall1 = mockFetch.mock.calls[1];
+    expect(blobCall1[0]).toContain('/git/blobs');
+
+    // Verify tree creation
+    const treeCall = mockFetch.mock.calls[3];
+    expect(treeCall[0]).toContain('/git/trees');
+
+    // Verify commit creation
+    const commitCall = mockFetch.mock.calls[4];
+    expect(commitCall[0]).toContain('/git/commits');
+
+    // Verify branch creation
+    const refCall = mockFetch.mock.calls[5];
+    expect(refCall[0]).toContain('/git/refs');
+    const refBody = JSON.parse(refCall[1].body);
+    expect(refBody.ref).toBe('refs/heads/bot/test-branch');
+
+    // Verify PR creation
+    const prCall = mockFetch.mock.calls[6];
+    expect(prCall[0]).toContain('/pulls');
+    const prBody = JSON.parse(prCall[1].body);
+    expect(prBody.title).toBe('Add new feature');
+    expect(prBody.head).toBe('bot/test-branch');
+    expect(prBody.base).toBe('main');
+  });
+
+  it('should handle delete actions (null sha in tree)', async () => {
+    let fetchCallIndex = 0;
+    const mockFetch = vi.fn().mockImplementation(() => {
+      fetchCallIndex++;
+      switch (fetchCallIndex) {
+        case 1: return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'base-sha' } }) });
+        case 2: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree-sha' }) }); // tree (no blob for delete)
+        case 3: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit-sha' }) });
+        case 4: return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/del-branch' }) });
+        case 5: return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/1', number: 1 }) });
+        default: return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_pr_del',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Delete old file',
+          branch: 'del-branch',
+          changes: '[{"path":"old-file.ts","action":"delete"}]',
+        }),
+      },
+    }, { githubToken: 'test-token' });
+
+    expect(result.content).toContain('Pull Request created successfully');
+    expect(result.content).toContain('delete: old-file.ts');
+
+    // For delete, no blob API call should be made
+    // Calls: GET ref, POST tree, POST commit, POST ref, POST pull = 5
+    expect(mockFetch).toHaveBeenCalledTimes(5);
+  });
+
+  it('should auto-prefix branch with bot/ if not already prefixed', async () => {
+    let fetchCallIndex = 0;
+    const mockFetch = vi.fn().mockImplementation(() => {
+      fetchCallIndex++;
+      switch (fetchCallIndex) {
+        case 1: return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+        case 2: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob' }) });
+        case 3: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree' }) });
+        case 4: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit' }) });
+        case 5: return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/my-feature' }) });
+        case 6: return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/1', number: 1 }) });
+        default: return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_pr_prefix',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Test',
+          branch: 'my-feature',
+          changes: '[{"path":"a.ts","content":"x","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('bot/my-feature');
+  });
+
+  it('should not double-prefix if branch already starts with bot/', async () => {
+    let fetchCallIndex = 0;
+    const mockFetch = vi.fn().mockImplementation(() => {
+      fetchCallIndex++;
+      switch (fetchCallIndex) {
+        case 1: return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+        case 2: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob' }) });
+        case 3: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree' }) });
+        case 4: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit' }) });
+        case 5: return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/already-prefixed' }) });
+        case 6: return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/2', number: 2 }) });
+        default: return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await executeTool({
+      id: 'call_pr_noprefix',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Test',
+          branch: 'bot/already-prefixed',
+          changes: '[{"path":"a.ts","content":"x","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    // Should NOT be bot/bot/already-prefixed
+    expect(result.content).toContain('bot/already-prefixed');
+    expect(result.content).not.toContain('bot/bot/');
+  });
+
+  it('should default base branch to main', async () => {
+    let fetchCallIndex = 0;
+    const mockFetch = vi.fn().mockImplementation(() => {
+      fetchCallIndex++;
+      switch (fetchCallIndex) {
+        case 1: return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+        case 2: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob' }) });
+        case 3: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree' }) });
+        case 4: return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit' }) });
+        case 5: return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'r' }) });
+        case 6: return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/3', number: 3 }) });
+        default: return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await executeTool({
+      id: 'call_pr_default_base',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Test',
+          branch: 'b',
+          changes: '[{"path":"a.ts","content":"x","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    // First call should be to /git/ref/heads/main (default)
+    const firstCallUrl = mockFetch.mock.calls[0][0];
+    expect(firstCallUrl).toContain('/git/ref/heads/main');
+  });
+
+  it('should handle API error on get ref', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: () => Promise.resolve('Not Found'),
+    }));
+
+    const result = await executeTool({
+      id: 'call_pr_err',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Test',
+          branch: 'b',
+          changes: '[{"path":"a.ts","content":"x","action":"create"}]',
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('Failed to get base branch');
+    expect(result.content).toContain('404');
+  });
+});
+
+describe('sandbox_exec tool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should be included in AVAILABLE_TOOLS', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'sandbox_exec');
+    expect(tool).toBeDefined();
+    expect(tool!.function.parameters.required).toEqual(['commands']);
+  });
+
+  it('should NOT be included in TOOLS_WITHOUT_BROWSER (excluded from DOs)', () => {
+    const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'sandbox_exec');
+    expect(tool).toBeUndefined();
+  });
+
+  it('should fail without sandbox in context', async () => {
+    const result = await executeTool({
+      id: 'call_sb_1',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["echo hello"]' }),
+      },
+    });
+
+    expect(result.content).toContain('Sandbox container is not available');
+  });
+
+  it('should fail with invalid commands JSON', async () => {
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn(),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_2',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: 'not json' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('Invalid commands JSON');
+  });
+
+  it('should fail with empty commands array', async () => {
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn(),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_3',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '[]' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('non-empty array');
+  });
+
+  it('should fail with too many commands', async () => {
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn(),
+    };
+
+    const commands = Array.from({ length: 21 }, (_, i) => `echo ${i}`);
+
+    const result = await executeTool({
+      id: 'call_sb_4',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: JSON.stringify(commands) }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('Too many commands');
+  });
+
+  it('should block dangerous commands', async () => {
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn(),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_5',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["rm -rf /"]' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('Blocked command pattern');
+  });
+
+  it('should execute commands and return output', async () => {
+    const mockProcess: SandboxProcess = {
+      id: 'proc-1',
+      status: 'completed',
+      getLogs: vi.fn().mockResolvedValue({
+        stdout: 'hello world\n',
+        stderr: '',
+      }),
+      kill: vi.fn(),
+    };
+
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn().mockResolvedValue(mockProcess),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_6',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["echo hello world"]' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.role).toBe('tool');
+    expect(result.content).toContain('Sandbox Execution');
+    expect(result.content).toContain('echo hello world');
+    expect(result.content).toContain('hello world');
+
+    // Verify sandbox.startProcess was called
+    expect(mockSandbox.startProcess).toHaveBeenCalledTimes(1);
+    const call = (mockSandbox.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(call[0]).toContain('echo hello world');
+  });
+
+  it('should execute multiple commands sequentially', async () => {
+    let callCount = 0;
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn().mockImplementation(() => {
+        callCount++;
+        return Promise.resolve({
+          id: `proc-${callCount}`,
+          status: 'completed',
+          getLogs: vi.fn().mockResolvedValue({
+            stdout: `output ${callCount}\n`,
+            stderr: '',
+          }),
+          kill: vi.fn(),
+        });
+      }),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_7',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["echo first", "echo second"]' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('Command 1/2');
+    expect(result.content).toContain('Command 2/2');
+    expect(mockSandbox.startProcess).toHaveBeenCalledTimes(2);
+  });
+
+  it('should pass GitHub token as environment variable', async () => {
+    const mockProcess: SandboxProcess = {
+      id: 'proc-env',
+      status: 'completed',
+      getLogs: vi.fn().mockResolvedValue({ stdout: 'done\n', stderr: '' }),
+      kill: vi.fn(),
+    };
+
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn().mockResolvedValue(mockProcess),
+    };
+
+    await executeTool({
+      id: 'call_sb_8',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["git clone https://github.com/o/r"]' }),
+      },
+    }, { sandbox: mockSandbox, githubToken: 'gh-token-123' });
+
+    const call = (mockSandbox.startProcess as ReturnType<typeof vi.fn>).mock.calls[0];
+    const envArg = call[1]?.env;
+    expect(envArg).toBeDefined();
+    expect(envArg.GH_TOKEN).toBe('gh-token-123');
+    expect(envArg.GITHUB_TOKEN).toBe('gh-token-123');
+  });
+
+  it('should stop on first error (fail-fast)', async () => {
+    let callCount = 0;
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.reject(new Error('Process failed'));
+        }
+        return Promise.resolve({
+          id: 'proc',
+          status: 'completed',
+          getLogs: vi.fn().mockResolvedValue({ stdout: '', stderr: '' }),
+          kill: vi.fn(),
+        });
+      }),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_9',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["bad-cmd", "echo should-not-run"]' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('Process failed');
+    expect(result.content).toContain('Stopped at command 1');
+    // Second command should not have been called
+    expect(mockSandbox.startProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle stderr output', async () => {
+    const mockProcess: SandboxProcess = {
+      id: 'proc-err',
+      status: 'completed',
+      getLogs: vi.fn().mockResolvedValue({
+        stdout: '',
+        stderr: 'warning: some deprecation\n',
+      }),
+      kill: vi.fn(),
+    };
+
+    const mockSandbox: SandboxLike = {
+      startProcess: vi.fn().mockResolvedValue(mockProcess),
+    };
+
+    const result = await executeTool({
+      id: 'call_sb_10',
+      type: 'function',
+      function: {
+        name: 'sandbox_exec',
+        arguments: JSON.stringify({ commands: '["npm test"]' }),
+      },
+    }, { sandbox: mockSandbox });
+
+    expect(result.content).toContain('stderr:');
+    expect(result.content).toContain('warning: some deprecation');
   });
 });
