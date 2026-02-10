@@ -367,8 +367,9 @@ async function initCDPSession(ws: WebSocket, env: MoltbotEnv): Promise<void> {
 
   try {
     // Launch browser
-    // eslint-disable-next-line import/no-named-as-default-member -- puppeteer.launch() is the standard API
-    const browser = await puppeteer.launch(env.BROWSER!);
+    const browser = await puppeteer.launch(
+      env.BROWSER as unknown as Parameters<typeof puppeteer.launch>[0],
+    );
     const page = await browser.newPage();
     const targetId = crypto.randomUUID();
 
@@ -581,7 +582,6 @@ async function handleTarget(
         targets.push({
           targetId,
           type: 'page',
-          // eslint-disable-next-line no-await-in-loop -- sequential page info retrieval
           title: await page.title(),
           url: page.url(),
           attached: true,
@@ -1541,7 +1541,6 @@ async function handleNetwork(
       // Get all cookies and delete them
       const cookies = await page.cookies();
       for (const cookie of cookies) {
-        // eslint-disable-next-line no-await-in-loop -- sequential cookie deletion
         await page.deleteCookie(cookie);
       }
 
@@ -1626,8 +1625,6 @@ async function handleEmulation(
       await page.evaluateOnNewDocument((tz: string) => {
         // Override Date to use the specified timezone
         const originalToLocaleString = Date.prototype.toLocaleString;
-
-        // eslint-disable-next-line no-extend-native -- CDP emulation requires prototype override
         Date.prototype.toString = function () {
           return originalToLocaleString.call(this, 'en-US', { timeZone: tz });
         };
@@ -1651,7 +1648,6 @@ async function handleEmulation(
           });
 
           // Add touch event support indicator (deliberate property set for emulation, not event binding)
-          // eslint-disable-next-line unicorn/prefer-add-event-listener
           window.ontouchstart = null;
         });
       }

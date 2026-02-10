@@ -11,7 +11,6 @@ async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
     // Wait for the command to complete
     let attempts = 0;
     while (proc.status === 'running' && attempts < 10) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
       await new Promise((r) => setTimeout(r, 200));
       attempts++;
     }

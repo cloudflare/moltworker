@@ -176,7 +176,10 @@ app.use('*', async (c, next) => {
     const acceptsHtml = c.req.header('Accept')?.includes('text/html');
     if (acceptsHtml) {
       // Return a user-friendly HTML error page
-      const html = configErrorHtml.replace('{{MISSING_VARS}}', missingVars.join(', '));
+      const html = String(configErrorHtml).replace(
+        '{{MISSING_VARS}}',
+        missingVars.join(', '),
+      );
       return c.html(html, 503);
     }
 
@@ -252,7 +255,7 @@ app.all('*', async (c) => {
     );
 
     // Return the loading page immediately
-    return c.html(loadingPageHtml);
+    return c.html(String(loadingPageHtml));
   }
 
   // Ensure moltbot is running (this will wait for startup)

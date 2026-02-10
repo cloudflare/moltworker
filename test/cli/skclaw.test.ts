@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { ChildProcess } from "node:child_process";
 import { createSkclaw } from "../../scripts/skclaw";
 
 type LoggerBuffer = {
@@ -12,6 +13,51 @@ const createLogger = (buffer: LoggerBuffer) => ({
 });
 
 describe("skclaw", () => {
+  test("lint runs through bun", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+    });
+
+    const code = await skclaw.run(["lint"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([{ command: "bun", args: ["run", "lint"] }]);
+  });
+
+  test("typecheck runs through bun", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+    });
+
+    const code = await skclaw.run(["typecheck"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([{ command: "bun", args: ["run", "typecheck"] }]);
+  });
   test("tenant commands are not implemented yet", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
     const skclaw = createSkclaw({

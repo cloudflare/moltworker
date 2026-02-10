@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 
 type Logger = {
@@ -13,7 +14,8 @@ type SkclawDeps = {
   logger: Logger;
   env: NodeJS.ProcessEnv;
   cwd: () => string;
-  spawnCommand: typeof spawn;
+  spawnCommand: (command: string, args: string[], options?: Record<string, unknown>) =>
+    ChildProcess;
   fileExists: (path: string) => boolean;
   readFile: (path: string) => string;
   resolvePath: (...parts: string[]) => string;
@@ -145,6 +147,8 @@ Usage:
   skclaw env validate
   skclaw secrets sync --env production [--env-file .dev.vars] [--dry-run]
   skclaw deploy --env production
+  skclaw lint
+  skclaw typecheck
   skclaw tenant <create|update>
   skclaw routing <set|test>
 
@@ -226,6 +230,14 @@ const handleDeploy = async (
   await runCommand(deps, "bunx", deployArgs);
 };
 
+const handleLint = async (deps: SkclawDeps) => {
+  await runCommand(deps, "bun", ["run", "lint"]);
+};
+
+const handleTypecheck = async (deps: SkclawDeps) => {
+  await runCommand(deps, "bun", ["run", "typecheck"]);
+};
+
 const handleNotImplemented = (deps: SkclawDeps, label: string) => {
   deps.logger.error(`Not implemented: ${label}`);
 };
@@ -252,6 +264,14 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
       }
       if (group === "deploy") {
         await handleDeploy(resolvedDeps, flags);
+        return 0;
+      }
+      if (group === "lint") {
+        await handleLint(resolvedDeps);
+        return 0;
+      }
+      if (group === "typecheck") {
+        await handleTypecheck(resolvedDeps);
         return 0;
       }
       if (group === "tenant") {

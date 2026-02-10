@@ -4,7 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "bun-types"],
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
@@ -13,6 +13,12 @@
     "resolveJsonModule": true,
     "isolatedModules": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.d.ts",
+    "scripts/**/*.ts",
+    "test/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

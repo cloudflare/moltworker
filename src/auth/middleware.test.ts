@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { isDevMode, isE2ETestMode, extractJWT } from './middleware';
+import type { createAccessMiddleware as CreateAccessMiddleware } from './middleware';
 import type { MoltbotEnv } from '../types';
 import type { Context } from 'hono';
 import type { AppEnv } from '../types';
@@ -124,7 +125,7 @@ describe('extractJWT', () => {
 
 describe('createAccessMiddleware', () => {
   // Import the function dynamically to allow mocking
-  let createAccessMiddleware: typeof import('./middleware').createAccessMiddleware;
+  let createAccessMiddleware: typeof CreateAccessMiddleware;
 
   beforeEach(async () => {
     vi.resetModules();

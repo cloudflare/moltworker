@@ -162,14 +162,11 @@ adminApi.post('/devices/approve-all', async (c) => {
 
     for (const device of pending) {
       try {
-        // eslint-disable-next-line no-await-in-loop -- sequential device approval required
         const approveProc = await sandbox.startProcess(
           `openclaw devices approve ${device.requestId} --url ws://localhost:18789${tokenArg}`,
         );
-        // eslint-disable-next-line no-await-in-loop
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
-        // eslint-disable-next-line no-await-in-loop
         const approveLogs = await approveProc.getLogs();
         const success =
           approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;

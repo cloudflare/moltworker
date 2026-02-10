@@ -136,7 +136,6 @@ debug.get('/cli', async (c) => {
     // Wait longer for command to complete
     let attempts = 0;
     while (attempts < 30) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
       await new Promise((r) => setTimeout(r, 500));
       if (proc.status !== 'running') break;
       attempts++;
@@ -248,22 +247,22 @@ debug.get('/ws-test', async (c) => {
     <button id="sendConnect" disabled>Send Connect Frame</button>
   </div>
   <div id="log"></div>
-  
+
   <script>
     const wsUrl = '${wsProtocol}://${host}/';
     let ws = null;
-    
+
     const log = (msg, className = '') => {
       const logEl = document.getElementById('log');
       const time = new Date().toISOString().substr(11, 12);
       logEl.innerHTML += '<span class="' + className + '">[' + time + '] ' + msg + '</span>\\n';
       logEl.scrollTop = logEl.scrollHeight;
     };
-    
+
     document.getElementById('connect').onclick = () => {
       log('Connecting to ' + wsUrl + '...', 'info');
       ws = new WebSocket(wsUrl);
-      
+
       ws.onopen = () => {
         log('Connected!', 'info');
         document.getElementById('connect').disabled = true;
@@ -271,7 +270,7 @@ debug.get('/ws-test', async (c) => {
         document.getElementById('send').disabled = false;
         document.getElementById('sendConnect').disabled = false;
       };
-      
+
       ws.onmessage = (e) => {
         log('RECV: ' + e.data, 'received');
         try {
@@ -279,11 +278,11 @@ debug.get('/ws-test', async (c) => {
           log('  Parsed: ' + JSON.stringify(parsed, null, 2), 'received');
         } catch {}
       };
-      
+
       ws.onerror = (e) => {
         log('ERROR: ' + JSON.stringify(e), 'error');
       };
-      
+
       ws.onclose = (e) => {
         log('Closed: code=' + e.code + ' reason=' + e.reason, 'info');
         document.getElementById('connect').disabled = false;
@@ -293,15 +292,15 @@ debug.get('/ws-test', async (c) => {
         ws = null;
       };
     };
-    
+
     document.getElementById('disconnect').onclick = () => {
       if (ws) ws.close();
     };
-    
+
     document.getElementById('clear').onclick = () => {
       document.getElementById('log').innerHTML = '';
     };
-    
+
     document.getElementById('send').onclick = () => {
       const msg = document.getElementById('message').value;
       if (ws && msg) {
@@ -309,7 +308,7 @@ debug.get('/ws-test', async (c) => {
         ws.send(msg);
       }
     };
-    
+
     document.getElementById('sendConnect').onclick = () => {
       if (!ws) return;
       const connectFrame = {
@@ -334,7 +333,7 @@ debug.get('/ws-test', async (c) => {
       log('SEND Connect Frame: ' + msg, 'sent');
       ws.send(msg);
     };
-    
+
     document.getElementById('message').onkeypress = (e) => {
       if (e.key === 'Enter') document.getElementById('send').click();
     };
@@ -371,7 +370,6 @@ debug.get('/container-config', async (c) => {
 
     let attempts = 0;
     while (attempts < 10) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
       await new Promise((r) => setTimeout(r, 200));
       if (proc.status !== 'running') break;
       attempts++;
