@@ -7,6 +7,7 @@ build-info.json
 
 # Wrangler
 .wrangler/
+.wrangler-home/
 .dev.vars
 
 # Logs
@@ -25,6 +26,9 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Worktrees
+.worktrees/
 
 # Environment files (secrets should use wrangler secret)
 .env
