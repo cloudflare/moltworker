@@ -78,13 +78,14 @@ export const MODELS: Record<string, ModelInfo> = {
     isFree: true,
   },
   deepfree: {
-    id: 'deepseek/deepseek-r1:free',
+    id: 'deepseek/deepseek-r1-0528:free',
     alias: 'deepfree',
-    name: 'DeepSeek R1 (Free)',
+    name: 'DeepSeek R1 0528 (Free)',
     specialty: 'Free Deep Reasoning/Math',
-    score: 'Strong AIME/Math, open reasoning',
+    score: '671B MoE, strong AIME/Math',
     cost: 'FREE',
     isFree: true,
+    maxContext: 163840,
   },
   glmfree: {
     id: 'z-ai/glm-4.5-air:free',

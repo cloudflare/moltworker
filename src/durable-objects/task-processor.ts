@@ -633,6 +633,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         console.log(`[TaskProcessor] Using provider: ${provider}, URL: ${providerConfig.baseUrl}`);
 
+        // Check if current model supports tools (conditional injection)
+        const currentModel = getModel(task.modelAlias);
+        const useTools = currentModel?.supportsTools === true;
+
         // Retry loop for API calls
         const MAX_API_RETRIES = 3;
         let result: {
@@ -669,8 +673,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 {
                   maxTokens: 4096,
                   temperature: 0.7,
-                  tools: TOOLS_WITHOUT_BROWSER,
-                  toolChoice: 'auto',
+                  tools: useTools ? TOOLS_WITHOUT_BROWSER : undefined,
+                  toolChoice: useTools ? 'auto' : undefined,
                   idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
                   reasoningLevel: request.reasoningLevel,
                   responseFormat: request.responseFormat,
@@ -709,9 +713,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                     messages: conversationMessages,
                     max_tokens: 4096,
                     temperature: 0.7,
-                    tools: TOOLS_WITHOUT_BROWSER,
-                    tool_choice: 'auto',
                   };
+                if (useTools) {
+                  requestBody.tools = TOOLS_WITHOUT_BROWSER;
+                  requestBody.tool_choice = 'auto';
+                }
                 if (request.responseFormat) {
                   requestBody.response_format = request.responseFormat;
                 }

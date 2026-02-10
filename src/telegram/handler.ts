@@ -1274,54 +1274,47 @@ export class TelegramHandler {
     try {
       let responseText: string;
 
-      // Check if model supports tools
+      // Route through Durable Object when available (unlimited time, checkpointing, auto-resume)
+      // All models benefit from DO: tool-supporting models get tools, others get timeout protection
+      if (this.taskProcessor) {
+        const taskId = `${userId}-${Date.now()}`;
+        const autoResume = await this.storage.getUserAutoResume(userId);
+        const responseFormat: ResponseFormat | undefined =
+          requestJson && supportsStructuredOutput(modelAlias)
+            ? { type: 'json_object' }
+            : undefined;
+
+        const taskRequest: TaskRequest = {
+          taskId,
+          chatId,
+          userId,
+          modelAlias,
+          messages,
+          telegramToken: this.telegramToken,
+          openrouterKey: this.openrouterKey,
+          githubToken: this.githubToken,
+          dashscopeKey: this.dashscopeKey,
+          moonshotKey: this.moonshotKey,
+          deepseekKey: this.deepseekKey,
+          autoResume,
+          reasoningLevel: reasoningLevel ?? undefined,
+          responseFormat,
+        };
+
+        const doId = this.taskProcessor.idFromName(userId);
+        const doStub = this.taskProcessor.get(doId);
+        await doStub.fetch(new Request('https://do/process', {
+          method: 'POST',
+          body: JSON.stringify(taskRequest),
+        }));
+
+        await this.storage.addMessage(userId, 'user', text);
+        return;
+      }
+
+      // Fallback: Worker-based processing (only when DO not available)
       if (modelSupportsTools(modelAlias)) {
-        // Use Durable Object for tool-calling models (unlimited time)
-        if (this.taskProcessor) {
-          // Route to Durable Object for long-running processing
-          const taskId = `${userId}-${Date.now()}`;
-          const autoResume = await this.storage.getUserAutoResume(userId);
-          // Determine responseFormat if json: prefix was used and model supports it
-          const responseFormat: ResponseFormat | undefined =
-            requestJson && supportsStructuredOutput(modelAlias)
-              ? { type: 'json_object' }
-              : undefined;
-
-          const taskRequest: TaskRequest = {
-            taskId,
-            chatId,
-            userId,
-            modelAlias,
-            messages,
-            telegramToken: this.telegramToken,
-            openrouterKey: this.openrouterKey,
-            githubToken: this.githubToken,
-            dashscopeKey: this.dashscopeKey,
-            moonshotKey: this.moonshotKey,
-            deepseekKey: this.deepseekKey,
-            autoResume,
-            reasoningLevel: reasoningLevel ?? undefined,
-            responseFormat,
-          };
-
-          // Get or create DO instance for this user
-          const doId = this.taskProcessor.idFromName(userId);
-          const doStub = this.taskProcessor.get(doId);
-
-          // Start processing in DO (it will send results directly to Telegram)
-          await doStub.fetch(new Request('https://do/process', {
-            method: 'POST',
-            body: JSON.stringify(taskRequest),
-          }));
-
-          // Save user message to history (DO will handle the rest)
-          await this.storage.addMessage(userId, 'user', text);
-
-          // Return early - DO handles everything from here
-          return;
-        }
-
-        // Fallback: Direct processing (with timeout) if DO not available
+        // Fallback: Direct tool-calling processing (with timeout)
         let statusMessage: TelegramMessage | null = null;
         let toolCallCount = 0;
         const uniqueTools = new Set<string>();
