@@ -2,7 +2,7 @@
 # Startup script for OpenClaw in Cloudflare Sandbox
 # This script:
 # 1. Restores config from R2 backup if available
-# 2. Runs openclaw onboard --non-interactive to configure from env vars
+# 2. Runs openclaw onboard to configure from env vars
 # 3. Patches config for features onboard doesn't cover (channels, gateway auth)
 # 4. Starts the gateway
 
@@ -125,8 +125,16 @@ fi
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "No existing config found, running openclaw onboard..."
 
+    OPENAI_CODEX_OAUTH_ENABLED=false
+    OPENAI_CODEX_OAUTH_NORMALIZED=$(printf '%s' "${OPENAI_CODEX_OAUTH:-}" | tr '[:upper:]' '[:lower:]')
+    if [ "$OPENAI_CODEX_OAUTH_NORMALIZED" = "1" ] || [ "$OPENAI_CODEX_OAUTH_NORMALIZED" = "true" ]; then
+        OPENAI_CODEX_OAUTH_ENABLED=true
+    fi
+
     AUTH_ARGS=""
-    if [ -n "$CLOUDFLARE_AI_GATEWAY_API_KEY" ] && [ -n "$CF_AI_GATEWAY_ACCOUNT_ID" ] && [ -n "$CF_AI_GATEWAY_GATEWAY_ID" ]; then
+    if [ "$OPENAI_CODEX_OAUTH_ENABLED" = "true" ]; then
+        AUTH_ARGS="--auth-choice openai-codex"
+    elif [ -n "$CLOUDFLARE_AI_GATEWAY_API_KEY" ] && [ -n "$CF_AI_GATEWAY_ACCOUNT_ID" ] && [ -n "$CF_AI_GATEWAY_GATEWAY_ID" ]; then
         AUTH_ARGS="--auth-choice cloudflare-ai-gateway-api-key \
             --cloudflare-ai-gateway-account-id $CF_AI_GATEWAY_ACCOUNT_ID \
             --cloudflare-ai-gateway-gateway-id $CF_AI_GATEWAY_GATEWAY_ID \
@@ -137,14 +145,26 @@ if [ ! -f "$CONFIG_FILE" ]; then
         AUTH_ARGS="--auth-choice openai-api-key --openai-api-key $OPENAI_API_KEY"
     fi
 
-    openclaw onboard --non-interactive --accept-risk \
-        --mode local \
-        $AUTH_ARGS \
-        --gateway-port 18789 \
-        --gateway-bind lan \
-        --skip-channels \
-        --skip-skills \
-        --skip-health
+    if [ "$OPENAI_CODEX_OAUTH_ENABLED" = "true" ]; then
+        echo "OPENAI_CODEX_OAUTH is enabled: running interactive onboarding with openai-codex auth"
+        openclaw onboard --accept-risk \
+            --mode local \
+            $AUTH_ARGS \
+            --gateway-port 18789 \
+            --gateway-bind lan \
+            --skip-channels \
+            --skip-skills \
+            --skip-health
+    else
+        openclaw onboard --non-interactive --accept-risk \
+            --mode local \
+            $AUTH_ARGS \
+            --gateway-port 18789 \
+            --gateway-bind lan \
+            --skip-channels \
+            --skip-skills \
+            --skip-health
+    fi
 
     echo "Onboard completed"
 else

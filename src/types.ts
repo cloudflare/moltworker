@@ -22,6 +22,7 @@ export interface MoltbotEnv {
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_BASE_URL?: string;
   OPENAI_API_KEY?: string;
+  OPENAI_CODEX_OAUTH?: string; // Enable OpenAI Codex OAuth mode when set to '1' or 'true'
 
   // Optional tools
   BRAVE_API_KEY?: string; // Brave Search API key for web_search tool

@@ -11,7 +11,7 @@ Run [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly
 ## Requirements
 
 - [Workers Paid plan](https://www.cloudflare.com/plans/developer-platform/) ($5 USD/month) — required for Cloudflare Sandbox containers
-- [Anthropic API key](https://console.anthropic.com/) — for Claude access, or you can use AI Gateway's [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/)
+- One AI provider auth method — e.g. [Anthropic API key](https://console.anthropic.com/), `OPENAI_API_KEY`, `OPENAI_CODEX_OAUTH`, or AI Gateway credentials
 
 The following Cloudflare features used by this project have free tiers:
 - Cloudflare Access (authentication)
@@ -65,6 +65,10 @@ npm install
 # Set your API key (direct Anthropic access)
 npx wrangler secret put ANTHROPIC_API_KEY
 
+# Or enable OpenAI Codex OAuth on first onboard (interactive)
+# npx wrangler secret put OPENAI_CODEX_OAUTH
+# Enter: true
+#
 # Or use Cloudflare AI Gateway instead (see "Optional: Cloudflare AI Gateway" below)
 # npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY
 # npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID
@@ -428,6 +432,29 @@ OpenAI behavior with `AI_GATEWAY_BASE_URL=.../openai`:
 - If `OPENAI_API_KEY` and `AI_GATEWAY_API_KEY` are both set, `OPENAI_API_KEY` is used for provider auth and `AI_GATEWAY_API_KEY` is sent via `cf-aig-authorization`.
 - If `OPENAI_API_KEY` is not set, `AI_GATEWAY_API_KEY` is used as the OpenAI provider key (backward-compatible behavior).
 
+### Optional: OpenAI Codex OAuth
+
+To run OpenClaw with OpenAI Codex OAuth instead of API keys, set:
+
+```bash
+npx wrangler secret put OPENAI_CODEX_OAUTH
+# Enter: true (or 1)
+```
+
+Behavior:
+- `OPENAI_CODEX_OAUTH=true` (or `1`) takes precedence over API key auth selection during onboarding.
+- On first startup (when `/root/.openclaw/openclaw.json` does not exist), startup runs:
+  - `openclaw onboard --auth-choice openai-codex ...` (interactive)
+- On later restarts, onboarding is skipped if config already exists, so OAuth onboarding is not re-run.
+
+First-time OAuth should be completed from a shell inside the running container:
+
+```bash
+openclaw models auth login --provider openai-codex
+```
+
+Use R2 persistence so OAuth credentials and config survive container restarts.
+
 ### Optional: Brave Search API
 
 To enable Brave Search for web search tools, set:
@@ -449,6 +476,7 @@ npx wrangler secret put BRAVE_API_KEY
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (alternative to AI Gateway) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
+| `OPENAI_CODEX_OAUTH` | No | Set to `1` or `true` to use OpenAI Codex OAuth during first onboard (interactive). Takes precedence over API key auth selection |
 | `AI_GATEWAY_API_KEY` | No | Legacy AI Gateway key (deprecated). For OpenAI authenticated gateway, used as `cf-aig-authorization`; if `OPENAI_API_KEY` is unset, used as provider key |
 | `AI_GATEWAY_BASE_URL` | No | Legacy AI Gateway endpoint URL (deprecated) |
 | `BRAVE_API_KEY` | No | Brave Search API key for web_search tooling |

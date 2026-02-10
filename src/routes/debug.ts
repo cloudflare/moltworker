@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { buildCliCommand, findExistingMoltbotProcess } from '../gateway';
+import { isTruthyFlag } from '../env-validation';
 
 /**
  * Debug routes for inspecting container state
@@ -349,6 +350,7 @@ debug.get('/env', async (c) => {
   return c.json({
     has_anthropic_key: !!c.env.ANTHROPIC_API_KEY,
     has_openai_key: !!c.env.OPENAI_API_KEY,
+    openai_codex_oauth_enabled: isTruthyFlag(c.env.OPENAI_CODEX_OAUTH),
     has_gateway_token: !!(
       c.env.OPENCLAW_GATEWAY_TOKEN ||
       c.env.MOLTBOT_GATEWAY_TOKEN ||

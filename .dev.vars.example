@@ -4,6 +4,8 @@
 # AI Provider (at least one required)
 ANTHROPIC_API_KEY=sk-ant-...
 # OPENAI_API_KEY=sk-...
+# OPENAI_CODEX_OAUTH=true
+# Runs `openclaw onboard --auth-choice openai-codex` on first startup (interactive)
 
 # Cloudflare AI Gateway (alternative to direct provider keys)
 # CLOUDFLARE_AI_GATEWAY_API_KEY=your-provider-api-key

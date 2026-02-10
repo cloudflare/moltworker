@@ -18,6 +18,14 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_API_KEY).toBe('sk-openai');
   });
 
+  it('passes OPENAI_CODEX_OAUTH to container env vars', () => {
+    const env = createMockEnv({
+      OPENAI_CODEX_OAUTH: 'true',
+    });
+    const result = buildEnvVars(env);
+    expect(result.OPENAI_CODEX_OAUTH).toBe('true');
+  });
+
   it('passes native Cloudflare AI Gateway env vars', () => {
     const env = createMockEnv({
       CLOUDFLARE_AI_GATEWAY_API_KEY: 'cf-gw-key',
