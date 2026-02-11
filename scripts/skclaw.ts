@@ -157,8 +157,8 @@ Usage:
   skclaw logs <tail|search> [query] [--env production]
   skclaw quality <lint|typecheck|test|test cli>
   skclaw test [cli]
-  skclaw tenant <create|update>
-  skclaw routing <set|test>
+  skclaw tenant <create|update|get|list>
+  skclaw routing <set|test|list>
 
 Flags:
   --config       Path to .skclaw.json
@@ -168,6 +168,11 @@ Flags:
   --d1-name      D1 database name (resources create, default uses naming standard)
   --kv-name      KV namespace name (resources create, default uses naming standard)
   --r2-name      R2 bucket name (resources create, default uses naming standard)
+  --slug         Tenant slug
+  --sandbox-id   Tenant sandbox id
+  --domain       Routing domain
+  --tenant       Routing tenant slug
+  --limit        Query limit
   --dry-run      Show actions without executing
   --json         Output machine-readable JSON
   --verbose      Output additional details
@@ -547,6 +552,126 @@ const handleLogsSearch = async (
   return "Logs search complete";
 };
 
+const escapeSqlValue = (value: string) => value.replace(/'/g, "''");
+
+const runD1Execute = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+  databaseId: string,
+  sql: string,
+) => {
+  const envName = flags.env as string | undefined;
+  const args = ["wrangler", "d1", "execute", databaseId, "--command", sql];
+  if (envName) {
+    args.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", args);
+};
+
+const handleTenantCreate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const slug = flags.slug as string | undefined;
+  if (!slug) {
+    throw new Error("tenant create requires --slug");
+  }
+  const sandboxId = flags["sandbox-id"] as string | undefined;
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = sandboxId
+    ? `insert into tenants (slug, sandbox_id) values ('${escapeSqlValue(slug)}', '${escapeSqlValue(sandboxId)}')`
+    : `insert into tenants (slug) values ('${escapeSqlValue(slug)}')`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Tenant create complete";
+};
+
+const handleTenantUpdate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const slug = flags.slug as string | undefined;
+  const sandboxId = flags["sandbox-id"] as string | undefined;
+  if (!slug || !sandboxId) {
+    throw new Error("tenant update requires --slug and --sandbox-id");
+  }
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = `update tenants set sandbox_id = '${escapeSqlValue(sandboxId)}' where slug = '${escapeSqlValue(slug)}'`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Tenant update complete";
+};
+
+const handleTenantGet = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const slug = flags.slug as string | undefined;
+  if (!slug) {
+    throw new Error("tenant get requires --slug");
+  }
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = `select * from tenants where slug = '${escapeSqlValue(slug)}'`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Tenant get complete";
+};
+
+const handleTenantList = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const limit = flags.limit as string | undefined;
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = `select * from tenants${limit ? ` limit ${Number(limit)}` : ""}`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Tenant list complete";
+};
+
+const handleRoutingSet = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const domain = flags.domain as string | undefined;
+  const tenant = flags.tenant as string | undefined;
+  if (!domain || !tenant) {
+    throw new Error("routing set requires --domain and --tenant");
+  }
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = `insert into tenant_domains (hostname, tenant_slug) values ('${escapeSqlValue(domain)}', '${escapeSqlValue(tenant)}') on conflict(hostname) do update set tenant_slug = excluded.tenant_slug`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Routing set complete";
+};
+
+const handleRoutingTest = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const domain = flags.domain as string | undefined;
+  if (!domain) {
+    throw new Error("routing test requires --domain");
+  }
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = `select * from tenant_domains where hostname = '${escapeSqlValue(domain)}'`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Routing test complete";
+};
+
+const handleRoutingList = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const limit = flags.limit as string | undefined;
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const sql = `select * from tenant_domains${limit ? ` limit ${Number(limit)}` : ""}`;
+  await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
+  return "Routing list complete";
+};
+
 const handleLint = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "lint"]);
   return "Lint complete";
@@ -706,6 +831,45 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
         }
         if (action === "test") {
           const message = await handleTest(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "tenant") {
+        if (action === "create") {
+          const message = await handleTenantCreate(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "update") {
+          const message = await handleTenantUpdate(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "get") {
+          const message = await handleTenantGet(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "list") {
+          const message = await handleTenantList(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "routing") {
+        if (action === "set") {
+          const message = await handleRoutingSet(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "test") {
+          const message = await handleRoutingTest(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "list") {
+          const message = await handleRoutingList(resolvedDeps, flags);
           emitSuccess(resolvedDeps, flags, message);
           return 0;
         }

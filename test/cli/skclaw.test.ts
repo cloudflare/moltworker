@@ -138,28 +138,48 @@ describe("skclaw", () => {
     expect(code).toBe(0);
     expect(calls).toEqual([{ command: "bun", args: ["run", "test:cli"] }]);
   });
-  test("tenant commands are not implemented yet", async () => {
+  test("tenant create requires --slug", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
     const skclaw = createSkclaw({
       logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
     });
 
-    const code = await skclaw.run(["tenant", "create"]);
+    const code = await skclaw.run(["tenant", "create", "--json"]);
 
     expect(code).toBe(1);
-    expect(buffer.error.join(" ")).toContain("Not implemented");
+    const payload = JSON.parse(buffer.error[0]) as {
+      status: string;
+      message: string;
+    };
+    expect(payload.status).toBe("error");
+    expect(payload.message).toContain("tenant create requires --slug");
   });
 
-  test("routing commands are not implemented yet", async () => {
+  test("routing set requires --domain and --tenant", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
     const skclaw = createSkclaw({
       logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
     });
 
-    const code = await skclaw.run(["routing", "set"]);
+    const code = await skclaw.run(["routing", "set", "--json"]);
 
     expect(code).toBe(1);
-    expect(buffer.error.join(" ")).toContain("Not implemented");
+    const payload = JSON.parse(buffer.error[0]) as {
+      status: string;
+      message: string;
+    };
+    expect(payload.status).toBe("error");
+    expect(payload.message).toContain("routing set requires --domain and --tenant");
   });
 
   test("env validate fails without config", async () => {
@@ -563,5 +583,137 @@ describe("skclaw", () => {
     };
     expect(payload.status).toBe("ok");
     expect(payload.data.workerName).toBe("worker");
+  });
+
+  test("tenant create uses wrangler d1 execute", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run([
+      "tenant",
+      "create",
+      "--slug",
+      "acme",
+      "--sandbox-id",
+      "sk-1234",
+    ]);
+
+    expect(code).toBe(0);
+    expect(calls[0].command).toBe("bunx");
+    expect(calls[0].args).toContain("d1");
+    expect(calls[0].args).toContain("execute");
+    expect(calls[0].args).toContain("db");
+  });
+
+  test("tenant list uses wrangler d1 execute", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["tenant", "list", "--limit", "5"]);
+
+    expect(code).toBe(0);
+    expect(calls[0].command).toBe("bunx");
+    expect(calls[0].args).toContain("execute");
+  });
+
+  test("routing set uses wrangler d1 execute", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run([
+      "routing",
+      "set",
+      "--domain",
+      "agent.acme.com",
+      "--tenant",
+      "acme",
+    ]);
+
+    expect(code).toBe(0);
+    expect(calls[0].command).toBe("bunx");
+    expect(calls[0].args).toContain("execute");
+  });
+
+  test("routing test uses wrangler d1 execute", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["routing", "test", "--domain", "agent.acme.com"]);
+
+    expect(code).toBe(0);
+    expect(calls[0].command).toBe("bunx");
+    expect(calls[0].args).toContain("execute");
   });
 });
