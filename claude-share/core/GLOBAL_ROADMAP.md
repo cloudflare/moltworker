@@ -87,7 +87,7 @@
 | 2.3 | Integrate Acontext observability (Phase 1) | 🔲 | Claude/Codex | Store messages in Acontext Sessions for replay |
 | 2.4 | Add Acontext dashboard link to admin UI | 🔲 | Codex | Low-risk, read-only integration |
 
-> 🧑 HUMAN CHECK 2.5: Set up Acontext account and configure API key — ⏳ PENDING
+> 🧑 HUMAN CHECK 2.5: Set up Acontext account and configure API key — ✅ DONE (2026-02-11)
 > 🧑 HUMAN CHECK 2.6: Review cost tracking accuracy against OpenRouter billing — ⏳ PENDING
 
 ---
@@ -163,7 +163,7 @@
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
-| 6.1 | Telegram inline buttons | 🔲 | Any AI | Confirmations, model selection |
+| 6.1 | Telegram inline buttons | ✅ | Claude | /start feature buttons, model pick, start callbacks |
 | 6.2 | Response streaming (Telegram) | 🔲 | Any AI | Progressive message updates |
 | 6.3 | Voice messages (Whisper + TTS) | 🔲 | Any AI | High effort |
 | 6.4 | Calendar/reminder tools | 🔲 | Any AI | Cron-based |
@@ -190,7 +190,7 @@
 | 0.6 | Verify new model IDs on OpenRouter | ✅ DEPLOYED |
 | 1.6 | Test parallel tool execution with real APIs | ⏳ PENDING |
 | 1.7 | Verify reasoning control compatibility | ⏳ PENDING |
-| 2.5 | Set up Acontext account/API key | ⏳ PENDING |
+| 2.5 | Set up Acontext account/API key | ✅ DONE (key in CF Workers secrets) |
 | 2.5.11 | Decide which free APIs to prioritize first | ⏳ PENDING |
 | 2.6 | Review cost tracking vs. OpenRouter billing | ⏳ PENDING |
 | 3.5 | Review learning data quality | ⏳ PENDING |
@@ -224,6 +224,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-11 | Claude Opus 4.6 (Session: 018gmCDcuBJqs9ffrrDHHBBd) | fix(tools): briefing location (Nominatim), news clickable links (HN/Reddit/arXiv URLs), crypto symbol disambiguation (pick highest mcap), 448 tests | src/openrouter/tools.ts
 2026-02-11 | Claude Opus 4.6 (Session: 018gmCDcuBJqs9ffrrDHHBBd) | feat(telegram): /start redesign with feature buttons, bot menu commands, enhanced R2 skill prompt | src/telegram/handler.ts, src/routes/telegram.ts, claude-share/R2/skills/storia-orchestrator/prompt.md
 2026-02-10 | Claude Opus 4.6 (Session: 018gmCDcuBJqs9ffrrDHHBBd) | fix: auto-resume counter reset + revert GLM free tool flag (BUG-12, BUG-6 update), 448 tests | src/durable-objects/task-processor.ts, src/openrouter/models.ts, src/openrouter/models.test.ts
 2026-02-10 | Claude Opus 4.6 (Session: 018gmCDcuBJqs9ffrrDHHBBd) | fix: 6 bot improvements from Telegram analysis — GLM tools, 402 handling, cross-task context, elapsed cap, tool-intent warn, parallel prompt (33 new tests, 447 total) | src/openrouter/models.ts, src/openrouter/client.ts, src/durable-objects/task-processor.ts, src/telegram/handler.ts

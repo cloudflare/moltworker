@@ -4,6 +4,46 @@
 
 ---
 
+## Session: 2026-02-11 | UX Fixes + /start Redesign + Acontext Key (Session: 018gmCDcuBJqs9ffrrDHHBBd)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/extract-task-metadata-8lMCM`
+**Status:** Completed
+
+### Summary
+Full session covering: auto-resume counter bug fix, GLM free tool revert, /start redesign with feature buttons, bot menu commands, enhanced R2 skill prompt, briefing weather location, news clickable links, and crypto symbol disambiguation. Also guided user through Acontext API key setup (now configured in Cloudflare).
+
+### Changes Made
+1. **Auto-resume counter bug** — Counter persisted across different tasks (18→22 on new task). Fixed by checking taskId match before inheriting autoResumeCount from DO storage.
+2. **GLM free tool flag reverted** — Live testing confirmed GLM 4.5 Air free tier doesn't generate tool_calls. Removed supportsTools from glmfree.
+3. **/start redesign** — Inline keyboard with 8 feature buttons (Coding, Research, Images, Tools, Vision, Reasoning, Pick Model, All Commands). Each button shows detailed guide with examples and model recommendations.
+4. **Bot menu commands** — Added setMyCommands to TelegramBot. 12 commands registered during /setup.
+5. **Enhanced R2 skill prompt** — Storia identity, model recommendations by task, stronger tool-first behavior.
+6. **Briefing location** — Reverse geocodes coordinates via Nominatim for city/country name in weather section.
+7. **News clickable links** — HN article URLs, Reddit permalinks, arXiv paper URLs in briefing items.
+8. **Crypto symbol fix** — Search with limit=5, filter exact symbol matches, pick highest market cap. Fixes JUP returning wrong token ($3.58 vs actual $0.14).
+9. **Acontext API key** — Guided user through setup, now configured as Cloudflare Workers secret.
+
+### Files Modified
+- `src/durable-objects/task-processor.ts` (auto-resume counter taskId check)
+- `src/openrouter/models.ts` (GLM free supportsTools revert)
+- `src/openrouter/models.test.ts` (updated GLM tests)
+- `src/openrouter/tools.ts` (briefing location, news links, crypto disambiguation)
+- `src/telegram/handler.ts` (sendStartMenu, getStartFeatureText, handleStartCallback, setMyCommands)
+- `src/routes/telegram.ts` (register commands during setup)
+- `claude-share/R2/skills/storia-orchestrator/prompt.md` (enhanced skill prompt)
+
+### Tests
+448 total (all passing). No new TypeScript errors (pre-existing only).
+
+### Notes for Next Session
+- Acontext API key is now in Cloudflare — Phase 2.3/4.1 unblocked
+- After merging, hit `/telegram/setup` endpoint once to register the new bot menu commands
+- Upload `claude-share/R2/skills/storia-orchestrator/prompt.md` to R2 bucket
+- Phase 6.1 (inline buttons) is effectively done
+
+---
+
 ## Session: 2026-02-11 | /start Redesign + Bot Menu + Skill Prompt (Session: 018gmCDcuBJqs9ffrrDHHBBd)
 
 **AI:** Claude Opus 4.6
