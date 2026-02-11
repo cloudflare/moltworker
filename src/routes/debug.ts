@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { findExistingMoltbotProcess, waitForProcess } from '../gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, waitForProcess } from '../gateway';
+import { sanitizeStderr } from '../utils/sanitize';
 
 /**
  * Debug routes for inspecting container state
@@ -8,6 +9,49 @@ import { findExistingMoltbotProcess, waitForProcess } from '../gateway';
  * when mounted in the main app
  */
 const debug = new Hono<AppEnv>();
+
+// GET /debug/start-gateway - Force start the Moltbot gateway (for triggering 126 logs in wrangler tail)
+debug.get('/start-gateway', async (c) => {
+  const sandbox = c.get('sandbox');
+  try {
+    const process = await ensureMoltbotGateway(sandbox, c.env);
+    return c.json({
+      success: true,
+      processId: process.id,
+      status: process.status,
+      message: 'Gateway started successfully',
+    });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    // Try to attach logs from the most recent failed start-moltbot process
+    let lastFailed: Record<string, unknown> | null = null;
+    try {
+      const processes = await sandbox.listProcesses();
+      const starter = processes
+        .filter(p => (p.command.includes('start-openclaw.sh') || p.command.includes('start-moltbot.sh')) &&
+          (p.status === 'failed' || p.status === 'completed'))
+        .sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0))[0];
+      if (starter) {
+        const logs = await starter.getLogs();
+        lastFailed = {
+          id: starter.id,
+          command: starter.command,
+          status: starter.status,
+          exitCode: starter.exitCode,
+          stdout: logs.stdout || '',
+          stderr: logs.stderr || '',
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return c.json({
+      success: false,
+      error: errorMessage,
+      lastFailedProcess: lastFailed,
+    }, 503);
+  }
+});
 
 // GET /debug/version - Returns version info from inside the container
 debug.get('/version', async (c) => {
@@ -36,11 +80,13 @@ debug.get('/version', async (c) => {
 });
 
 // GET /debug/processes - List all processes with optional logs
+// Query: logs=true (include stdout/stderr), failed=1 (only gateway-related failed/completed with non-zero exit)
 debug.get('/processes', async (c) => {
   const sandbox = c.get('sandbox');
   try {
     const processes = await sandbox.listProcesses();
     const includeLogs = c.req.query('logs') === 'true';
+    const failedOnly = c.req.query('failed') === '1';
 
     const processData = await Promise.all(
       processes.map(async (p) => {
@@ -67,28 +113,60 @@ debug.get('/processes', async (c) => {
       }),
     );
 
-    // Sort by status (running first, then starting, completed, failed)
-    // Within each status, sort by startTime descending (newest first)
+    // Optionally filter to gateway-related failed/completed only
+    const isGatewayRelated = (d: Record<string, unknown>) => {
+      const cmd = (d.command as string) || '';
+      const status = d.status as string;
+      const exitCode = d.exitCode as number | undefined;
+      return (
+        (cmd.includes('start-openclaw.sh') || cmd.includes('start-moltbot.sh') ||
+          cmd.includes('openclaw gateway') || cmd.includes('clawdbot gateway')) &&
+        !cmd.includes('openclaw devices') && !cmd.includes('clawdbot devices') &&
+        (status === 'failed' || (status === 'completed' && exitCode != null && exitCode !== 0))
+      );
+    };
+    let list = processData;
+    if (failedOnly) {
+      list = processData.filter(isGatewayRelated);
+    }
+
+    // Sort by status (running first, then starting, completed, failed), then by startTime descending
     const statusOrder: Record<string, number> = {
       running: 0,
       starting: 1,
       completed: 2,
       failed: 3,
     };
-
-    processData.sort((a, b) => {
+    list.sort((a, b) => {
       const statusA = statusOrder[a.status as string] ?? 99;
       const statusB = statusOrder[b.status as string] ?? 99;
-      if (statusA !== statusB) {
-        return statusA - statusB;
-      }
-      // Within same status, sort by startTime descending
+      if (statusA !== statusB) return statusA - statusB;
       const timeA = (a.startTime as string) || '';
       const timeB = (b.startTime as string) || '';
       return timeB.localeCompare(timeA);
     });
 
-    return c.json({ count: processes.length, processes: processData });
+    // Last failed gateway stderr preview (sanitized) when logs=true or failed=1
+    let lastFailedStderrPreview: string | undefined;
+    if (includeLogs || failedOnly) {
+      const failedStarter = processes
+        .filter(p => (p.command.includes('start-openclaw.sh') || p.command.includes('start-moltbot.sh')) &&
+          (p.status === 'failed' || (p.status === 'completed' && p.exitCode != null && p.exitCode !== 0)))
+        .sort((a, b) => (b.startTime?.getTime() ?? 0) - (a.startTime?.getTime() ?? 0))[0];
+      if (failedStarter) {
+        try {
+          const logs = await failedStarter.getLogs();
+          const stderr = logs.stderr || '';
+          if (stderr) lastFailedStderrPreview = sanitizeStderr(stderr, 500);
+        } catch {
+          lastFailedStderrPreview = '(failed to retrieve logs)';
+        }
+      }
+    }
+
+    const payload: Record<string, unknown> = { count: list.length, processes: list };
+    if (lastFailedStderrPreview != null) payload.lastFailedStderrPreview = lastFailedStderrPreview;
+    return c.json(payload);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: errorMessage }, 500);

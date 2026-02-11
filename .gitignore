@@ -58,3 +58,7 @@ test/e2e/.dev.vars
 
 # Temporary e2e wrangler configs
 .wrangler-e2e-*.jsonc
+
+# Local PR / helper docs (not part of the repo)
+.pr-error-info.md
+PR-DESCRIPTION.md

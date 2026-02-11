@@ -385,18 +385,14 @@ app.all('*', async (c) => {
       }
     });
 
-    // Handle close events
+    // Handle close events (structured log for wrangler tail / debugging)
     serverWs.addEventListener('close', (event) => {
-      if (debugLogs) {
-        console.log('[WS] Client closed:', event.code, event.reason);
-      }
+      console.error('[WS] close', JSON.stringify({ side: 'client', code: event.code, reason: event.reason || '(none)' }));
       containerWs.close(event.code, event.reason);
     });
 
     containerWs.addEventListener('close', (event) => {
-      if (debugLogs) {
-        console.log('[WS] Container closed:', event.code, event.reason);
-      }
+      console.error('[WS] close', JSON.stringify({ side: 'container', code: event.code, reason: event.reason || '(none)' }));
       // Transform the close reason (truncate to 123 bytes max for WebSocket spec)
       let reason = transformErrorMessage(event.reason, url.host);
       if (reason.length > 123) {
@@ -407,15 +403,14 @@ app.all('*', async (c) => {
       }
       serverWs.close(event.code, reason);
     });
-
-    // Handle errors
+    // Handle errors (structured log for wrangler tail / debugging)
     serverWs.addEventListener('error', (event) => {
-      console.error('[WS] Client error:', event);
+      console.error('[WS] error', JSON.stringify({ side: 'client', message: event instanceof ErrorEvent ? event.message : String(event) }));
       containerWs.close(1011, 'Client error');
     });
 
     containerWs.addEventListener('error', (event) => {
-      console.error('[WS] Container error:', event);
+      console.error('[WS] error', JSON.stringify({ side: 'container', message: event instanceof ErrorEvent ? event.message : String(event) }));
       serverWs.close(1011, 'Container error');
     });
 
