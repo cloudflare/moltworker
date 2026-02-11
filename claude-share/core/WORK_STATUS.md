@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-11 (UX fixes, /start redesign, Acontext key)
+**Last Updated:** 2026-02-11 (Phase 3.2 structured task phases)
 
 ---
 
@@ -33,6 +33,7 @@
 | 6.1 | /start redesign with inline keyboard + bot menu commands | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 | — | Enhanced R2 skill prompt (Storia identity, model recs) | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 | — | Briefing fixes: weather location, news links, crypto disambiguation | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
+| 3.2 | Structured task phases (Plan → Work → Review) | Claude Opus 4.6 | ✅ Complete | `claude/add-task-phases-4R9Q6` |
 
 ---
 
@@ -40,7 +41,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Session complete — UX fixes, /start, Acontext | `claude/extract-task-metadata-8lMCM` | 2026-02-11 |
+| Claude | Phase 3.2 complete — Structured task phases | `claude/add-task-phases-4R9Q6` | 2026-02-11 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -83,6 +84,7 @@
 | 6.1 | /start redesign with inline keyboard + bot menu commands | Claude Opus 4.6 | 2026-02-11 | `claude/extract-task-metadata-8lMCM` |
 | — | Enhanced R2 skill prompt (Storia identity, model recs) | Claude Opus 4.6 | 2026-02-11 | `claude/extract-task-metadata-8lMCM` |
 | — | Briefing fixes: weather location, news links, crypto disambiguation | Claude Opus 4.6 | 2026-02-11 | `claude/extract-task-metadata-8lMCM` |
+| 3.2 | Structured task phases (Plan → Work → Review) | Claude Opus 4.6 | 2026-02-11 | `claude/add-task-phases-4R9Q6` |
 
 ---
 
@@ -114,10 +116,10 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 3.2** — Structured task phases (Plan → Work → Review)
-2. **Phase 3.3** — /learnings Telegram command
-3. **Phase 2.3** — Acontext integration (API key now configured)
-4. **Phase 2.5.9** — Holiday awareness (Nager.Date)
+1. **Phase 3.3** — /learnings Telegram command
+2. **Phase 2.3** — Acontext integration (API key now configured)
+3. **Phase 2.5.9** — Holiday awareness (Nager.Date)
+4. **Phase 4.1** — Replace compressContext with token-budgeted retrieval
 
 ---
 
@@ -125,4 +127,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 34 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1+2.2 complete, Phase 2.5 COMPLETE (all 8 tools), Phase 3.1+3.4 complete, ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 448 tests total |
+| Sprint 1 (current) | 8 | 35 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1+2.2 complete, Phase 2.5 COMPLETE (all 8 tools), Phase 3.1+3.2+3.4 complete, ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 456 tests total |

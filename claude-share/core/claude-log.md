@@ -4,6 +4,45 @@
 
 ---
 
+## Session: 2026-02-11 | Phase 3.2: Structured Task Phases (Session: 019jH8X9pJabGwP2untYhuYE)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/add-task-phases-4R9Q6`
+**Status:** Completed
+
+### Summary
+Implemented Phase 3.2 (Structured Task Phases). Long-running Durable Object tasks now go through three structured phases: Plan → Work → Review. Phase-aware prompts guide the model at each stage, phase transitions are tracked in TaskState, and Telegram progress updates show the current phase.
+
+### Changes Made
+1. **`TaskPhase` type** — New exported type: `'plan' | 'work' | 'review'`
+2. **TaskState fields** — Added `phase` and `phaseStartIteration` to the interface
+3. **Plan phase** — Injects `[PLANNING PHASE]` prompt as user message for fresh tasks; skipped on checkpoint resume
+4. **Plan → Work transition** — After first API response (iteration 1), regardless of tool calls
+5. **Work → Review transition** — When model stops calling tools AND `toolsUsed.length > 0`; injects `[REVIEW PHASE]` prompt for one more iteration
+6. **Simple task handling** — Tasks with no tools skip review gracefully (phase ends at 'work')
+7. **Progress messages** — Updated to show phase: "Planning...", "Working...", "Reviewing..."
+8. **Checkpoint persistence** — Phase included in R2 checkpoint saves and restored on resume
+9. **8 new tests** — Phase type, initialization, plan→work→review transitions, simple task skip, review prompt injection, "Planning..." status message, phase in R2 checkpoints
+
+### Files Modified
+- `src/durable-objects/task-processor.ts` (phase type, TaskState fields, prompt injection, transitions, progress messages, checkpoint persistence)
+- `src/durable-objects/task-processor.test.ts` (NEW — 8 tests)
+- `claude-share/core/GLOBAL_ROADMAP.md`
+- `claude-share/core/WORK_STATUS.md`
+- `claude-share/core/next_prompt.md`
+- `claude-share/core/claude-log.md`
+
+### Tests
+- [x] 456 tests pass (8 new, 448 existing)
+- [x] TypeScript: only pre-existing errors (request.prompt, parse_mode)
+
+### Notes for Next Session
+- Phase 3.3 (/learnings Telegram command) is next
+- Phase 2.3 (Acontext integration) is unblocked — API key configured
+- The phase system adds ~1 extra API call per tool-using task (review phase)
+
+---
+
 ## Session: 2026-02-11 | UX Fixes + /start Redesign + Acontext Key (Session: 018gmCDcuBJqs9ffrrDHHBBd)
 
 **AI:** Claude Opus 4.6
