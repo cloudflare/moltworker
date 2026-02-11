@@ -61,6 +61,12 @@ _Cloudflare Sandboxes are available on the [Workers Paid plan](https://dash.clou
 For the internal CLI overview, see [docs/engineering/cli/skclaw.md](docs/engineering/cli/skclaw.md).
 For the end-state CLI spec, see [docs/engineering/cli/skclaw-spec.md](docs/engineering/cli/skclaw-spec.md).
 
+Note: `skclaw` reads `.skclaw.json` by default. For local-only configs, set `SKCLAW_CONFIG` and keep the file out of git.
+AI Gateway commands require `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) with AI Gateway write permissions.
+KV namespace commands require a token with Workers KV Storage edit permissions.
+D1 commands require a token with D1 edit permissions.
+R2 commands require a token with R2 edit permissions.
+
 ```bash
 # Install dependencies
 npm install

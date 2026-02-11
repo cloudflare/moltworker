@@ -39,7 +39,7 @@ Spec: TBD
 
 ## [ ] Track: Relocate skclaw docs to engineering/cli, fix references, and deliver phased implementation plan/spec for end-state skclaw.
 
-> 📊 **Effort:** Medium
+> 📊 **Effort:** Medium | Status: Completed
 
 *Link: [./tracks/relocate_skclaw_20260210/](./tracks/relocate_skclaw_20260210/)*
 
@@ -47,7 +47,7 @@ Spec: TBD
 
 ## [ ] Track: Implement full skclaw CLI per end-state spec (init/env/secrets/resources/migrations/tenant/routing/logs/quality).
 
-> 📊 **Effort:** High
+> 📊 **Effort:** High | Status: Completed
 
 Link: ./tracks/implement_full__20260210/plan.md
 Spec: ./tracks/implement_full__20260210/spec.md

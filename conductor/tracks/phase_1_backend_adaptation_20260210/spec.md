@@ -80,8 +80,9 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 
 - Tenant resolution: use request host as authoritative. In `DEV_MODE`, allow an override header for internal testing only. For custom domains, resolve via registry lookup before tenant fetch.
 - Sandbox ID format: `sk-` + first 16 hex chars of SHA-256 hash of tenant UUID (19 chars total), lowercase and hyphen-safe.
-- D1 schema: `tenants(id, platform, tier, sandbox_id, created_at, updated_at)` and `usage(id, tenant_id, model, tokens_in, tokens_out, latency_ms, created_at)`.
-- D1 indexes: unique index on `tenants.sandbox_id`, composite index on `usage(tenant_id, created_at)`.
+- D1 schema: `tenants(id, slug, platform, tier, created_at, updated_at)` and `usage(id, tenant_id, model, tokens_in, tokens_out, latency_ms, created_at)`.
+- D1 indexes: unique index on `tenants.slug`, composite index on `usage(tenant_id, created_at)`.
+- Sandbox IDs are derived on read from tenant UUIDs (not stored in D1).
 - D1 migrations: required for schema changes; no ad-hoc init scripts.
 - Binding validation: fail fast in prod; in `DEV_MODE`, warn and continue with a clear banner log.
 - Access + rate limiting: hybrid model (WAF as volumetric shield, Worker for business-logic limits). Admin routes require Access plus JWT verification in Worker.

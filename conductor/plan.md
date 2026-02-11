@@ -21,8 +21,8 @@ Last updated: 2026-02-10
 | --- | --- | --- |
 | Total Tracks | 5 | Listed tracks |
 | Active | 0 | In progress |
-| Planned | 5 | Spec ready or pending spec |
-| Completed | 0 | Done or merged |
+| Planned | 3 | Spec ready or pending spec |
+| Completed | 2 | Done or merged |
 
 ---
 
@@ -37,6 +37,13 @@ Last updated: 2026-02-10
 - Quality Gate and Testing
   - Track plan: TBD
   - Spec: TBD
+- Relocate skclaw docs to engineering/cli, fix references, and deliver phased implementation plan/spec for end-state skclaw
+- Implement full skclaw CLI per end-state spec (init/env/secrets/resources/migrations/tenant/routing/logs/quality)
+  - Track plan: ./tracks/implement_full__20260210/plan.md
+  - Spec: ./tracks/implement_full__20260210/spec.md
+
+## Completed Tracks
+
 - Relocate skclaw docs to engineering/cli, fix references, and deliver phased implementation plan/spec for end-state skclaw
   - Track plan: ./tracks/relocate_skclaw_20260210/plan.md
   - Spec: ./tracks/relocate_skclaw_20260210/spec.md

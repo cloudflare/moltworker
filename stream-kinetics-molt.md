@@ -75,8 +75,9 @@ CLI-first note
 - DEBUG_ROUTES (env)
 
 ## D1 Schema (Minimal)
-- tenants(id, platform, tier, sandbox_id, created_at, updated_at)
+- tenants(id, slug, platform, tier, created_at, updated_at)
 - usage(id, tenant_id, model, tokens_in, tokens_out, latency_ms, created_at)
+- Sandbox IDs are derived on read from tenant UUIDs (not stored in D1).
 
 ## Routing Rubric (AI Gateway)
 - Input metadata: platform, tier, workload

@@ -33,6 +33,15 @@ Cloudflare returns the UUID to use in `wrangler.jsonc`:
 
 ## Resource Naming Cheat Sheet (Phase 1)
 
+## API Token Scopes (CLI)
+
+When using `skclaw` for resource lifecycle operations, use Cloudflare API tokens with these scopes:
+
+- AI Gateway: AI Gateway Write
+- KV: Workers KV Storage Edit
+- D1: D1 Edit
+- R2: R2 Storage Edit
+
 ### AI Gateway
 
 - Format: `[env]-[project]-ai-gw`

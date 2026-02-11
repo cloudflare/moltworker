@@ -3,9 +3,9 @@
 ## Status
 
 - Dependencies: docs/engineering/cli/skclaw-spec.md (end-state spec)
-- Completed: Phase A (Core CLI Contract), Phase B (Env + Secrets), Phase D (Deploy + Migrations + Logs)
+- Completed: Phase A (Core CLI Contract), Phase B (Env + Secrets), Phase C (Resources + Bindings), Phase D (Deploy + Migrations + Logs), Phase E (Tenant + Routing), Phase F (Tests + QA)
 - In Progress: None
-- Next Up: Phase C (Resources + Bindings)
+- Next Up: None (Track complete)
 
 ## Objectives
 
@@ -18,9 +18,9 @@
 1. Core CLI contract and global flags standardized. (Done)
 2. Env/secrets workflows implemented. (Done)
 3. Deploy/migrations/logs workflows implemented. (Done)
-4. Resources/bindings workflows implemented. (Next)
-5. Tenant/routing workflows implemented with validation.
-6. Comprehensive tests and docs aligned.
+4. Resources/bindings workflows implemented. (Done)
+5. Tenant/routing workflows implemented with validation. (Done)
+6. Comprehensive tests and docs aligned. (Done)
 
 ## Estimates and Elapsed
 

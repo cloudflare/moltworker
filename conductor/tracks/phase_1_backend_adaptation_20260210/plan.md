@@ -28,6 +28,7 @@
 - Implement tenant registry lookup for custom domains.
 - Implement D1 tenant lookup and sandbox ID derivation (SHA-256 truncated hash).
 - Add unit tests for mapping and ID format.
+- Note: Sandbox IDs are derived from tenant UUIDs (not stored). See ADR in docs/engineering/adr-tenant-sandbox-ids.md.
 
 ### B) Binding Validation
 

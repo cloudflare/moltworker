@@ -1,5 +1,9 @@
 # Track Plan: skclaw Docs Relocation + End-State Plan
 
+## Status
+
+- Completed: Phase 0 (Docs Relocation + References)
+
 ## Goal
 
 Relocate skclaw docs to the internal engineering docs structure, fix references, and deliver a phased implementation plan for the skclaw end-state spec with t-shirt sizing.

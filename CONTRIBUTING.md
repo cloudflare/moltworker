@@ -28,9 +28,16 @@ We have a few rules regarding AI usage:
 
 These rules apply only to outside contributions to Ghostty. Maintainers are exempt from these rules and may use AI tools at their discretion; they've proven themselves trustworthy to apply good judgment.
 
+## Project Standards
+
+Please review and follow our internal standards before making infrastructure or security changes:
+
+- [Security Standards](docs/engineering/security-standards.md)
+- [DevOps Standards](docs/engineering/devops-standards.md)
+
 ## There are Humans Here
 
-Please remember that this software is ultimately maintained by humans. 
+Please remember that this software is ultimately maintained by humans.
 
 Every discussion, issue, and pull request is read and reviewed by humans (and sometimes machines, too). It is a boundary point at which people interact with each other and the work done. It is rude and disrespectful to approach this boundary with low-effort, unqualified work, since it puts the burden of validation on the maintainer.
 
