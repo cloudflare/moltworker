@@ -99,11 +99,28 @@ telegram.get('/setup', async (c) => {
   const bot = new TelegramBot(env.TELEGRAM_BOT_TOKEN);
   const success = await bot.setWebhook(webhookUrl);
 
+  // Register bot menu commands
+  const commandsSet = await bot.setMyCommands([
+    { command: 'start', description: 'Welcome & feature overview' },
+    { command: 'help', description: 'Full command reference' },
+    { command: 'pick', description: 'Choose a model (buttons)' },
+    { command: 'models', description: 'All models with prices' },
+    { command: 'new', description: 'Clear conversation' },
+    { command: 'img', description: 'Generate an image' },
+    { command: 'briefing', description: 'Daily briefing (weather+news)' },
+    { command: 'costs', description: 'Token usage summary' },
+    { command: 'status', description: 'Bot status & info' },
+    { command: 'saves', description: 'List saved checkpoints' },
+    { command: 'ar', description: 'Toggle auto-resume' },
+    { command: 'credits', description: 'OpenRouter balance' },
+  ]);
+
   if (success) {
     return c.json({
       ok: true,
       message: 'Webhook set successfully',
       webhook_url: webhookUrl.replace(env.TELEGRAM_BOT_TOKEN, '***'),
+      commands_registered: commandsSet,
     });
   } else {
     return c.json({ error: 'Failed to set webhook' }, 500);

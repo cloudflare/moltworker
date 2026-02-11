@@ -322,6 +322,20 @@ export class TelegramBot {
   }
 
   /**
+   * Set bot menu commands visible in Telegram UI
+   */
+  async setMyCommands(commands: { command: string; description: string }[]): Promise<boolean> {
+    const response = await fetch(`${this.baseUrl}/setMyCommands`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commands }),
+    });
+
+    const result = await response.json() as { ok: boolean; description?: string };
+    return result.ok;
+  }
+
+  /**
    * Send a message with inline keyboard buttons
    */
   async sendMessageWithButtons(
@@ -625,7 +639,7 @@ export class TelegramHandler {
 
     switch (cmd) {
       case '/start':
-        await this.bot.sendMessage(chatId, this.getStartMessage());
+        await this.sendStartMenu(chatId);
         break;
       case '/help':
         await this.bot.sendMessage(chatId, this.getHelpMessage());
@@ -1690,8 +1704,44 @@ export class TelegramHandler {
         await this.handleSyncCallback(query, parts, userId, chatId);
         break;
 
+      case 'start':
+        // /start feature exploration: start:coding, start:research, etc.
+        await this.handleStartCallback(parts, chatId);
+        break;
+
       default:
         console.log('[Telegram] Unknown callback action:', action);
+    }
+  }
+
+  /**
+   * Handle /start menu button callbacks
+   */
+  private async handleStartCallback(parts: string[], chatId: number): Promise<void> {
+    const feature = parts[1];
+
+    if (feature === 'pick') {
+      await this.sendModelPicker(chatId);
+      return;
+    }
+
+    if (feature === 'help') {
+      await this.bot.sendMessage(chatId, this.getHelpMessage());
+      return;
+    }
+
+    const text = this.getStartFeatureText(feature);
+    if (text) {
+      // Send feature info with a "Back to menu" button
+      const buttons: InlineKeyboardButton[][] = [
+        [
+          { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
+          { text: '🤖 Pick Model', callback_data: 'start:pick' },
+        ],
+      ];
+      await this.bot.sendMessageWithButtons(chatId, text, buttons);
+    } else if (feature === 'menu') {
+      await this.sendStartMenu(chatId);
     }
   }
 
@@ -2072,36 +2122,149 @@ export class TelegramHandler {
   }
 
   /**
-   * Get welcome message for /start
+   * Send /start welcome menu with inline buttons
    */
-  private getStartMessage(): string {
-    return `🤖 Welcome to Moltworker!
+  private async sendStartMenu(chatId: number): Promise<void> {
+    const welcome = `🤖 Welcome to Moltworker!
 
-A multi-model AI assistant with real-time tools.
+Your multi-model AI assistant with 14 real-time tools and 30+ AI models.
 
-💬 What can I do?
+Just type a message to chat, or tap a button below to explore:`;
 
-Chat — Just type a message. I'll answer using whichever AI model you've selected (default: auto-route).
+    const buttons: InlineKeyboardButton[][] = [
+      [
+        { text: '💻 Coding', callback_data: 'start:coding' },
+        { text: '🔍 Research', callback_data: 'start:research' },
+        { text: '🎨 Images', callback_data: 'start:images' },
+      ],
+      [
+        { text: '🔧 Tools & Data', callback_data: 'start:tools' },
+        { text: '👁️ Vision', callback_data: 'start:vision' },
+        { text: '🧠 Reasoning', callback_data: 'start:reasoning' },
+      ],
+      [
+        { text: '🤖 Pick a Model', callback_data: 'start:pick' },
+        { text: '📖 All Commands', callback_data: 'start:help' },
+      ],
+    ];
 
-Vision — Send a photo (with or without a caption). I'll analyze it and can combine that with live data lookups.
+    await this.bot.sendMessageWithButtons(chatId, welcome, buttons);
+  }
 
-Tools — When you ask about weather, crypto, news, GitHub repos, or URLs, I automatically call the right tool to get fresh data. No special syntax needed.
+  /**
+   * Get feature detail text for /start button callbacks
+   */
+  private getStartFeatureText(feature: string): string {
+    switch (feature) {
+      case 'coding':
+        return `💻 Coding with Moltworker
 
-Images — /img a cat in space creates an image using FLUX.
+Just describe what you need — I'll read repos, write code, create PRs, and run tests.
 
-Reasoning — Prefix with think:high to activate deep reasoning on models that support it.
+What I can do:
+• Read files from any GitHub repo
+• Create PRs with multi-file changes
+• Run code in a sandbox (git, node, npm)
+• Analyze code, refactor, debug
 
-JSON — Prefix with json: to get structured JSON output (on supported models).
+Best models for coding:
+/deep — Best value ($0.25/M)
+/qwencoderfree — Free, strong coding
+/grok — Best agentic (#1 tool use)
+/sonnet — Premium quality
 
-Briefing — /briefing gives you a daily snapshot: weather, top HN stories, Reddit, and arXiv.
+Try it: "Read the README of PetrAnto/moltworker and summarize it"`;
 
-🔧 Quick start:
-/pick — Choose a model (button menu)
-/models — Full model list with prices
-/help — All commands & reference
-/new — Clear conversation & start fresh
+      case 'research':
+        return `🔍 Research & Web
 
-Tip: /deep and /gpt are good defaults. DeepSeek is cheap with great tools; GPT-4o adds vision.`;
+I can fetch any URL, browse JS-heavy sites, pull news, and analyze content.
+
+What I can do:
+• Fetch & summarize any webpage
+• Browse JS-rendered sites (screenshots, PDFs)
+• Get top stories from HackerNews, Reddit, arXiv
+• Extract metadata (title, author, images)
+
+Try it: "What's on the front page of Hacker News?"
+Try it: "Summarize https://example.com"`;
+
+      case 'images':
+        return `🎨 Image Generation
+
+Create images with FLUX.2 models — from quick drafts to high-quality renders.
+
+Usage: /img <prompt>
+Example: /img a cat astronaut floating in space
+
+Models (pick by quality):
+/img fluxklein — Fast draft ($0.014/MP)
+/img fluxpro — Default, great quality ($0.05/MP)
+/img fluxflex — Best for text in images ($0.06/MP)
+/img fluxmax — Highest quality ($0.07/MP)`;
+
+      case 'tools':
+        return `🔧 Tools & Live Data
+
+I have 14 tools that run automatically — just ask naturally:
+
+📊 Data:
+• "What's the weather in Prague?"
+• "Bitcoin price" / "Top 10 crypto"
+• "Convert 100 EUR to CZK"
+
+📰 News:
+• "Top stories on HN" / "Reddit r/programming"
+• "Latest arXiv papers on cs.AI"
+
+🌐 Web:
+• Paste any URL — I'll fetch it
+• "Browse https://example.com" for JS sites
+
+📈 Charts:
+• "Chart showing quarterly revenue: Q1=10, Q2=15, Q3=22, Q4=30"
+
+🌍 Other:
+• "Geolocate IP 8.8.8.8"
+• /briefing for a daily digest (weather + news)`;
+
+      case 'vision':
+        return `👁️ Vision & Image Analysis
+
+Send a photo and I'll analyze it. Add a caption to guide the analysis.
+
+What I can do:
+• Identify objects, text, scenes
+• Analyze code from screenshots
+• Combine vision with tools (see a city → get its weather)
+
+How to use:
+• Send a photo → I describe what I see
+• Send a photo + caption → I follow your instructions
+• Works with: /gpt, /flash, /haiku, /sonnet, /kimi
+
+Try it: Send a screenshot and ask "What's in this image?"`;
+
+      case 'reasoning':
+        return `🧠 Deep Reasoning
+
+Activate extended thinking for complex problems — math, logic, planning.
+
+Usage: Prefix your message with think:high
+Example: "think:high Prove that the square root of 2 is irrational"
+
+Levels: think:low, think:medium, think:high, think:off
+
+Also works with JSON: "think:high json: Analyze these metrics..."
+
+Best reasoning models:
+/deep — Great value, configurable thinking
+/flash — Strong reasoning + 1M context
+/opus — Maximum quality`;
+
+      default:
+        return '';
+    }
   }
 
   private getHelpMessage(): string {
