@@ -13,6 +13,26 @@ const createLogger = (buffer: LoggerBuffer) => ({
 });
 
 describe("skclaw", () => {
+  test("help returns JSON when --json is set", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+    });
+
+    const code = await skclaw.run(["--help", "--json"]);
+
+    expect(code).toBe(0);
+    expect(buffer.info.length).toBe(1);
+    const payload = JSON.parse(buffer.info[0]) as {
+      status: string;
+      code: number;
+      message: string;
+      data?: { usage?: string };
+    };
+    expect(payload.status).toBe("ok");
+    expect(payload.code).toBe(0);
+    expect(payload.data?.usage).toContain("skclaw");
+  });
   test("lint runs through bun", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
     const calls: Array<{ command: string; args: string[] }> = [];
@@ -58,6 +78,52 @@ describe("skclaw", () => {
     expect(code).toBe(0);
     expect(calls).toEqual([{ command: "bun", args: ["run", "typecheck"] }]);
   });
+
+  test("test runs through bun", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+    });
+
+    const code = await skclaw.run(["test"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([{ command: "bun", args: ["run", "test"] }]);
+  });
+
+  test("quality test cli runs through bun", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+    });
+
+    const code = await skclaw.run(["quality", "test", "cli"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([{ command: "bun", args: ["run", "test:cli"] }]);
+  });
   test("tenant commands are not implemented yet", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
     const skclaw = createSkclaw({
@@ -90,9 +156,17 @@ describe("skclaw", () => {
       readFile: () => "{}",
     });
 
-    const code = await skclaw.run(["env", "validate"]);
+    const code = await skclaw.run(["env", "validate", "--json"]);
 
     expect(code).toBe(1);
-    expect(buffer.error.join(" ")).toContain("Config not found");
+    expect(buffer.error.length).toBe(1);
+    const payload = JSON.parse(buffer.error[0]) as {
+      status: string;
+      code: number;
+      message: string;
+    };
+    expect(payload.status).toBe("error");
+    expect(payload.code).toBe(1);
+    expect(payload.message).toContain("Config not found");
   });
 });

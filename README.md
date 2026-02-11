@@ -58,6 +58,9 @@ This project packages OpenClaw to run in a [Cloudflare Sandbox](https://develope
 
 _Cloudflare Sandboxes are available on the [Workers Paid plan](https://dash.cloudflare.com/?to=/:account/workers/plans)._
 
+For the internal CLI overview, see [docs/engineering/cli/skclaw.md](docs/engineering/cli/skclaw.md).
+For the end-state CLI spec, see [docs/engineering/cli/skclaw-spec.md](docs/engineering/cli/skclaw-spec.md).
+
 ```bash
 # Install dependencies
 npm install

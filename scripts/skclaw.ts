@@ -140,15 +140,14 @@ const runCommand = (deps: SkclawDeps, command: string, args: string[]) =>
     });
   });
 
-const printUsage = (deps: SkclawDeps) => {
-  deps.logger.info(`skclaw - StreamKinetics OpenClaw CLI
+const getUsage = () => `skclaw - StreamKinetics OpenClaw CLI
 
 Usage:
   skclaw env validate
   skclaw secrets sync --env production [--env-file .dev.vars] [--dry-run]
   skclaw deploy --env production
-  skclaw lint
-  skclaw typecheck
+  skclaw quality <lint|typecheck|test|test cli>
+  skclaw test [cli]
   skclaw tenant <create|update>
   skclaw routing <set|test>
 
@@ -157,7 +156,43 @@ Flags:
   --env          Wrangler environment name
   --env-file     Env file for secrets sync (default: .dev.vars)
   --dry-run      Show actions without executing
-`);
+  --json         Output machine-readable JSON
+  --verbose      Output additional details
+  --yes          Skip confirmations where supported
+`;
+
+const emitSuccess = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+  message: string,
+  data?: Record<string, unknown>,
+) => {
+  if (flags.json) {
+    deps.logger.info(
+      JSON.stringify({ status: "ok", code: 0, message, data }),
+    );
+    return;
+  }
+  if (message) {
+    deps.logger.info(message);
+  }
+};
+
+const emitError = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+  message: string,
+  code = 1,
+  data?: Record<string, unknown>,
+) => {
+  if (flags.json) {
+    deps.logger.error(
+      JSON.stringify({ status: "error", code, message, data }),
+    );
+    return code;
+  }
+  deps.logger.error(message);
+  return code;
 };
 
 const handleEnvValidate = (deps: SkclawDeps, flags: Record<string, string | boolean>) => {
@@ -167,7 +202,7 @@ const handleEnvValidate = (deps: SkclawDeps, flags: Record<string, string | bool
   if (missing.length > 0) {
     throw new Error(`Missing required env vars: ${missing.join(", ")}`);
   }
-  deps.logger.info("Env validation OK");
+  return "Env validation OK";
 };
 
 const handleSecretsSync = async (
@@ -213,6 +248,7 @@ const handleSecretsSync = async (
       });
     });
   }
+  return dryRun ? "Secrets sync dry-run complete" : "Secrets sync complete";
 };
 
 const handleDeploy = async (
@@ -228,18 +264,27 @@ const handleDeploy = async (
   }
   await runCommand(deps, "bun", ["run", "build"]);
   await runCommand(deps, "bunx", deployArgs);
+  return "Deploy complete";
 };
 
 const handleLint = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "lint"]);
+  return "Lint complete";
 };
 
 const handleTypecheck = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "typecheck"]);
+  return "Typecheck complete";
 };
 
-const handleNotImplemented = (deps: SkclawDeps, label: string) => {
-  deps.logger.error(`Not implemented: ${label}`);
+const handleTest = async (deps: SkclawDeps) => {
+  await runCommand(deps, "bun", ["run", "test"]);
+  return "Tests complete";
+};
+
+const handleTestCli = async (deps: SkclawDeps) => {
+  await runCommand(deps, "bun", ["run", "test:cli"]);
+  return "CLI tests complete";
 };
 
 export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
@@ -247,7 +292,11 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
   const run = async (argv: string[]) => {
     const { positionals, flags } = parseArgs(argv);
     if (positionals.length === 0 || flags.help) {
-      printUsage(resolvedDeps);
+      const usage = getUsage();
+      emitSuccess(resolvedDeps, flags, "Usage", { usage });
+      if (!flags.json) {
+        resolvedDeps.logger.info(usage);
+      }
       return 0;
     }
 
@@ -255,41 +304,87 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
 
     try {
       if (group === "env" && action === "validate") {
-        handleEnvValidate(resolvedDeps, flags);
+        const message = handleEnvValidate(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
       if (group === "secrets" && action === "sync") {
-        await handleSecretsSync(resolvedDeps, flags);
+        const message = await handleSecretsSync(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
       if (group === "deploy") {
-        await handleDeploy(resolvedDeps, flags);
+        const message = await handleDeploy(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
       if (group === "lint") {
-        await handleLint(resolvedDeps);
+        const message = await handleLint(resolvedDeps);
+        emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
       if (group === "typecheck") {
-        await handleTypecheck(resolvedDeps);
+        const message = await handleTypecheck(resolvedDeps);
+        emitSuccess(resolvedDeps, flags, message);
+        return 0;
+      }
+      if (group === "quality") {
+        if (action === "lint") {
+          const message = await handleLint(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "typecheck") {
+          const message = await handleTypecheck(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "test" && positionals[2] === "cli") {
+          const message = await handleTestCli(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "test") {
+          const message = await handleTest(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "test") {
+        if (action === "cli") {
+          const message = await handleTestCli(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        const message = await handleTest(resolvedDeps);
+        emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
       if (group === "tenant") {
-        handleNotImplemented(resolvedDeps, `tenant ${action || ""}`.trim());
-        return 1;
+        return emitError(
+          resolvedDeps,
+          flags,
+          `Not implemented: ${`tenant ${action || ""}`.trim()}`,
+        );
       }
       if (group === "routing") {
-        handleNotImplemented(resolvedDeps, `routing ${action || ""}`.trim());
-        return 1;
+        return emitError(
+          resolvedDeps,
+          flags,
+          `Not implemented: ${`routing ${action || ""}`.trim()}`,
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      resolvedDeps.logger.error(message);
-      return 1;
+      return emitError(resolvedDeps, flags, message);
     }
 
-    printUsage(resolvedDeps);
-    return 1;
+    const usage = getUsage();
+    if (flags.json) {
+      return emitError(resolvedDeps, flags, "Unknown command", 1, { usage });
+    }
+    resolvedDeps.logger.info(usage);
+    return emitError(resolvedDeps, flags, "Unknown command");
   };
 
   return { run };
