@@ -19,9 +19,9 @@ Last updated: 2026-02-10
 
 | Category | Count | Notes |
 | --- | --- | --- |
-| Total Tracks | 2 | Active track directories |
+| Total Tracks | 5 | Listed tracks |
 | Active | 0 | In progress |
-| Planned | 2 | Spec ready, awaiting implementation |
+| Planned | 5 | Spec ready or pending spec |
 | Completed | 0 | Done or merged |
 
 ---
@@ -34,3 +34,12 @@ Last updated: 2026-02-10
 - Phase 1 Backend Adaptation
   - Track plan: ./tracks/phase_1_backend_adaptation_20260210/plan.md
   - Spec: ./tracks/phase_1_backend_adaptation_20260210/spec.md
+- Quality Gate and Testing
+  - Track plan: TBD
+  - Spec: TBD
+- Relocate skclaw docs to engineering/cli, fix references, and deliver phased implementation plan/spec for end-state skclaw
+  - Track plan: ./tracks/relocate_skclaw_20260210/plan.md
+  - Spec: ./tracks/relocate_skclaw_20260210/spec.md
+- Implement full skclaw CLI per end-state spec (init/env/secrets/resources/migrations/tenant/routing/logs/quality)
+  - Track plan: ./tracks/implement_full__20260210/plan.md
+  - Spec: ./tracks/implement_full__20260210/spec.md
