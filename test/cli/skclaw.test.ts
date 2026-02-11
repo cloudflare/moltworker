@@ -457,4 +457,111 @@ describe("skclaw", () => {
       },
     ]);
   });
+
+  test("resources check returns JSON output", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["resources", "check", "--json"]);
+
+    expect(code).toBe(0);
+    const payload = JSON.parse(buffer.info[0]) as {
+      status: string;
+      code: number;
+      data: { d1DatabaseId: string; kvNamespaceId: string; r2BucketName: string };
+    };
+    expect(payload.status).toBe("ok");
+    expect(payload.data.d1DatabaseId).toBe("db");
+    expect(payload.data.kvNamespaceId).toBe("kv");
+    expect(payload.data.r2BucketName).toBe("bucket");
+  });
+
+  test("resources create dry-run logs commands", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run([
+      "resources",
+      "create",
+      "--d1-name",
+      "tenant-db",
+      "--kv-name",
+      "tenant-kv",
+      "--r2-name",
+      "tenant-r2",
+      "--dry-run",
+    ]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([]);
+    expect(buffer.info.join(" ")).toContain("dry-run");
+    expect(buffer.info.join(" ")).toContain("tenant-db");
+  });
+
+  test("resources create uses naming defaults", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["resources", "create", "--dry-run"]);
+
+    expect(code).toBe(0);
+    expect(buffer.info.join(" ")).toContain("dev-project-tenant-db");
+    expect(buffer.info.join(" ")).toContain("dev-project-session-kv");
+    expect(buffer.info.join(" ")).toContain("dev-project-memory");
+  });
+
+  test("resources bind returns JSON output", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["resources", "bind", "--json"]);
+
+    expect(code).toBe(0);
+    const payload = JSON.parse(buffer.info[0]) as {
+      status: string;
+      code: number;
+      data: { workerName: string };
+    };
+    expect(payload.status).toBe("ok");
+    expect(payload.data.workerName).toBe("worker");
+  });
 });

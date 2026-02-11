@@ -152,6 +152,7 @@ Usage:
   skclaw deploy [--env production]
   skclaw deploy preview --env preview
   skclaw deploy status [--env production]
+  skclaw resources <check|create|bind>
   skclaw migrations <list|apply|status> [--env production]
   skclaw logs <tail|search> [query] [--env production]
   skclaw quality <lint|typecheck|test|test cli>
@@ -164,6 +165,9 @@ Flags:
   --env          Wrangler environment name
   --env-file     Env file for secrets sync (default: .dev.vars)
   --keys         Comma-separated secret keys (for rotate)
+  --d1-name      D1 database name (resources create, default uses naming standard)
+  --kv-name      KV namespace name (resources create, default uses naming standard)
+  --r2-name      R2 bucket name (resources create, default uses naming standard)
   --dry-run      Show actions without executing
   --json         Output machine-readable JSON
   --verbose      Output additional details
@@ -363,6 +367,95 @@ const handleDeployStatus = async (
   return "Deploy status complete";
 };
 
+const handleResourcesCheck = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  return {
+    message: "Resources check complete",
+    data: {
+      workerName: String(config.workerName),
+      d1DatabaseId: String(config.d1DatabaseId),
+      kvNamespaceId: String(config.kvNamespaceId),
+      r2BucketName: String(config.r2BucketName),
+      aiGatewayId: String(config.aiGatewayId),
+      aiGatewayAccountId: String(config.aiGatewayAccountId),
+    },
+  };
+};
+
+const normalizeSlug = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const buildResourceNames = (
+  envName: string,
+  projectName: string,
+  overrides: { d1?: string; kv?: string; r2?: string },
+) => {
+  const envSlug = normalizeSlug(envName) || "dev";
+  const projectSlug = normalizeSlug(projectName) || "project";
+  const base = `${envSlug}-${projectSlug}`;
+  return {
+    d1: overrides.d1 || `${base}-tenant-db`,
+    kv: overrides.kv || `${base}-session-kv`,
+    r2: overrides.r2 || `${base}-memory`,
+  };
+};
+
+const handleResourcesCreate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const d1Name = flags["d1-name"] as string | undefined;
+  const kvName = flags["kv-name"] as string | undefined;
+  const r2Name = flags["r2-name"] as string | undefined;
+  const dryRun = Boolean(flags["dry-run"]);
+  const envName = (flags.env as string | undefined) || "dev";
+  const names = buildResourceNames(envName, String(config.projectName), {
+    d1: d1Name,
+    kv: kvName,
+    r2: r2Name,
+  });
+  const commands: Array<{ command: string; args: string[] }> = [
+    { command: "bunx", args: ["wrangler", "d1", "create", names.d1] },
+    { command: "bunx", args: ["wrangler", "kv", "namespace", "create", names.kv] },
+    { command: "bunx", args: ["wrangler", "r2", "bucket", "create", names.r2] },
+  ];
+  for (const entry of commands) {
+    if (envName) {
+      entry.args.push("--env", envName);
+    }
+    if (dryRun) {
+      deps.logger.info(`[dry-run] ${entry.command} ${entry.args.join(" ")}`);
+      continue;
+    }
+    await runCommand(deps, entry.command, entry.args);
+  }
+  return dryRun ? "Resources create dry-run complete" : "Resources create complete";
+};
+
+const handleResourcesBind = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  return {
+    message: "Resources bind complete",
+    data: {
+      workerName: String(config.workerName),
+    },
+  };
+};
+
 const handleMigrationsList = async (
   deps: SkclawDeps,
   flags: Record<string, string | boolean>,
@@ -549,6 +642,23 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
         if (action === "status") {
           const message = await handleMigrationsStatus(resolvedDeps, flags);
           emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "resources") {
+        if (action === "check") {
+          const { message, data } = handleResourcesCheck(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "create") {
+          const message = await handleResourcesCreate(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "bind") {
+          const { message, data } = handleResourcesBind(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
           return 0;
         }
       }
