@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-10 (live testing bug fixes)
+**Last Updated:** 2026-02-11 (UX fixes, /start redesign, Acontext key)
 
 ---
 
@@ -30,6 +30,9 @@
 | 3.1+3.4 | Compound learning loop + prompt injection | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 | — | 6 bot improvements (GLM tools, 402, cross-task ctx, time cap, tool-intent, parallel prompt) | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 | BUG-12 | Fix auto-resume counter persistence + revert GLM free tool flag | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
+| 6.1 | /start redesign with inline keyboard + bot menu commands | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
+| — | Enhanced R2 skill prompt (Storia identity, model recs) | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
+| — | Briefing fixes: weather location, news links, crypto disambiguation | Claude Opus 4.6 | ✅ Complete | `claude/extract-task-metadata-8lMCM` |
 
 ---
 
@@ -37,7 +40,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Live testing bug fixes complete | `claude/extract-task-metadata-8lMCM` | 2026-02-10 |
+| Claude | Session complete — UX fixes, /start, Acontext | `claude/extract-task-metadata-8lMCM` | 2026-02-11 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -77,6 +80,9 @@
 | 3.1+3.4 | Compound learning loop + prompt injection | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
 | — | 6 bot improvements from Telegram analysis | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
 | BUG-12 | Auto-resume counter fix + GLM free flag revert | Claude Opus 4.6 | 2026-02-10 | `claude/extract-task-metadata-8lMCM` |
+| 6.1 | /start redesign with inline keyboard + bot menu commands | Claude Opus 4.6 | 2026-02-11 | `claude/extract-task-metadata-8lMCM` |
+| — | Enhanced R2 skill prompt (Storia identity, model recs) | Claude Opus 4.6 | 2026-02-11 | `claude/extract-task-metadata-8lMCM` |
+| — | Briefing fixes: weather location, news links, crypto disambiguation | Claude Opus 4.6 | 2026-02-11 | `claude/extract-task-metadata-8lMCM` |
 
 ---
 
@@ -100,7 +106,7 @@
 
 | Task ID | Description | Blocked By | Resolution |
 |---------|-------------|-----------|------------|
-| 2.3 | Acontext integration | Human: Need API key | 🧑 HUMAN CHECK 2.5 |
+| 2.3 | Acontext integration | ~~API key~~ | ✅ Key configured in Cloudflare — UNBLOCKED |
 
 ---
 
@@ -108,9 +114,10 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 3.2** — Structured task phases (Plan -> Work -> Review)
+1. **Phase 3.2** — Structured task phases (Plan → Work → Review)
 2. **Phase 3.3** — /learnings Telegram command
-3. **Phase 2.5.9** — Holiday awareness (Nager.Date)
+3. **Phase 2.3** — Acontext integration (API key now configured)
+4. **Phase 2.5.9** — Holiday awareness (Nager.Date)
 
 ---
 
@@ -118,4 +125,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 31 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1+2.2 complete, Phase 2.5 COMPLETE (all 8 tools), Phase 3.1+3.4 complete, ALL 11 bugs fixed (5 live + 6 Telegram analysis), 447 tests total |
+| Sprint 1 (current) | 8 | 34 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1+2.2 complete, Phase 2.5 COMPLETE (all 8 tools), Phase 3.1+3.4 complete, ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 448 tests total |
