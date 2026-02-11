@@ -96,8 +96,8 @@ export async function registerEngineeringTools(server: McpServer) {
     async ({ project_path }) => {
       try {
         const cwd = project_path ? path.resolve(ROOT_DIR, project_path) : ROOT_DIR;
-        // Run the check command. We expect it to fail if there are errors, so catch the error.
-        await execAsync("bun run check || npx tsc --noEmit", { cwd });
+        // Run the typecheck command. We expect it to fail if there are errors, so catch the error.
+        await execAsync("bun run skclaw typecheck", { cwd });
         return {
           content: [{ type: "text", text: `[OK] No syntax errors in ${project_path || "(root)"}.` }]
         };

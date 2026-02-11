@@ -39,8 +39,8 @@ export async function registerUXTools(server: McpServer) {
     },
     async () => {
       try {
-        // Using svelte-check as a proxy for basic a11y, or searching for specific a11y warnings
-        const { stdout, stderr } = await execAsync("bun run check", { cwd: ROOT_DIR });
+        // Use CLI-driven typecheck as a proxy for basic a11y signals in output
+        const { stdout, stderr } = await execAsync("bun run skclaw typecheck", { cwd: ROOT_DIR });
         const output = stdout + stderr;
 
         // Filter for a11y related warnings in the output if standard check doesn't explicitly categorize them
@@ -65,7 +65,7 @@ export async function registerUXTools(server: McpServer) {
           content: [{ type: "text", text: `⚠️ Potential A11Y Issues:\n${a11yIssues.join("\n")}` }]
         };
       } catch (error: unknown) {
-        // 'bun run check' often fails if there are errors, so we parse the output
+        // Typecheck may fail if there are errors, so we parse the output
         const err = error as { stdout?: string; stderr?: string };
         const output = (err.stdout || "") + (err.stderr || "");
 

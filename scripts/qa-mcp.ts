@@ -124,15 +124,9 @@ export async function registerQaTools(server: McpServer) {
   server.registerTool(
     "run_quality_check",
     {
-      description: "Runs a general quality command (lint, check, or a package.json script).",
+      description: "Runs a CLI-driven quality command (currently lint/typecheck).",
       inputSchema: z.object({
-        command: z.enum([
-          "bun run lint",
-          "bun run check",
-          "bun run test:unit",
-          "bun run test:backend",
-          "bun run test:components"
-        ]),
+        command: z.enum(["bun run skclaw lint", "bun run skclaw typecheck"]),
         environment: z.enum(["production", "staging"]).optional().default("production")
       })
     },

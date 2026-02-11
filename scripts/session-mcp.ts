@@ -30,16 +30,14 @@ const TEMPLATES = {
     `\n*   **Critical Blockers:**` +
     `\n    *   ...` +
     `\n## 2. Market Radar Review` +
-    `\n*   [ ] Review
-conductor/market-radar.md` +
+    `\n*   [ ] Review conductor/market-radar.md` +
     `\n*   *New insights/competitors?*` +
     `\n## 3. Financial Pulse` +
     `\n*   *Burn rate / Runway check*` +
     `\n*   *Revenue drivers check*` +
     `\n## 4. Strategic Directives (Next Objectives)` +
     `\n*   [ ] Define next major milestone` +
-    `\n*   [ ] Adjust prioritization in
-conductor/prioritization-framework.md` +
+    `\n*   [ ] Adjust prioritization in conductor/prioritization-framework.md` +
     `\n## 5. Decisions / Action Items` +
     `\n*   ...`,
 
@@ -48,8 +46,7 @@ conductor/prioritization-framework.md` +
     `\n**Date:** ${date}` +
     `\n## 1. Deep Research & Authoritative Sources` +
     `\n> *Action: Research underlying technologies, modern patterns, and stable practices.*` +
-    `\n*   [ ] **Internal Docs:** (Audit existing
-books/)` +
+    `\n*   [ ] **Internal Docs:** (Audit existing books/)` +
     `\n*   [ ] **External Docs:** (Link authoritative sources, e.g., Stripe docs, Cloudflare docs)` +
     `\n*   [ ] **Patterns:** (Identify relevant design patterns)` +
     `\n## 2. Requirements & Specifications` +
@@ -59,12 +56,10 @@ books/)` +
     `\n*   **Non-Functional Requirements (Perf, Scale):**` +
     `\n    *   ...` +
     `\n## 3. Alignment & Standards` +
-    `\n*   [ ] **Tech Stack:** Confirm alignment with
-conductor/tech-stack.md (Bun, Svelte 5, Drizzle, etc.)` +
+    `\n*   [ ] **Tech Stack:** Confirm alignment with conductor/tech-stack.md (Bun, Svelte 5, Drizzle, etc.)` +
     `\n*   [ ] **Future Roadmap:** Does this conflict with planned items?` +
     `\n## 4. 360 Review Checklist` +
-    `\n*   [ ] **Documentation:** Update plan for
-books/` +
+    `\n*   [ ] **Documentation:** Update plan for books/` +
     `\n*   [ ] **Security:** (AuthZ, Data Privacy, Secrets) - *Consult Security MCP*` +
     `\n*   [ ] **Architecture:** (Data flow, API design) - *Consult Architect MCP*` +
     `\n*   [ ] **Product:** (UX flow, Value prop)` +
@@ -100,10 +95,8 @@ books/` +
     `\n## 1. In-Progress Review` +
     `\n${tasks}` +
     `\n## 2. Backlog Grooming` +
-    `\n*   [ ] Review
-conductor/tracks.md for stalled tracks.` +
-    `\n*   [ ] Check
-conductor/incidents/ for open issues.` +
+    `\n*   [ ] Review conductor/tracks.md for stalled tracks.` +
+    `\n*   [ ] Check conductor/incidents/ for open issues.` +
     `\n## 3. Assignments` +
     `\n*   *Assign actions to specific owners.*`,
 
@@ -132,13 +125,10 @@ conductor/incidents/ for open issues.` +
     `\n## 1. Scope Definition` +
     `\n*   **Focus Area:** ${scope} (e.g., SOC2, GDPR, License Audit, Secrets Scan)` +
     `\n## 2. Security & Privacy Checklist` +
-    `\n*   [ ] **Secrets:** Run
-security-mcp or
-gitleaks check.` +
+    `\n*   [ ] **Secrets:** Run security-mcp or gitleaks check.` +
     `\n*   [ ] **PII:** Identify any new PII collection points.` +
     `\n*   [ ] **Access Control:** Review new permissions/roles.` +
-    `\n*   [ ] **Dependencies:** Check
-bun.lock for vulnerable packages.` +
+    `\n*   [ ] **Dependencies:** Check bun.lock for vulnerable packages.` +
     `\n## 3. Legal & Regulatory` +
     `\n*   [ ] **Licenses:** Verify all 3rd-party libs have compatible licenses.` +
     `\n*   [ ] **Terms of Service:** Do recent changes affect ToS?` +
@@ -154,13 +144,10 @@ bun.lock for vulnerable packages.` +
     `\n**Date:** ${date}` +
     `\n## 1. Authoritative Sources Check` +
     `\n> *Action: Verify alignment with official docs and internal standards.*` +
-    `\n*   [ ] **Svelte 5 Runes:** Are we using
-$state,
-$derived correctly? (No legacy stores?)` +
+    `\n*   [ ] **Svelte 5 Runes:** Are we using $state, $derived correctly? (No legacy stores?)` +
     `\n*   [ ] **Bun/Elysia:** Are we following latest patterns?` +
     `\n*   [ ] **Drizzle ORM:** Query efficiency, transaction usage.` +
-    `\n*   [ ] **Internal Style Guide:** Check
-conductor/product-guidelines.md.` +
+    `\n*   [ ] **Internal Style Guide:** Check conductor/product-guidelines.md.` +
     `\n## 2. Anti-Pattern Detection` +
     `\n*   [ ] **Global State:** Is any state global that should be local?` +
     `\n*   [ ] **Prop Drilling:** Excessive passing of props? (Use Context/Snippets)` +
