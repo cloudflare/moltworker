@@ -7,6 +7,8 @@ export interface MoltbotEnv {
   Sandbox: DurableObjectNamespace<Sandbox>;
   ASSETS: Fetcher; // Assets binding for admin UI static files
   MOLTBOT_BUCKET: R2Bucket; // R2 bucket for persistent storage
+  TENANT_DB?: D1Database; // D1 database for tenant records
+  TENANT_KV?: KVNamespace; // KV cache for tenant domain lookups
   // Cloudflare AI Gateway configuration (preferred)
   CF_AI_GATEWAY_ACCOUNT_ID?: string; // Cloudflare account ID for AI Gateway
   CF_AI_GATEWAY_GATEWAY_ID?: string; // AI Gateway ID
@@ -24,6 +26,9 @@ export interface MoltbotEnv {
   E2E_TEST_MODE?: string; // Set to 'true' for E2E tests (skips CF Access auth but keeps device pairing)
   DEBUG_ROUTES?: string; // Set to 'true' to enable /debug/* routes
   SANDBOX_SLEEP_AFTER?: string; // How long before sandbox sleeps: 'never' (default), or duration like '10m', '1h'
+  APP_DOMAIN?: string; // Base domain for tenant subdomains (e.g., streamkinetics.com)
+  TENANT_DOMAIN_MAP?: string; // JSON mapping for custom domains: {"host":"tenant"}
+  TENANT_CACHE_TTL_SECONDS?: string; // Cache TTL for tenant domain lookups
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_DM_POLICY?: string;
   DISCORD_BOT_TOKEN?: string;
@@ -59,6 +64,8 @@ export type AppEnv = {
   Bindings: MoltbotEnv;
   Variables: {
     sandbox: Sandbox;
+    tenantSlug?: string;
+    sandboxId?: string;
     accessUser?: AccessUser;
   };
 };

@@ -1,103 +1,131 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "moltbot-sandbox",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-05-06",
-  "compatibility_flags": ["nodejs_compat"],
-  "observability": {
-    "enabled": true,
-  },
-  // Static assets for admin UI (built by vite)
-  "assets": {
-    "directory": "./dist/client",
-    "not_found_handling": "single-page-application",
-    "html_handling": "auto-trailing-slash",
-    "binding": "ASSETS",
-    "run_worker_first": true,
-  },
-  // Allow importing HTML files as text modules and PNG files as binary
-  "rules": [
-    {
-      "type": "Text",
-      "globs": ["**/*.html"],
-      "fallthrough": false,
-    },
-    {
-      "type": "Data",
-      "globs": ["**/*.png"],
-      "fallthrough": false,
-    },
-  ],
-  // Build command for vite
-  "build": {
-    "command": "npm run build",
-  },
-  // Container configuration for the Moltbot sandbox
-  "containers": [
-    {
-      "class_name": "Sandbox",
-      "image": "./Dockerfile",
-      "instance_type": "standard-1",
-      "max_instances": 1,
-    },
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "class_name": "Sandbox",
-        "name": "Sandbox",
-      },
-    ],
-  },
-  "migrations": [
-    {
-      "new_sqlite_classes": ["Sandbox"],
-      "tag": "v1",
-    },
-  ],
-  // R2 bucket for persistent storage (moltbot data, conversations, etc.)
-  "r2_buckets": [
-    {
-      "binding": "MOLTBOT_BUCKET",
-      "bucket_name": "moltbot-data",
-    },
-  ],
-  // Cron trigger to sync moltbot data to R2 every 5 minutes
-  "triggers": {
-    "crons": ["*/5 * * * *"],
-  },
-  // Browser Rendering binding for CDP shim
-  "browser": {
-    "binding": "BROWSER",
-  },
-  // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
-  // Secrets to configure via `wrangler secret put`:
-  //
-  // AI Provider (at least one set required):
-  // - ANTHROPIC_API_KEY: Direct Anthropic API key
-  // - OPENAI_API_KEY: Direct OpenAI API key
-  // - Cloudflare AI Gateway (alternative to direct keys):
-  //   - CLOUDFLARE_AI_GATEWAY_API_KEY: API key for requests through the gateway
-  //   - CF_AI_GATEWAY_ACCOUNT_ID: Your Cloudflare account ID
-  //   - CF_AI_GATEWAY_GATEWAY_ID: Your AI Gateway ID
-  // - Legacy AI Gateway (still supported):
-  //   - AI_GATEWAY_API_KEY: API key
-  //   - AI_GATEWAY_BASE_URL: Gateway endpoint URL
-  //
-  // Authentication:
-  // - MOLTBOT_GATEWAY_TOKEN: Token to protect gateway access
-  // - CF_ACCESS_TEAM_DOMAIN: Cloudflare Access team domain
-  // - CF_ACCESS_AUD: Cloudflare Access application audience
-  //
-  // Chat channels (optional):
-  // - TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN
-  //
-  // Browser automation (optional):
-  // - CDP_SECRET: Shared secret for /cdp endpoint authentication
-  // - WORKER_URL: Public URL of the worker
-  //
-  // R2 persistent storage (optional, for data persistence across sessions):
-  // - R2_ACCESS_KEY_ID: R2 access key ID (from R2 API tokens)
-  // - R2_SECRET_ACCESS_KEY: R2 secret access key (from R2 API tokens)
-  // - CF_ACCOUNT_ID: Your Cloudflare account ID (for R2 endpoint URL)
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "moltbot-sandbox",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-05-06",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true,
+	},
+	// Static assets for admin UI (built by vite)
+	"assets": {
+		"directory": "./dist/client",
+		"not_found_handling": "single-page-application",
+		"html_handling": "auto-trailing-slash",
+		"binding": "ASSETS",
+		"run_worker_first": true,
+	},
+	// Allow importing HTML files as text modules and PNG files as binary
+	"rules": [
+		{
+			"type": "Text",
+			"globs": [
+				"**/*.html"
+			],
+			"fallthrough": false,
+		},
+		{
+			"type": "Data",
+			"globs": [
+				"**/*.png"
+			],
+			"fallthrough": false,
+		},
+	],
+	// Build command for vite
+	"build": {
+		"command": "npm run build",
+	},
+	// Container configuration for the Moltbot sandbox
+	"containers": [
+		{
+			"class_name": "Sandbox",
+			"image": "./Dockerfile",
+			"instance_type": "standard-1",
+			"max_instances": 1,
+		},
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "Sandbox",
+				"name": "Sandbox",
+			},
+		],
+	},
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+				"Sandbox"
+			],
+			"tag": "v1",
+		},
+	],
+	// R2 bucket for persistent storage (moltbot data, conversations, etc.)
+	"r2_buckets": [
+		{
+			"binding": "MOLTBOT_BUCKET",
+			"bucket_name": "moltbot-data",
+		},
+	],
+	// Tenant lookup storage
+	"d1_databases": [
+		{
+			"binding": "TENANT_DB",
+			"database_name": "prod-molt-tenant-db",
+			"database_id": "b6a126a4-7e5c-4045-a08f-cf56a3b03b02",
+		},
+	],
+	"kv_namespaces": [
+		{
+			"binding": "TENANT_KV",
+			"id": "f671b9ef2a534befbce262993556ad1c",
+		},
+		{
+			"binding": "prod_molt_session_kv",
+			"id": "f671b9ef2a534befbce262993556ad1c"
+		},
+	],
+	// Cron trigger to sync moltbot data to R2 every 5 minutes
+	"triggers": {
+		"crons": [
+			"*/5 * * * *"
+		],
+	},
+	// Browser Rendering binding for CDP shim
+	"browser": {
+		"binding": "BROWSER",
+	},
+	// Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
+	// Secrets to configure via `wrangler secret put`:
+	//
+	// AI Provider (at least one set required):
+	// - ANTHROPIC_API_KEY: Direct Anthropic API key
+	// - OPENAI_API_KEY: Direct OpenAI API key
+	// - Cloudflare AI Gateway (alternative to direct keys):
+	//   - CLOUDFLARE_AI_GATEWAY_API_KEY: API key for requests through the gateway
+	//   - CF_AI_GATEWAY_ACCOUNT_ID: Your Cloudflare account ID
+	//   - CF_AI_GATEWAY_GATEWAY_ID: Your AI Gateway ID
+	// - Legacy AI Gateway (still supported):
+	//   - AI_GATEWAY_API_KEY: API key
+	//   - AI_GATEWAY_BASE_URL: Gateway endpoint URL
+	//
+	// Authentication:
+	// - MOLTBOT_GATEWAY_TOKEN: Token to protect gateway access
+	// - CF_ACCESS_TEAM_DOMAIN: Cloudflare Access team domain
+	// - CF_ACCESS_AUD: Cloudflare Access application audience
+	//
+	// Chat channels (optional):
+	// - TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN
+	//
+	// Browser automation (optional):
+	// - CDP_SECRET: Shared secret for /cdp endpoint authentication
+	// - WORKER_URL: Public URL of the worker
+	//
+	// R2 persistent storage (optional, for data persistence across sessions):
+	// - R2_ACCESS_KEY_ID: R2 access key ID (from R2 API tokens)
+	// - R2_SECRET_ACCESS_KEY: R2 secret access key (from R2 API tokens)
+	// - CF_ACCOUNT_ID: Your Cloudflare account ID (for R2 endpoint URL)
 }

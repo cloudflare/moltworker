@@ -29,6 +29,8 @@ import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
+import { resolveTenantSlug, generateSandboxId } from './tenant/resolve';
+import { lookupTenantByDomain } from './tenant/lookup';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -114,6 +116,7 @@ function buildSandboxOptions(env: MoltbotEnv): SandboxOptions {
   return { sleepAfter };
 }
 
+
 // Main app
 const app = new Hono<AppEnv>();
 
@@ -132,10 +135,41 @@ app.use('*', async (c, next) => {
   await next();
 });
 
+// Middleware: Resolve tenant context
+app.use('*', async (c, next) => {
+  const request = c.req.raw;
+  const appDomain = c.env.APP_DOMAIN;
+  const tenantSlug = await resolveTenantSlug(request, c.env, appDomain || '', (hostname) =>
+    lookupTenantByDomain(c.env, hostname),
+  );
+
+  if (!tenantSlug) {
+    if (!appDomain) {
+      c.set('tenantSlug', 'default');
+      c.set('sandboxId', 'moltbot');
+      return next();
+    }
+
+    const acceptsHtml = c.req.header('Accept')?.includes('text/html');
+    if (acceptsHtml) {
+      return c.html('Tenant not found', 404);
+    }
+
+    return c.json({ error: 'Tenant not found' }, 404);
+  }
+
+  const sandboxId = await generateSandboxId(tenantSlug);
+  c.set('tenantSlug', tenantSlug);
+  c.set('sandboxId', sandboxId);
+
+  return next();
+});
+
 // Middleware: Initialize sandbox for all requests
 app.use('*', async (c, next) => {
   const options = buildSandboxOptions(c.env);
-  const sandbox = getSandbox(c.env.Sandbox, 'moltbot', options);
+  const sandboxId = c.get('sandboxId') || 'moltbot';
+  const sandbox = getSandbox(c.env.Sandbox, sandboxId, options);
   c.set('sandbox', sandbox);
   await next();
 });
