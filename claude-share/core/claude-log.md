@@ -4,6 +4,30 @@
 
 ---
 
+## Session: 2026-02-11 | /start Redesign + Bot Menu + Skill Prompt (Session: 018gmCDcuBJqs9ffrrDHHBBd)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/extract-task-metadata-8lMCM`
+**Status:** Completed
+
+### Summary
+Redesigned /start landing page with inline keyboard feature buttons, added Telegram bot menu commands, and enhanced R2 skill prompt.
+
+### Changes Made
+1. **/start redesign** — Replaced plain text with inline keyboard: 8 feature buttons (Coding, Research, Images, Tools, Vision, Reasoning, Pick Model, All Commands). Each button sends a detailed guide with examples and model recommendations. Navigation with Back to Menu button.
+2. **Bot menu commands** — Added `setMyCommands` to TelegramBot class. 12 commands registered during `/setup`: start, help, pick, models, new, img, briefing, costs, status, saves, ar, credits.
+3. **Enhanced R2 skill prompt** — Added Storia identity, model recommendation guidance by task type, stronger tool-first behavior, removed filler instructions.
+
+### Files Modified
+- `src/telegram/handler.ts` (sendStartMenu, getStartFeatureText, handleStartCallback, setMyCommands)
+- `src/routes/telegram.ts` (register commands during setup)
+- `claude-share/R2/skills/storia-orchestrator/prompt.md` (enhanced skill prompt)
+
+### Tests
+448 total (all passing). No new TypeScript errors.
+
+---
+
 ## Session: 2026-02-10 | Bug Fixes from Live Testing (Session: 018gmCDcuBJqs9ffrrDHHBBd)
 
 **AI:** Claude Opus 4.6
