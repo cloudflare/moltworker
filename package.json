@@ -12,7 +12,7 @@
     "skclaw": "scripts/skclaw.ts"
   },
   "scripts": {
-    "build": "bunx vite build",
+    "build": "bun scripts/vite-build.ts",
     "deploy": "bun run build && bunx wrangler deploy",
     "skclaw": "bun scripts/skclaw.ts",
     "dev": "bunx vite dev",
@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.0.6",
+    "@playwright/cli": "^0.1.0",
     "hono": "^4.11.9",
     "jose": "^6.1.3",
     "react": "^19.2.4",
