@@ -26,7 +26,7 @@ import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, ensureCronJobs } from './gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, ensureCronJobs, cleanupExitedProcesses } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -111,13 +111,10 @@ const app = new Hono<AppEnv>();
 // MIDDLEWARE: Applied to ALL routes
 // =============================================================================
 
-// Middleware: Log every request
+// Middleware: Log every request (compact)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
-  console.log(`[REQ] ${c.req.method} ${url.pathname}${url.search}`);
-  console.log(`[REQ] Has ANTHROPIC_API_KEY: ${!!c.env.ANTHROPIC_API_KEY}`);
-  console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
-  console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
+  console.log(`[REQ] ${c.req.method} ${url.pathname}`);
   await next();
 });
 
@@ -264,101 +261,73 @@ app.all('*', async (c) => {
 
   // Proxy to Moltbot with WebSocket message interception
   if (isWebSocketRequest) {
-    console.log('[WS] Proxying WebSocket connection to Moltbot');
-    console.log('[WS] URL:', request.url);
-    console.log('[WS] Search params:', url.search);
-    
+    console.log('[WS] Proxying WebSocket connection');
+
     // Get WebSocket connection to the container
     const containerResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
-    console.log('[WS] wsConnect response status:', containerResponse.status);
-    
+
     // Get the container-side WebSocket
     const containerWs = containerResponse.webSocket;
     if (!containerWs) {
-      console.error('[WS] No WebSocket in container response - falling back to direct proxy');
+      console.error('[WS] No WebSocket in container response');
       return containerResponse;
     }
-    
-    console.log('[WS] Got container WebSocket, setting up interception');
-    
+
     // Create a WebSocket pair for the client
     const [clientWs, serverWs] = Object.values(new WebSocketPair());
-    
+
     // Accept both WebSockets
     serverWs.accept();
     containerWs.accept();
     
-    console.log('[WS] Both WebSockets accepted');
-    console.log('[WS] containerWs.readyState:', containerWs.readyState);
-    console.log('[WS] serverWs.readyState:', serverWs.readyState);
-    
     // Relay messages from client to container
     serverWs.addEventListener('message', (event) => {
-      console.log('[WS] Client -> Container:', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)');
       if (containerWs.readyState === WebSocket.OPEN) {
         containerWs.send(event.data);
-      } else {
-        console.log('[WS] Container not open, readyState:', containerWs.readyState);
       }
     });
-    
+
     // Relay messages from container to client, with error transformation
     containerWs.addEventListener('message', (event) => {
-      console.log('[WS] Container -> Client (raw):', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 500) : '(binary)');
       let data = event.data;
-      
-      // Try to intercept and transform error messages
+
+      // Transform error messages for better UX
       if (typeof data === 'string') {
         try {
           const parsed = JSON.parse(data);
-          console.log('[WS] Parsed JSON, has error.message:', !!parsed.error?.message);
           if (parsed.error?.message) {
-            console.log('[WS] Original error.message:', parsed.error.message);
             parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
-            console.log('[WS] Transformed error.message:', parsed.error.message);
             data = JSON.stringify(parsed);
           }
-        } catch (e) {
-          console.log('[WS] Not JSON or parse error:', e);
+        } catch {
+          // Not JSON, pass through
         }
       }
-      
+
       if (serverWs.readyState === WebSocket.OPEN) {
         serverWs.send(data);
-      } else {
-        console.log('[WS] Server not open, readyState:', serverWs.readyState);
       }
     });
     
     // Handle close events
     serverWs.addEventListener('close', (event) => {
-      console.log('[WS] Client closed:', event.code, event.reason);
       containerWs.close(event.code, event.reason);
     });
-    
+
     containerWs.addEventListener('close', (event) => {
-      console.log('[WS] Container closed:', event.code, event.reason);
-      // Transform the close reason (truncate to 123 bytes max for WebSocket spec)
       let reason = transformErrorMessage(event.reason, url.host);
-      if (reason.length > 123) {
-        reason = reason.slice(0, 120) + '...';
-      }
-      console.log('[WS] Transformed close reason:', reason);
+      if (reason.length > 123) reason = reason.slice(0, 120) + '...';
       serverWs.close(event.code, reason);
     });
-    
+
     // Handle errors
-    serverWs.addEventListener('error', (event) => {
-      console.error('[WS] Client error:', event);
+    serverWs.addEventListener('error', () => {
       containerWs.close(1011, 'Client error');
     });
-    
-    containerWs.addEventListener('error', (event) => {
-      console.error('[WS] Container error:', event);
+
+    containerWs.addEventListener('error', () => {
       serverWs.close(1011, 'Container error');
     });
-    
-    console.log('[WS] Returning intercepted WebSocket response');
     return new Response(null, {
       status: 101,
       webSocket: clientWs,
@@ -392,6 +361,12 @@ async function scheduled(
 ): Promise<void> {
   const options = buildSandboxOptions(env);
   const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
+
+  // Clean up zombie processes from previous cron runs
+  const cleaned = await cleanupExitedProcesses(sandbox);
+  if (cleaned > 0) {
+    console.log(`[cron] Cleaned up ${cleaned} exited processes`);
+  }
 
   // Health check: ensure the gateway is running and responding
   console.log('[cron] Running health check...');

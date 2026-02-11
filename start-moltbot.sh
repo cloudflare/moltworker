@@ -118,7 +118,13 @@ else
 fi
 
 # Write config AFTER restore (overwrite any restored config with correct format)
-cat > "$CONFIG_DIR/openclaw.json" << 'EOFCONFIG'
+# Build gateway.remote block only if token is set (enables CLI commands like cron add)
+GATEWAY_REMOTE=""
+if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+  GATEWAY_REMOTE=", \"remote\": { \"token\": \"$CLAWDBOT_GATEWAY_TOKEN\" }"
+fi
+
+cat > "$CONFIG_DIR/openclaw.json" << EOFCONFIG
 {
   "agents": {
     "defaults": {
@@ -127,7 +133,7 @@ cat > "$CONFIG_DIR/openclaw.json" << 'EOFCONFIG'
   },
   "gateway": {
     "port": 18789,
-    "mode": "local"
+    "mode": "local"$GATEWAY_REMOTE
   },
   "channels": {
     "telegram": {
@@ -156,12 +162,16 @@ log_timing "Config file written"
 echo "Config:"
 cat "$CONFIG_DIR/openclaw.json"
 
-# Conditional doctor execution - only run if channel tokens are set
-if [ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$DISCORD_BOT_TOKEN" ] || [ -n "$SLACK_BOT_TOKEN" ]; then
+# Conditional doctor execution - only run once (skip on restart/crash-loop)
+DOCTOR_DONE="$CONFIG_DIR/.doctor-done"
+if [ ! -f "$DOCTOR_DONE" ] && ([ -n "$TELEGRAM_BOT_TOKEN" ] || [ -n "$DISCORD_BOT_TOKEN" ] || [ -n "$SLACK_BOT_TOKEN" ]); then
   echo "Channel tokens detected, running openclaw doctor --fix..."
   log_timing "Doctor started"
   timeout 60 openclaw doctor --fix || true
+  touch "$DOCTOR_DONE"
   log_timing "Doctor completed"
+elif [ -f "$DOCTOR_DONE" ]; then
+  echo "Doctor already completed, skipping"
 else
   echo "No channel tokens set, skipping doctor"
 fi
@@ -222,18 +232,27 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
           node "$CRON_SCRIPT" 2>&1 || echo "[WARN] Cron restore failed"
         fi
 
-        # Register autonomous study cron (every 6 hours) if Serper API is available
+        # Build token flag for CLI commands (gateway requires auth)
+        TOKEN_FLAG=""
+        if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+          TOKEN_FLAG="--token $CLAWDBOT_GATEWAY_TOKEN"
+        fi
+
+        # Register autonomous study cron if Serper API is available
         if [ -n "$SERPER_API_KEY" ] && [ -f "$STUDY_SCRIPT" ]; then
           # Check if auto-study cron already exists
-          if ! openclaw cron list 2>/dev/null | grep -q "auto-study"; then
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "auto-study"; then
             echo "[STUDY] Registering autonomous study cron job..."
             openclaw cron add \
               --name "auto-study" \
-              --every "12h" \
+              --every "24h" \
               --session isolated \
+              --model "anthropic/claude-3-haiku-20240307" \
+              --thinking off \
+              $TOKEN_FLAG \
               --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js — summarize output, save to memory." \
-              2>/dev/null || echo "[WARN] Study cron registration failed"
-            echo "[STUDY] Study cron registered (every 6 hours)"
+              2>&1 || echo "[WARN] Study cron registration failed"
+            echo "[STUDY] Study cron registered (every 24h, haiku-3, thinking off)"
           else
             echo "[STUDY] auto-study cron already exists, skipping"
           fi

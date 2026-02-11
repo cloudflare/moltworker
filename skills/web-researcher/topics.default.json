@@ -3,29 +3,25 @@
     {
       "name": "crypto-market",
       "queries": [
-        "cryptocurrency market news today",
-        "bitcoin ethereum price analysis"
+        "cryptocurrency market news today bitcoin ethereum"
       ]
     },
     {
       "name": "ai-news",
       "queries": [
-        "AI artificial intelligence latest developments",
-        "Claude Anthropic OpenAI updates"
+        "AI artificial intelligence latest news Claude Anthropic OpenAI"
       ]
     },
     {
       "name": "tech-trends",
       "queries": [
-        "technology trends 2026",
-        "software engineering news"
+        "technology software engineering trends 2026"
       ]
     },
     {
       "name": "korea-tech",
       "queries": [
-        "한국 IT 기술 뉴스",
-        "Korea startup tech news"
+        "한국 IT 스타트업 기술 뉴스"
       ]
     }
   ]

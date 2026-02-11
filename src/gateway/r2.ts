@@ -1,23 +1,16 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH, R2_BUCKET_NAME } from '../config';
+import { runCommand } from './utils';
 
 /**
  * Check if R2 is already mounted by looking at the mount table
  */
 async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
   try {
-    const proc = await sandbox.startProcess(`mount | grep "s3fs on ${R2_MOUNT_PATH}"`);
-    // Wait for the command to complete
-    let attempts = 0;
-    while (proc.status === 'running' && attempts < 10) {
-      await new Promise(r => setTimeout(r, 200));
-      attempts++;
-    }
-    const logs = await proc.getLogs();
-    // If stdout has content, the mount exists
-    const mounted = !!(logs.stdout && logs.stdout.includes('s3fs'));
-    console.log('isR2Mounted check:', mounted, 'stdout:', logs.stdout?.slice(0, 100));
+    const result = await runCommand(sandbox, `mount | grep "s3fs on ${R2_MOUNT_PATH}"`, 5000);
+    const mounted = result.stdout.includes('s3fs');
+    console.log('isR2Mounted check:', mounted);
     return mounted;
   } catch (err) {
     console.log('isR2Mounted error:', err);
