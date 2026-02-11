@@ -128,7 +128,12 @@ cat > "$CONFIG_DIR/openclaw.json" << EOFCONFIG
 {
   "agents": {
     "defaults": {
-      "workspace": "/root/clawd"
+      "workspace": "/root/clawd",
+      "contextPruning": { "mode": "cache-ttl", "ttl": "1h" },
+      "compaction": { "mode": "safeguard" },
+      "heartbeat": { "every": "30m" },
+      "maxConcurrent": 4,
+      "subagents": { "maxConcurrent": 4 }
     }
   },
   "gateway": {
@@ -278,7 +283,7 @@ while true; do
   GATEWAY_START=$(date +%s)
   echo "[GATEWAY] Starting openclaw gateway (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
 
-  openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+  openclaw gateway --port 18789 --allow-unconfigured --bind lan
   EXIT_CODE=$?
 
   GATEWAY_END=$(date +%s)
