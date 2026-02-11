@@ -10,6 +10,7 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 - Validate required bindings at boot (R2/KV/D1) and fail fast with clear errors.
 - Enforce AI Gateway-only routing and include routing metadata (tier/platform/workload).
 - Default configuration uses Cloudflare AI Gateway + Workers AI.
+- Intent-based routing is deferred (post Phase 1).
 - Keep admin routes protected with Access and public routes rate-limited.
 
 ## Scope
@@ -20,6 +21,7 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 - Default configuration uses Cloudflare AI Gateway + Workers AI.
 - Routing rubric defaults (tier -> model, fallback model).
 - Minimal D1 schema for tenants and usage tracking.
+- Migrations and indexes for D1 schema.
 
 ## Out of Scope
 
@@ -27,6 +29,7 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 - Full CLI tenant/routing commands beyond thin `skclaw`.
 - Removing legacy AI provider support (Anthropic/OpenAI direct).
 - Advanced analytics or reporting.
+- Intent-based multi-model routing (Phase 1.5+).
 
 ## User Stories
 
@@ -43,9 +46,11 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 - Worker startup validates R2/KV/D1 bindings and returns a clear error when missing.
 - AI Gateway routing includes metadata for tier/platform/workload on every request.
 - Default configuration routes through Cloudflare AI Gateway + Workers AI.
+- Tier routing uses a validated model map with explicit timeouts and fallback behavior.
 - Admin routes are protected by Access; public routes are rate-limited.
 - Smoke test passes: create tenant -> start gateway -> receive model response.
 - Documented configuration defaults exist for tier model mapping.
+- D1 schema is applied via migrations with required indexes.
 
 ## Success Metrics
 
@@ -64,6 +69,7 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 - Unit tests for tenant resolution and sandbox ID derivation.
 - Unit tests for binding validation failure paths.
 - Integration smoke test for gateway routing with metadata.
+- Test vector validating `cf-aig-step` fallback behavior.
 
 ## Notes
 
@@ -72,15 +78,18 @@ Deliver the backend prerequisites for StreamKinetics: tenant-aware sandbox IDs, 
 
 ## Decisions and Clarifications (Phase 1)
 
-- Tenant resolution: derive tenant from request host (primary), with optional header override for internal testing.
-- Sandbox ID format: `sk_{tenant_id}` (lowercase, max 32 chars). If tenant_id exceeds length, use a stable hash suffix.
+- Tenant resolution: use request host as authoritative. In `DEV_MODE`, allow an override header for internal testing only. For custom domains, resolve via registry lookup before tenant fetch.
+- Sandbox ID format: `sk-` + first 16 hex chars of SHA-256 hash of tenant UUID (19 chars total), lowercase and hyphen-safe.
 - D1 schema: `tenants(id, platform, tier, sandbox_id, created_at, updated_at)` and `usage(id, tenant_id, model, tokens_in, tokens_out, latency_ms, created_at)`.
+- D1 indexes: unique index on `tenants.sandbox_id`, composite index on `usage(tenant_id, created_at)`.
+- D1 migrations: required for schema changes; no ad-hoc init scripts.
 - Binding validation: fail fast in prod; in `DEV_MODE`, warn and continue with a clear banner log.
-- Access + rate limiting: Access enforced for admin routes, rate limits applied at Worker routes (WAF optional later).
-- Routing metadata: include `platform`, `tier`, and `workload` keys on every AI Gateway request.
-- Default model map: use charter defaults for free/premium and a fast fallback model.
-- AI Gateway failure mode: fallback on timeout or non-2xx within 10s; propagate error if fallback fails.
-- Usage writes: record `usage` rows for successful AI responses only in Phase 1.
+- Access + rate limiting: hybrid model (WAF as volumetric shield, Worker for business-logic limits). Admin routes require Access plus JWT verification in Worker.
+- Routing metadata: include `platform`, `tier`, and `workload` keys on every AI Gateway request; values are flat strings.
+- Default model map: Free -> `@cf/meta/llama-3.1-8b-instruct-fp8-fast`; Premium/Enterprise -> `@cf/meta/llama-3.3-70b-instruct-fp8-fast` with fallback to Free model.
+- AI Gateway timeouts: Free 8s (retry), Premium 20s (1 retry, then fallback). Trigger fallback on 429/500/503/524.
+- Observability: log `cf-aig-step` to detect fallback usage.
+- Usage writes: record `usage` rows for successful AI responses only; write via `ctx.waitUntil()` with retry on overload.
 - Legacy data: no migration for existing tenants in Phase 1.
 
 ## Feature Definition (Phase 1)

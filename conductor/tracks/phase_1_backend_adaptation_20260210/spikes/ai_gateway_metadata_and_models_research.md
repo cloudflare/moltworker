@@ -1,130 +1,46 @@
-Phase 1 Spike: AI Gateway Metadata and Model Defaults – Engineering Research Report1. Executive Summary and Architectural Imperatives1.1 Strategic Context and Phase 1 ObjectivesThe architectural evolution of the Stream Kinetics Molt project relies heavily on the robust implementation of an inference orchestration layer. Phase 1 represents the foundational step in decoupling client-side application logic from the volatility of underlying Large Language Model (LLM) providers. By interjecting Cloudflare AI Gateway as the control plane, the engineering strategy aims to establish a unified interface for observability, cost control, and dynamic routing. This report serves as the definitive validation document for the "Phase 1 Spike," specifically addressing the configuration of routing metadata, the establishment of tiered model defaults, and the formalization of failure recovery protocols.The immediate objective is to validate the metadata shape, confirm the specific model identifiers for free and premium service tiers, and define a fallback behavior that ensures system resilience under load. This analysis moves beyond theoretical architecture into implementation specifics, providing the external research and engineering teams with a validated "contract" for development. The decisions outlined herein are derived from a rigorous analysis of Cloudflare’s current documentation, API behavior, and best practices for serverless inference orchestration.1.2 Architectural Constraints and ScopeThe scope of this validation is tightly bounded by the capabilities of Cloudflare AI Gateway and the Workers AI inference engine. While future phases may introduce multi-cloud routing (e.g., splitting traffic between AWS Bedrock and Azure OpenAI), Phase 1 is restricted to the Cloudflare ecosystem. This constraint simplifies the authentication and networking topology but places a higher burden on the internal routing logic of the AI Gateway to handle traffic differentiation effectively.A critical constraint identified during this research is the distinction between "Service Down" and "Service Degraded" states in serverless GPU environments. Unlike persistent server infrastructure, the Workers AI platform relies on on-demand loading of model weights into Video RAM (VRAM). This introduces variable latency ("cold starts") that must be distinguished from genuine timeout errors. The fallback policy, therefore, is not merely a mechanism for error handling but a load-balancing strategy that shifts traffic from heavy, slower-loading models (Premium) to lighter, always-available models (Free) during periods of high contention.1.3 Summary of Validated ConfigurationsThe research confirms that the proposed metadata keys—platform, tier, and workload—are viable within the strict limitations of the cf-aig-metadata header, provided specific serialization protocols are followed. The model mapping strategy has been finalized to utilize the fp8-fast quantized variants of the Llama 3 series, balancing the reasoning capabilities required for premium users with the latency requirements of interactive applications. Furthermore, the timeout policy originally assumed (10 seconds) has been deemed insufficient for large-parameter models in a serverless context, necessitating a revised, bifurcated timeout strategy detailed in Section 6.2. The Metadata Contract: Ontology and Implementation2.1 Theoretical Framework: Metadata-Driven RoutingIn modern distributed systems, metadata acts as the context carrier that allows stateless intermediaries to make intelligent routing decisions. For the Stream Kinetics Molt project, the metadata is not merely for logging; it is the control signal that determines the quality of service (QoS) a user receives. The requirement to validate metadata keys is, therefore, a requirement to define the "Language of Routing" for the entire platform.Cloudflare AI Gateway enables this through the cf-aig-metadata header. This feature allows the injection of arbitrary key-value pairs into the request stream. However, unlike a generic NoSQL store, this metadata layer has strict operational constraints designed to maintain low operational overhead at the edge. The engineering team must treat the metadata payload as a fixed-schema contract rather than a flexible document store.2.2 Validation of Metadata KeysThe user query proposed three specific keys: platform, tier, and workload. This research validates these keys as semantically sufficient and technically compliant, provided they adhere to the specific limitations of the gateway.2.2.1 Key 1: platformThe platform key serves as the primary differentiator for client origin. In a multi-interface application ecosystem, understanding the origin is critical not just for analytics, but for potential future rate-limiting policies (e.g., allowing higher burst limits for internal CLI tools vs. public web clients).Data Type: String.Validated Value Set: web, mobile_ios, mobile_android, cli, partner_api.Routing Implication: Currently passive. In Phase 1, this key is used primarily for cost attribution logs (e.g., "How much did the iOS launch cost us in inference tokens?"). It does not drive the model selection logic in the initial rollout but must be present to support Phase 2 cost-per-platform analysis.2.2.2 Key 2: tierThe tier key is the active driver of the routing logic. This is the single most critical piece of metadata in the Phase 1 architecture. It maps directly to the user's subscription status and determines whether the request is routed to a high-fidelity reasoning model or a high-efficiency basic model.Data Type: String.Validated Value Set: free, premium, enterprise.Routing Implication: Active. The Dynamic Routing rules engine (discussed in Section 5) will inspect this specific key to bifurcate the request flow. A missing or malformed tier key must default to free to prevent unauthorized access to premium compute resources.2.2.3 Key 3: workloadThe workload key describes the intent of the request. While Phase 1 treats most requests as generic instruction-following tasks, tagging requests with intent allows for future optimization. For example, a code_generation workload might eventually be routed to a specialized coding model (like DeepSeek Coder or a fine-tuned Llama variant), while summarization remains on a generalist model.Data Type: String.Validated Value Set: chat, code_generation, summarization, analysis, rag_query.Routing Implication: Passive (Phase 1). This prepares the data lake for tuning the routing rules. If analysis shows that summarization tasks on the Premium model are consistently hitting timeout thresholds, the engineering team can create a specific rule for that workload without requiring client-side code changes.2.3 Technical Constraints and Schema ValidationThe implementation of these keys is bound by the specific limitations of the Cloudflare AI Gateway infrastructure.2.3.1 The Five-Key LimitCloudflare explicitly limits custom metadata to five entries per request. If more than five entries are provided, the additional entries are ignored/dropped. This is a hard constraint.Current Usage: 3 keys (platform, tier, workload).Remaining Capacity: 2 keys.Implication: We have a safety margin of two keys. Engineering must rigorously police the addition of new metadata fields. Transient identifiers like session_id or trace_id should effectively utilize standard headers or be carefully considered before consuming one of the two remaining metadata slots. It is recommended to reserve one slot for experiment_id to support A/B testing of prompts or models in the future.2.3.2 Data Type StrictnessMetadata values must be strings, numbers, or booleans. Nested objects are not supported. This requires a flat structure. The application cannot send a user object with properties; it must send flattened keys if user details were required (which they are not, per the non-PII scope).Invalid Structure:JSON{
-  "tier": {
-    "level": "premium",
-    "status": "active"
-  }
-}
-Valid Structure:JSON{
-  "tier": "premium",
-  "tier_status": "active"
-}
-2.3.3 Header Serialization ProtocolThe metadata is transmitted via the HTTP header cf-aig-metadata. The value must be a correctly escaped JSON string. Incorrect escaping is a common failure mode in HTTP integration.Correct cURL Formatting:Bash--header 'cf-aig-metadata: {"platform":"web","tier":"premium","workload":"chat"}'
-Correct TypeScript/Fetch Formatting:When using fetch in a browser or Node.js environment, the object must be stringified:TypeScriptheaders: {
-  "cf-aig-metadata": JSON.stringify({
-    platform: "web",
-    tier: user.subscription_tier, // variable injection
-    workload: "chat"
-  })
-}
-2.4 Metadata Security and SanitationWhile the current keys do not inherently contain Personally Identifiable Information (PII), the mechanism allows for arbitrary string injection. To prevent log pollution and potential injection attacks in the analytics dashboard:Length Limits: Enforce a strict character limit (e.g., 64 characters) on all metadata values at the client level before transmission.Allowed Characters: Restrict values to alphanumeric characters and underscores ([a-zA-Z0-9_]). This prevents the injection of control characters that might disrupt log parsing.PII Exclusion: Explicitly forbid the mapping of email addresses or raw user names into the tier or workload fields. If user tracking is needed, utilize a hashed User ID in a separate user_hash field, consuming the fourth available metadata slot.3. Tiered Model Strategy: Defaults and Fallbacks3.1 The Architecture of TieringThe core requirement of Phase 1 is to differentiate the user experience based on the tier metadata. This is not merely a business logic decision but a resource management strategy. Premium models consume significantly more VRAM and compute units ("Neurons" in Cloudflare parlance), costing roughly 6-7 times more per token than standard models. Therefore, the default map must be rigorous, ensuring that Free users never accidentally route to Premium models, while Premium users receive the capabilities they pay for.3.2 Evaluation of the Model LandscapeThe research focused on the Llama 3 series available via Workers AI. The decision to standardize on Llama (Meta) models over Mistral or Qwen for Phase 1 is driven by the consistent behavior, broad tooling support, and the predictable upgrade path provided by the Llama ecosystem.3.2.1 The "Fast" Variant (FP8 Quantization)A critical technical detail found during the research is the availability of fp8-fast variants for the Llama models. FP8 (Floating Point 8-bit) quantization reduces the precision of the model weights from 16-bit to 8-bit.Impact on Quality: Research suggests negligible degradation in reasoning capability for most instruction-following tasks.Impact on Performance: Significant reduction in memory bandwidth usage. This directly translates to lower latency (Time to First Token) and higher throughput.Decision: All Phase 1 models will utilize the fp8-fast variants where available to maximize responsiveness and minimize timeout risks.3.3 The Free Tier: Efficiency at ScaleSelected Model: @cf/meta/llama-3.1-8b-instruct-fp8-fastThe Llama 3.1 8B model represents the current state-of-the-art for "small" models. It is capable of handling complex instruction following, summarization, and basic logic tasks.Cost Profile: Extremely low (approx. $0.045 per 1M input neurons). This supports the "Free" business model by minimizing the cost of goods sold (COGS).Latency: Fast cold starts. Because the model is small (~8GB VRAM), it can be loaded quickly onto available GPUs across the Cloudflare network, reducing the "pending" time that leads to timeouts.Context Window: Supports up to 128k context , though the application may choose to limit this artificially to prevent abuse.3.4 The Premium Tier: High-Fidelity ReasoningSelected Model: @cf/meta/llama-3.3-70b-instruct-fp8-fastThe Llama 3.3 70B model serves as the flagship offering. The "70B" parameter count places it in a different capability class, suitable for nuanced creative writing, complex reasoning, and analyzing large documents.Why Llama 3.3 over 3.1 70B? Llama 3.3 is a refined version of the 70B architecture, offering improved instruction following and effectively replacing the 3.1 70B in recommended deployments.The Latency Trade-off: Loading a 70B parameter model requires significantly more VRAM (approx. 40-70GB depending on quantization). This increases the probability of cold starts and dictates the need for the extended timeout policies discussed in Section 6.3.5 The Fallback StrategyThe "Fallback" is the safety net. If the primary model fails, the system must degrade gracefully rather than failing hard.Scenario: A Premium user requests the 70B model. The Cloudflare Workers AI region hosting the request is at capacity or the model fails to load within the timeout window.Response: The Gateway automatically re-routes the same request payload to the Free model (8B).Implication: The user gets a response. It may be less nuanced, but the service appears "up." The response headers will indicate this degradation (see Section 6.4), allowing the UI to render a "Low Precision Mode" badge if desired.3.6 The Validated Model Map MatrixThe following table constitutes the finalized configuration map for Phase 1.TierPrimary Model IDFallback Model IDNotesFree@cf/meta/llama-3.1-8b-instruct-fp8-fastNone (Retry Only)Free users do not fallback to different models; they simply retry the same model.Premium@cf/meta/llama-3.3-70b-instruct-fp8-fast@cf/meta/llama-3.1-8b-instruct-fp8-fastPremium users cascade to the lighter model on failure.Enterprise@cf/meta/llama-3.3-70b-instruct-fp8-fast@cf/meta/llama-3.1-8b-instruct-fp8-fast(Placeholder) Initially maps to Premium behavior.4. Routing Architecture and Configuration4.1 From Client-Side to Gateway-Side LogicHistorically, routing logic often lived in the client ("If user is premium, call API endpoint A"). Phase 1 explicitly rejects this pattern in favor of Dynamic Routing. The client sends a generic request to the Universal Endpoint, and the Gateway inspects the metadata to make the routing decision. This encapsulates the complexity; if we decide to switch the Premium model from Llama 3.3 to GPT-4o in the future, we update the Gateway rule, not the iOS app.4.2 The Universal Endpoint MechanismThe Universal Endpoint (https://gateway.ai.cloudflare.com/v1/{account}/{gateway}) acts as a funnel. It accepts a JSON payload that can specify a provider, but with Dynamic Routing enabled, the specific provider requested in the payload can be overridden by the rules engine.However, strictly speaking, the Universal Endpoint payload usually looks like an array of fallback steps.JSON[
-  { "provider": "workers-ai", "endpoint": "@cf/meta/llama-3.3..." },
-  { "provider": "workers-ai", "endpoint": "@cf/meta/llama-3.1..." }
-]
-In our Phase 1 architecture, we are abstracting even this. The client will target a "virtual" endpoint or a generic route, and the Dynamic Routing configuration (JSON-based rules) will rewrite the destination.4.3 Dynamic Routing Configuration SchemaThe Cloudflare AI Gateway allows for routing rules defined in JSON. This system uses a flow-based logic (Start -> Condition -> Model). The research confirms that the conditional logic supports MongoDB-style operators like $eq (equals) to evaluate metadata.Below is the validated JSON configuration schema required to implement the model map defined in Section 3.6. This configuration is deployed via the Cloudflare API or Dashboard.Configuration Object:JSON{
-  "routes": [
-    {
-      "id": "tier-based-routing",
-      "type": "conditional",
-      "properties": {
-        "condition": {
-          "metadata.tier": { "$eq": "premium" }
-        }
-      },
-      "outputs": {
-        "true": {
-          "elementId": "node-premium-model"
-        },
-        "false": {
-          "elementId": "node-free-model"
-        }
-      }
-    }
-  ],
-  "elements": [
-    {
-      "id": "node-premium-model",
-      "type": "model",
-      "properties": {
-        "provider": "workers-ai",
-        "model": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-        "timeout": 20000,
-        "retries": 1
-      },
-      "outputs": {
-        "fallback": { "elementId": "node-fallback-8b" }
-      }
-    },
-    {
-      "id": "node-fallback-8b",
-      "type": "model",
-      "properties": {
-        "provider": "workers-ai",
-        "model": "@cf/meta/llama-3.1-8b-instruct-fp8-fast",
-        "timeout": 10000,
-        "retries": 2
-      }
-    },
-    {
-      "id": "node-free-model",
-      "type": "model",
-      "properties": {
-        "provider": "workers-ai",
-        "model": "@cf/meta/llama-3.1-8b-instruct-fp8-fast",
-        "timeout": 8000,
-        "retries": 2
-      }
-    }
-  ]
-}
-4.4 Logic Flow AnalysisEntry Point: The request arrives with cf-aig-metadata.Conditional Check: The router evaluates metadata.tier == 'premium'.True Path (Premium):The request is directed to node-premium-model (Llama 3.3 70B).Timeout: Set to 20,000ms (20s). This is a critical deviation from the user's initial 10s assumption (see Section 6).Failure: If this node fails (timeout or error), it traverses the fallback output to node-fallback-8b.False Path (Free):The request is directed to node-free-model (Llama 3.1 8B).Timeout: Set to 8,000ms (8s). Since this is a smaller model, we expect faster response times. A delay >8s likely indicates a node failure, so we fail fast and retry.Failure: There is no fallback output defined for the free node (beyond internal retries), meaning it will return an error to the user if all retries fail. This preserves the cost structure.5. Resilience Engineering: Timeouts and Error Handling5.1 The Physics of Serverless Inference TimeoutsThe user's initial assumption was: "Fallback triggers on timeout or non-2xx within 10 seconds."This research phase categorizes this assumption as Risk Level: High for the Premium tier.In a serverless GPU environment (Workers AI), the "Time to Response" is composed of:$$T_{total} = T_{network} + T_{schedule} + T_{load} + T_{inference}$$$T_{schedule}$: Time waiting for a GPU slot.$T_{load}$: Time to load model weights into VRAM (Cold Start). For a 70B model, this is significant (multiple seconds).$T_{inference}$: The actual generation of tokens.If we set a strict 10-second timeout, we risk aborting requests that are simply in the $T_{load}$ phase. The model loads, starts generating at 10.1 seconds, but the gateway has already killed the connection. This wastes compute resources and frustrates the user.5.2 Validated Timeout PolicyWe propose a Bifurcated Timeout Strategy:TierModel SizeRecommended TimeoutRationaleFree8 Billion8,000 ms (8s)Small models load fast. If it takes >8s, the node is likely unhealthy. Fail fast and retry elsewhere.Premium70 Billion20,000 ms (20s)Large models have high variance in load times. A 20s window absorbs cold start latency without being excessively long for the user.5.3 Retry Logic: The "Hiccup" DefenseBefore triggering a fallback (which changes the model and potentially the quality of the answer), the system should attempt to retry the same model configuration. Transient network errors or brief scheduler contention can often be resolved by a simple retry.Configuration:Header: cf-aig-max-attempts.Value: 3 (1 initial attempt + 2 retries).Backoff: exponential.Why Exponential? If a specific GPU node is overwhelmed, hitting it immediately with a linear retry exacerbates the load. Exponential backoff (e.g., wait 200ms, then 400ms) allows the node to recover or the load balancer to shift the request.5.4 Fallback MechanicsWhen the timeout threshold is breached after retries are exhausted, the Gateway triggers the Fallback defined in the JSON route (Section 4.3).What constitutes a "Failure"?HTTP 5xx: Internal Server Error, Bad Gateway, Service Unavailable.HTTP 524: A Cloudflare-specific timeout (Origin Time-out). This is the most common error when models take too long.HTTP 429: Rate Limit Exceeded. If the Premium tier is rate-limited (quota exceeded), the fallback mechanism ensures the request is still served by the Free tier, effectively acting as a "soft cap" rather than a hard block.6. Implementation Specifications6.1 Authentication and HeadersAll requests to the AI Gateway must be authenticated. Phase 1 assumes the use of a Cloudflare API Token with permissions AI Gateway: Read/Edit.Required Headers:Authorization: Bearer {CLOUDFLARE_API_TOKEN}Content-Type: application/jsoncf-aig-metadata: {"tier":"premium",...} (The routing signal)cf-aig-request-timeout: (Optional override, but recommended to be set via Gateway Config as shown in Section 4.3).Note on BYOK (Bring Your Own Key):While Workers AI is the backend, if Phase 2 introduces OpenAI or Anthropic, the Gateway handles the API keys stored securely in Cloudflare. The client never sends provider keys. This validates the "Background" requirement of abstracting the provider.6.2 Observability: The cf-aig-step HeaderTo support the "Testable" requirement of the charter, the engineering team needs to know when a fallback has occurred. The Gateway injects a response header: cf-aig-step.cf-aig-step: 0: The request was served by the primary model (Premium/70B).cf-aig-step: 1: The primary model failed, and the request was served by the first fallback (Free/8B).cf-aig-step: 2: (If configured) Secondary fallback used.Implementation Action: The client-side application (or the testing suite) must log this header. If cf-aig-step > 0 is observed frequently, it indicates instability in the Premium tier configuration, triggering an alert for DevOps.6.3 Code Implementation ExamplesTwo primary integration paths exist: Direct HTTP (cURL/REST) and Cloudflare Workers Bindings.6.3.1 Vector 1: cURL / REST APIThis is the "Minimal Test Vector" requested.Test Case: Premium Request with Fallback VerificationTo verify the fallback logic, we can intentionally set an impossibly short timeout (10ms) while requesting the Premium tier.Bashcurl "https://gateway.ai.cloudflare.com/v1/{ACCOUNT_ID}/{GATEWAY_ID}/workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast" \
-  --header 'Authorization: Bearer {API_TOKEN}' \
-  --header 'Content-Type: application/json' \
-  --header 'cf-aig-metadata: {"platform":"cli", "tier":"premium", "workload":"test"}' \
-  --header 'cf-aig-request-timeout: 10' \
-  --data '{
-    "messages":
-  }' -v
-Expected Behavior: The response body contains valid JSON (from the 8B model), and the response headers show cf-aig-step: 1.6.3.2 Vector 2: Cloudflare Workers Binding (TypeScript)For internal services calling the Gateway, wrangler.toml bindings are preferred over raw fetch calls.TypeScript// wrangler.toml
-// [ai]
-// binding = "AI"
+# Phase 1 Spike: AI Gateway Metadata and Model Defaults - Research Summary
 
-// worker.ts
-export default {
-  async fetch(request: Request, env: Env) {
-    // 1. Extract context
-    const tier = request.headers.get("x-user-tier") |
+## 1. Executive Summary
 
-| "free";
+Phase 1 uses Cloudflare AI Gateway + Workers AI as the sole inference control plane. Requests include metadata for tier-based routing and observability. The default model map uses Llama fp8-fast variants, with a premium-to-free fallback policy and explicit timeouts.
 
-    // 2. Construct Metadata
-    const metadata = {
-      platform: "web",
-      tier: tier,
-      workload: "chat"
-    };
+## 2. Metadata Contract
 
-    // 3. Call AI Gateway via Binding
-    // Note: Bindings handle auth automatically [11]
-    try {
-      const response = await env.AI.run(
-        "@cf/meta/llama-3.3-70b-instruct-fp8-fast", // Default target, Gateway router will override if needed
-        {
-          messages: [{ role: "user", content: "Hello world" }]
-        },
-        {
-          gateway: {
-            id: "my-gateway-id",
-            skipCache: false,
-            cacheTtl: 3360,
-            metadata: metadata // Metadata injected here
-          }
-        }
-      );
-      return new Response(JSON.stringify(response));
-    } catch (e) {
-      // 4. Client-side error handling (Last resort)
-      return new Response(JSON.stringify({ error: e.message }), { status: 500 });
-    }
-  }
-}
-7. Operational Analysis and Edge Cases7.1 Rate Limiting and Quota ManagementWhile Phase 1 focuses on routing, Rate Limiting is intrinsically linked to fallback. Cloudflare Workers AI imposes limits (e.g., 300 requests/minute for text generation).Premium Quota: The architecture allows us to define the Premium model as the primary. If the 300 RPM limit is hit, the Gateway receives a 429 Too Many Requests.Fallback Behavior: The fallback configuration (Section 4.3) treats 429 as a trigger. Therefore, if the Premium tier is exhausted, the system effectively "spills over" traffic to the Free tier (which has its own separate limits). This provides a self-healing mechanism during traffic spikes.7.2 Caching ConsiderationsThe cf-aig-metadata header is not part of the cache key by default unless configured.Risk: A Premium user asks "What is the capital of France?" and the response is cached. A Free user asks the same. The Free user might receive the cached Premium response (good for them, bad for business logic consistency) or vice versa.Mitigation: Phase 1 accepts this risk as "Cache Efficiency." However, if strict separation is required, the cf-aig-cache-key header must be used to include ${tier} in the cache key generation.7.3 Data Privacy and LoggingAll metadata sent is logged by Cloudflare.Constraint: Do not send PII in platform or workload.Retention: Logs are retained according to the Cloudflare plan limits.Patching: If a log entry needs to be corrected (e.g., retroactively tagging a session with a user feedback score), the patchLog API can be used, referencing the cf-aig-log-id returned in the response headers.8. Conclusion and Final Recommendations8.1 Summary of FindingsThe Phase 1 Spike has successfully validated the core assumptions of the Stream Kinetics Molt project while identifying critical adjustments required for production stability.Metadata: The keys platform, tier, and workload are valid and supported.Models: The transition to fp8-fast variants of Llama 3.1 (8B) and Llama 3.3 (70B) is confirmed as the optimal balance of cost and performance.Timeout: The initial 10-second timeout assumption was rejected for the Premium tier. A 20-second timeout is necessary to accommodate serverless cold starts.8.2 Action Plan for EngineeringImmediate: Configure the AI Gateway Dynamic Routing rules using the JSON schema provided in Section 4.3.Immediate: Update the application client to serialize metadata correctly (JSON stringification) and inject it into the cf-aig-metadata header.Testing: Implement the cURL test vectors (Section 6.3) in the CI/CD pipeline to verify fallback behavior on every deployment.Monitoring: Set up a dashboard alert for cf-aig-step > 0 to track the frequency of Premium-to-Free downgrades.8.3 Final deliverables checklist[x] Metadata Contract (Section 2).[x] Default Model Map (Section 3).[x] Timeout and Error Policy (Section 5 & 6).[x] Minimal Test Vector (Section 6.3).This report concludes the research phase for the Phase 1 routing logic. The specifications contained herein are ready for immediate implementation.9. Appendices9.1 Appendix A: Model Comparison MatrixFeatureLlama 3.1 8B (Free)Llama 3.3 70B (Premium)Architectural ImpactParameter Count8 Billion70 Billion70B requires significantly larger VRAM allocation, increasing probability of cold starts.QuantizationFP8 (Fast)FP8 (Fast)Both models use Cloudflare's optimized inference engine.Reasoning ScoreModerateHigh (SOTA)Premium users paying for "reasoning" capability justify the higher latency/cost.Cost (Neurons)~4k / 1M tokens~26k / 1M tokens~6.5x cost differential necessitates strict routing rules.Recommended Timeout8 Seconds20 SecondsDivergent timeout policies required in Gateway config.9.2 Appendix B: Error Code ReferenceStatus CodeMeaningGateway Behavior (Dynamic Route)Recommended Action200 OKSuccessPass throughNone.429 Too Many RequestsRate Limit / QuotaTrigger FallbackDegrade to 8B model.524 Origin TimeoutCloudflare TimeoutTrigger FallbackDegrade to 8B model.500 Internal ErrorWorkers AI FailureTrigger FallbackDegrade to 8B model.503 Service UnavailableCapacity/MaintenanceTrigger FallbackDegrade to 8B model.9.3 Appendix C: Future Proofing (Phase 2 Considerations)Multi-Provider: The current Universal Endpoint configuration allows adding openai or anthropic providers to the JSON array later without changing the client metadata structure.Cost Control: The tier metadata can later be used to enforce hard budget limits (e.g., "Free users capped at $5/month") using the Gateway's Budgeting feature, which inspects the same metadata keys validated in this report.
+### 2.1 Keys (Phase 1)
+
+- `platform`: client origin (web, cli, partner_api).
+- `tier`: free, premium, enterprise (enterprise maps to premium).
+- `workload`: chat, summarization, analysis (passive in Phase 1).
+
+### 2.2 Constraints
+
+- Flat key/value pairs only; no nested objects.
+- String values preferred.
+- Hard limit on total keys (keep below 5).
+- Avoid PII in metadata.
+
+## 3. Model Map (Phase 1)
+
+- Free: `@cf/meta/llama-3.1-8b-instruct-fp8-fast` (primary only).
+- Premium/Enterprise: `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (fallback to free).
+
+## 4. Timeouts and Fallback
+
+- Free: 8s timeout, retry only.
+- Premium: 20s timeout, 1 retry, then fallback to free.
+- Fallback triggers on 429, 500, 503, 524.
+
+## 5. Observability
+
+- Log `cf-aig-step` to detect fallback usage.
+- Optional: Logpush to R2 for long-term telemetry.
+
+## 6. Minimal Test Vector
+
+- Send a premium request with a forced timeout.
+- Expect a fallback response and `cf-aig-step: 1`.
+
+## 7. Open Questions
+
+- Should Logpush be enabled in Phase 1 or Phase 2?
+- Should `intent` be added later as a metadata key?

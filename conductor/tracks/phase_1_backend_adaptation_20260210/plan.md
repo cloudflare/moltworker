@@ -1,10 +1,6 @@
-#+#+#+#+
 # Track Plan: Phase 1 Backend Adaptation
 
 ## Status
-
-- State: Planning
-- Owner: Engineering
 - Dependencies: None
 
 ## Objectives
@@ -12,6 +8,7 @@
 - Ship tenant-aware sandbox mapping with deterministic sandbox IDs.
 - Enforce binding validation for R2/KV/D1 (fail fast in prod).
 - Default all model routing through Cloudflare AI Gateway + Workers AI.
+- Defer intent-based routing until after Phase 1 stability.
 - Protect admin routes with Access and rate-limit public routes.
 
 ## Milestones
@@ -28,7 +25,8 @@
 ### A) Tenant Mapping + Sandbox ID
 
 - Define tenant resolution contract (host + optional override header).
-- Implement D1 tenant lookup and sandbox ID derivation.
+- Implement tenant registry lookup for custom domains.
+- Implement D1 tenant lookup and sandbox ID derivation (SHA-256 truncated hash).
 - Add unit tests for mapping and ID format.
 
 ### B) Binding Validation
@@ -41,19 +39,22 @@
 
 - Inject routing metadata (platform, tier, workload) in all AI requests.
 - Set default model map for tiers and fallback model.
-- Implement timeout/fallback behavior.
-- Add tests for metadata and fallback path.
+- Implement timeout/retry/fallback behavior (8s free, 20s premium).
+- Log `cf-aig-step` to detect fallback usage.
+- Add tests for metadata and fallback path (include fallback test vector).
 
 ### D) Access + Rate Limits
 
 - Enforce Access on admin routes.
-- Apply public route rate limiting in Worker.
+- Apply public route rate limiting in Worker with WAF as volumetric shield.
+- Add JWT verification in Worker for admin routes (double-lock).
 - Add tests for Access requirement and rate limit responses.
 
 ### E) D1 Usage Writes
 
 - Write usage rows for successful AI responses.
-- Confirm schema matches spec.
+- Apply D1 migrations and required indexes.
+- Use `ctx.waitUntil()` for async writes with retry on overload.
 
 ### F) Smoke Test
 
@@ -77,6 +78,7 @@ If any topic is unconfirmed, use the following spike docs:
 - spikes/ai_gateway_metadata_and_models.md
 - spikes/access_and_rate_limits.md
 - spikes/d1_schema_and_usage_writes.md
+- Research results available in *_research.md files.
 
 ## Definition of Done
 

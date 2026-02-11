@@ -1,4 +1,95 @@
-Phase 1 Backend Adaptation: Tenant Resolution and Sandbox ID Specification1. Executive SummaryThis report serves as the definitive technical specification for the Tenant Resolution and Sandbox Identity mechanisms within the StreamKinetics Moltworker architecture. As the platform prepares for Phase 1 backend readiness, the transition from a monolithic proof-of-concept to a scalable, multi-tenant SaaS infrastructure requires a rigorous definition of how incoming HTTP requests are mapped to isolated backend resources.The core objective of this research spike was to resolve ambiguities regarding the authoritative tenant signal and to define a Sandbox ID format that satisfies the intersection of constraints imposed by Cloudflare Workers, D1 Databases, R2 Storage, KV Namespaces, and AI Gateway.Key Decisions & Findings:Authoritative Signal: The Host Header (derived from the request URL) is the only authoritative signal for tenant identification in production environments. This leverages Cloudflare’s "SSL for SaaS" infrastructure to ensure that only validated, provisioned hostnames can trigger tenant logic.Development Overrides: The use of X-Tenant-Override headers is strictly prohibited in production due to severe risks of cache poisoning and authorization bypass. Such overrides are permitted only in environments explicitly flagged as DEV_MODE.Sandbox ID Format: To accommodate the strictly conflicting constraints of downstream services—most notably the 32-character recommended limit for D1 databases and the strict lowercase/hyphen-only requirement of R2—the platform will adopt a Stable Short Hash (SSH) format: sk-[hash].Derivation Logic: The Sandbox ID will be derived by computing a SHA-256 hash of the authoritative Tenant ID, truncated to the first 16 hexadecimal characters, and prefixed with sk-. This results in a 19-character identifier (e.g., sk-a1b2c3d4e5f67890) that is deterministic, collision-resistant (64-bit entropy), and compliant with all platform limits.This document details the architectural reasoning, security threat models, platform constraint analysis, and implementation logic required to operationalize these decisions. It is intended for the engineering team responsible for the Phase 1 backend adaptation of the OpenClaw integration.2. Architectural Context and Problem Definition2.1 The Moltworker StackStreamKinetics Moltworker represents a cutting-edge integration of the OpenClaw AI agent framework within a serverless edge environment. Unlike traditional containerized deployments, Moltworker leverages the Cloudflare Stack—specifically Workers, Durable Objects, and the Sandbox SDK—to provide ephemeral, secure execution environments for AI agents.In this architecture, "Tenancy" is not merely a logical separation of rows in a database; it is a physical and operational isolation boundary. Each tenant (user or organization) requires:Isolated Storage: A dedicated D1 database or distinct shard for structured data.Object Storage: A dedicated path or bucket in R2 for unstructured artifacts (logs, generated files).Compute Isolation: A specific configuration passed to the Cloudflare Sandbox to ensure the AI agent operates within defined resource quotas.Observability: Distinct logging and cost-tracking via Cloudflare AI Gateway.2.2 The Tenant Resolution ChallengeThe entry point for any interaction with Moltworker is the HTTP request. Before any backend logic can execute, the system must answer the fundamental question: "Who is calling?"In a single-tenant environment, this is trivial. In a multi-tenant SaaS running at the edge, this becomes complex due to:Edge Termination: Requests are terminated at hundreds of global data centers. The resolution logic must be replicated and consistent globally.Spoofing Risks: Malicious actors may manipulate HTTP headers to access another tenant's isolated environment.Development Velocity: Developers need ways to simulate different tenants without modifying global DNS records.2.3 The Sandbox Identity ChallengeOnce a tenant is identified (e.g., Tenant: Acme Corp), the system must provision or access resources. While "Acme Corp" is a human-readable identifier, it is unsuitable for technical resource naming due to variable lengths, special characters, and potential mutability (rebranding).The system requires a Sandbox ID: a technical, immutable, and strictly formatted identifier used to name the underlying infrastructure resources. The challenge lies in the Constraint Intersection:D1 prefers short names (<32 chars) for tooling stability.R2 demands strict lowercase and no underscores.AI Gateway allows longer names but has its own character set limits.Internal UUIDs (36 chars) are often too long or contain restricted characters when combined with prefixes.The Sandbox ID must be the "lowest common denominator" that works safely across all these services without requiring complex mapping tables or stateful lookups.3. Tenant Resolution StrategyThe security of a multi-tenant system is predicated on the reliability of the tenant resolution mechanism. If an attacker can trick the system into resolving their request to a victim's tenant ID, the isolation guarantees of the entire stack are compromised.3.1 Analysis of Potential SignalsWe evaluated four potential signals for identifying a tenant from an incoming HTTP request:SignalMechanismProsConsPath Prefixdomain.com/tenant-a/apiEasy to implement; works on single domain.Breaks standard REST patterns; difficult to isolate at DNS/TLS level; prevents "white-labeling" (custom domains).JWT / TokenAuthorization: Bearer <token>Secure; carries cryptographic proof.Requires parsing body/header before routing; creates "chicken-and-egg" problem for unauthenticated public endpoints (e.g., login pages, public assets).Custom HeaderX-Tenant-ID: tenant-aSimple for internal testing.Extremely insecure in public facing apps; highly susceptible to spoofing; requires trust in the client.Host Headertenant-a.app.comStandard for SaaS; relies on DNS; supports custom domains (app.acme.com).Requires DNS propagation; harder to simulate locally without /etc/hosts hacking.3.2 The Authoritative Signal: Host HeaderBased on the analysis of Cloudflare's architecture and industry best practices for SaaS, the Host Header is selected as the definitive, authoritative signal for tenant resolution in production.3.2.1 Mechanism of TrustIn the Cloudflare Workers environment, the request.url (and derived hostname) is trustworthy because:TLS Termination: Cloudflare handles the TLS handshake. For a request to reach the Worker with a specific hostname (e.g., app.acme.com), Cloudflare must hold a valid SSL certificate for that domain.Domain Control Validation: Cloudflare for SaaS requires active Domain Control Validation (DCV) before issuing certificates for custom hostnames. This ensures that the entity pointing the DNS record actually controls the domain.Routing Integrity: The Worker is bound to specific routes or zones. A request cannot "accidentally" hit the Worker with a hostname that hasn't been explicitly configured in the Cloudflare Dashboard or via the API.3.2.2 Handling Punycode and International DomainsModern SaaS applications must support international customers who may use non-ASCII domains (e.g., münchen.de).Observation: Browsers and HTTP clients transmit these domains in their Punycode format (e.g., xn--mnchen-3ya.de) in the Host header to ensure ASCII compatibility.Requirement: The Moltworker resolution logic must treat the Punycode version as the canonical key for lookup.Implementation: The standard new URL(request.url).hostname JavaScript API in the Workers runtime automatically handles normalization. The Tenant Registry (KV/D1) must store the Punycode version of the domain to ensure O(1) lookups without complex runtime conversion logic.3.3 The Risk of Override HeadersA critical question in the research spike was: "Are override headers permitted in non-prod only?" The definitive answer is YES.3.3.1 Threat Model: Cache Poisoning & Authorization BypassIf the production environment accepts an X-Tenant-Override header, the following attack vectors open up:Cache Poisoning: An attacker requests https://tenant-a.com with X-Tenant-Override: tenant-b. If the backend serves Tenant B's content but Cloudflare caches it under the URL for Tenant A, subsequent legitimate users of Tenant A will see Tenant B's data. This is a catastrophic data leak.Bypass of Custom Domain Logic: Some tenants may have specific IP access rules or WAF settings attached to their custom domain. Using an override header on a generic domain (e.g., api.moltworker.com) allows an attacker to interact with the tenant's backend while bypassing domain-specific security controls.3.3.2 Development Mode ConstraintsWhile dangerous in production, override headers are essential for developer velocity. They allow engineers to test "Tenant A" behavior against a local instance or a staging worker without manipulating local DNS files.Constraint: The code path checking for X-Tenant-Override must be wrapped in a conditional block that checks a specific environment variable (e.g., ENVIRONMENT or DEV_MODE).TypeScript// Safe Implementation Pattern
+# Phase 1 Backend Adaptation: Tenant Resolution and Sandbox ID Specification
+
+## 1. Executive Summary
+This report serves as the definitive technical specification for the Tenant Resolution and Sandbox Identity mechanisms within the StreamKinetics Moltworker architecture. As the platform prepares for Phase 1 backend readiness, the transition from a monolithic proof-of-concept to a scalable, multi-tenant SaaS infrastructure requires a rigorous definition of how incoming HTTP requests are mapped to isolated backend resources.
+
+The core objective of this research spike was to resolve ambiguities regarding the authoritative tenant signal and to define a Sandbox ID format that satisfies the intersection of constraints imposed by Cloudflare Workers, D1 Databases, R2 Storage, KV Namespaces, and AI Gateway.
+
+Key Decisions and Findings:
+
+- Authoritative Signal: The Host Header (derived from the request URL) is the only authoritative signal for tenant identification in production environments. This leverages Cloudflare’s "SSL for SaaS" infrastructure to ensure that only validated, provisioned hostnames can trigger tenant logic.
+- Development Overrides: The use of X-Tenant-Override headers is strictly prohibited in production due to severe risks of cache poisoning and authorization bypass. Such overrides are permitted only in environments explicitly flagged as DEV_MODE.
+- Sandbox ID Format: To accommodate the strictly conflicting constraints of downstream services—most notably the 32-character recommended limit for D1 databases and the strict lowercase/hyphen-only requirement of R2—the platform will adopt a Stable Short Hash (SSH) format: sk-[hash].
+- Derivation Logic: The Sandbox ID will be derived by computing a SHA-256 hash of the authoritative Tenant ID, truncated to the first 16 hexadecimal characters, and prefixed with sk-. This results in a 19-character identifier (e.g., sk-a1b2c3d4e5f67890) that is deterministic, collision-resistant (64-bit entropy), and compliant with all platform limits.
+
+This document details the architectural reasoning, security threat models, platform constraint analysis, and implementation logic required to operationalize these decisions. It is intended for the engineering team responsible for the Phase 1 backend adaptation of the OpenClaw integration.
+
+## 2. Architectural Context and Problem Definition
+
+### 2.1 The Moltworker Stack
+StreamKinetics Moltworker represents a cutting-edge integration of the OpenClaw AI agent framework within a serverless edge environment. Unlike traditional containerized deployments, Moltworker leverages the Cloudflare Stack—specifically Workers, Durable Objects, and the Sandbox SDK—to provide ephemeral, secure execution environments for AI agents.
+
+In this architecture, "Tenancy" is not merely a logical separation of rows in a database; it is a physical and operational isolation boundary. Each tenant (user or organization) requires:
+
+- Isolated Storage: A dedicated D1 database or distinct shard for structured data.
+- Object Storage: A dedicated path or bucket in R2 for unstructured artifacts (logs, generated files).
+- Compute Isolation: A specific configuration passed to the Cloudflare Sandbox to ensure the AI agent operates within defined resource quotas.
+- Observability: Distinct logging and cost-tracking via Cloudflare AI Gateway.
+
+### 2.2 The Tenant Resolution Challenge
+The entry point for any interaction with Moltworker is the HTTP request. Before any backend logic can execute, the system must answer the fundamental question: "Who is calling?"
+
+In a single-tenant environment, this is trivial. In a multi-tenant SaaS running at the edge, this becomes complex due to:
+
+- Edge Termination: Requests are terminated at hundreds of global data centers. The resolution logic must be replicated and consistent globally.
+- Spoofing Risks: Malicious actors may manipulate HTTP headers to access another tenant's isolated environment.
+- Development Velocity: Developers need ways to simulate different tenants without modifying global DNS records.
+
+### 2.3 The Sandbox Identity Challenge
+Once a tenant is identified (e.g., Tenant: Acme Corp), the system must provision or access resources. While "Acme Corp" is a human-readable identifier, it is unsuitable for technical resource naming due to variable lengths, special characters, and potential mutability (rebranding).
+
+The system requires a Sandbox ID: a technical, immutable, and strictly formatted identifier used to name the underlying infrastructure resources. The challenge lies in the Constraint Intersection:
+
+- D1 prefers short names (<32 chars) for tooling stability.
+- R2 demands strict lowercase and no underscores.
+- AI Gateway allows longer names but has its own character set limits.
+- Internal UUIDs (36 chars) are often too long or contain restricted characters when combined with prefixes.
+
+The Sandbox ID must be the "lowest common denominator" that works safely across all these services without requiring complex mapping tables or stateful lookups.
+
+## 3. Tenant Resolution Strategy
+The security of a multi-tenant system is predicated on the reliability of the tenant resolution mechanism. If an attacker can trick the system into resolving their request to a victim's tenant ID, the isolation guarantees of the entire stack are compromised.
+
+### 3.1 Analysis of Potential Signals
+We evaluated four potential signals for identifying a tenant from an incoming HTTP request:
+
+- Path Prefix: domain.com/tenant-a/api. Easy to implement; works on single domain. Breaks standard REST patterns; difficult to isolate at DNS/TLS level; prevents white-labeling (custom domains).
+- JWT or Token: Authorization: Bearer <token>. Secure; carries cryptographic proof. Requires parsing body/header before routing; creates a chicken-and-egg problem for unauthenticated public endpoints (e.g., login pages, public assets).
+- Custom Header: X-Tenant-ID: tenant-a. Simple for internal testing. Extremely insecure in public facing apps; highly susceptible to spoofing; requires trust in the client.
+- Host Header: tenant-a.app.com. Standard for SaaS; relies on DNS; supports custom domains (app.acme.com). Requires DNS propagation; harder to simulate locally without /etc/hosts hacking.
+
+### 3.2 The Authoritative Signal: Host Header
+Based on the analysis of Cloudflare's architecture and industry best practices for SaaS, the Host Header is selected as the definitive, authoritative signal for tenant resolution in production.
+
+#### 3.2.1 Mechanism of Trust
+In the Cloudflare Workers environment, the request.url (and derived hostname) is trustworthy because:
+
+- TLS Termination: Cloudflare handles the TLS handshake. For a request to reach the Worker with a specific hostname (e.g., app.acme.com), Cloudflare must hold a valid SSL certificate for that domain.
+- Domain Control Validation: Cloudflare for SaaS requires active Domain Control Validation (DCV) before issuing certificates for custom hostnames. This ensures that the entity pointing the DNS record actually controls the domain.
+- Routing Integrity: The Worker is bound to specific routes or zones. A request cannot accidentally hit the Worker with a hostname that hasn't been explicitly configured in the Cloudflare Dashboard or via the API.
+
+#### 3.2.2 Handling Punycode and International Domains
+Modern SaaS applications must support international customers who may use non-ASCII domains (e.g., munchen.de).
+
+- Observation: Browsers and HTTP clients transmit these domains in their Punycode format (e.g., xn--mnchen-3ya.de) in the Host header to ensure ASCII compatibility.
+- Requirement: The Moltworker resolution logic must treat the Punycode version as the canonical key for lookup.
+- Implementation: The standard new URL(request.url).hostname JavaScript API in the Workers runtime automatically handles normalization. The Tenant Registry (KV/D1) must store the Punycode version of the domain to ensure O(1) lookups without complex runtime conversion logic.
+
+### 3.3 The Risk of Override Headers
+A critical question in the research spike was: "Are override headers permitted in non-prod only?" The definitive answer is yes.
+
+#### 3.3.1 Threat Model: Cache Poisoning and Authorization Bypass
+If the production environment accepts an X-Tenant-Override header, the following attack vectors open up:
+
+- Cache Poisoning: An attacker requests https://tenant-a.com with X-Tenant-Override: tenant-b. If the backend serves Tenant B's content but Cloudflare caches it under the URL for Tenant A, subsequent legitimate users of Tenant A will see Tenant B's data. This is a catastrophic data leak.
+- Bypass of Custom Domain Logic: Some tenants may have specific IP access rules or WAF settings attached to their custom domain. Using an override header on a generic domain (e.g., api.moltworker.com) allows an attacker to interact with the tenant's backend while bypassing domain-specific security controls.
+
+#### 3.3.2 Development Mode Constraints
+While dangerous in production, override headers are essential for developer velocity. They allow engineers to test "Tenant A" behavior against a local instance or a staging worker without manipulating local DNS files.
+
+Constraint: The code path checking for X-Tenant-Override must be wrapped in a conditional block that checks a specific environment variable (e.g., ENVIRONMENT or DEV_MODE).
+
+TypeScript // Safe Implementation Pattern
 const isDev = env.ENVIRONMENT === "development";
 if (isDev && request.headers.has("X-Tenant-Override")) {
     // Process override
