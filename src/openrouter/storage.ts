@@ -342,10 +342,12 @@ export class UserStorage {
    * Save a sync picker session to R2 (persists across Worker invocations).
    */
   async saveSyncSession(userId: string, session: {
-    newModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean; tools?: boolean }>;
+    newModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean; tools?: boolean; reasoning?: boolean; category?: string; description?: string }>;
     staleModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean; tools?: boolean }>;
+    replacements: Array<{ newAlias: string; oldAlias: string; reason: string }>;
     selectedAdd: string[];
     selectedRemove: string[];
+    selectedReplace: string[];
     chatId: number;
     messageId: number;
   }): Promise<void> {
@@ -357,10 +359,12 @@ export class UserStorage {
    * Load a sync picker session from R2.
    */
   async loadSyncSession(userId: string): Promise<{
-    newModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean; tools?: boolean }>;
+    newModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean; tools?: boolean; reasoning?: boolean; category?: string; description?: string }>;
     staleModels: Array<{ alias: string; name: string; modelId: string; contextK: number; vision: boolean; tools?: boolean }>;
+    replacements: Array<{ newAlias: string; oldAlias: string; reason: string }>;
     selectedAdd: string[];
     selectedRemove: string[];
+    selectedReplace: string[];
     chatId: number;
     messageId: number;
   } | null> {
@@ -368,7 +372,11 @@ export class UserStorage {
     const obj = await this.bucket.get(key);
     if (!obj) return null;
     try {
-      return await obj.json();
+      const data = await obj.json() as Record<string, unknown>;
+      // Backfill defaults for sessions saved before v2 (replacements, selectedReplace)
+      if (!data.replacements) data.replacements = [];
+      if (!data.selectedReplace) data.selectedReplace = [];
+      return data as Awaited<ReturnType<UserStorage['loadSyncSession']>>;
     } catch {
       return null;
     }

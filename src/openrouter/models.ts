@@ -868,6 +868,20 @@ export function detectToolIntent(message: string): { needsTools: boolean; reason
 }
 
 /**
+ * Categorize a model by its ID/name into coding, reasoning, fast, or general.
+ * Used by /syncmodels to group models and suggest replacements.
+ */
+export type ModelCategory = 'coding' | 'reasoning' | 'fast' | 'general';
+
+export function categorizeModel(modelId: string, name: string, hasReasoning?: boolean): ModelCategory {
+  const lower = (modelId + ' ' + name).toLowerCase();
+  if (/coder|code|devstral|codestral|starcoder|aider|swe-?bench/i.test(lower)) return 'coding';
+  if (hasReasoning || /\br1\b|reason|think|math|chimera/i.test(lower)) return 'reasoning';
+  if (/flash|mini|small|fast|turbo|lite|nano/i.test(lower)) return 'fast';
+  return 'general';
+}
+
+/**
  * Default model alias
  */
 export const DEFAULT_MODEL = 'auto';

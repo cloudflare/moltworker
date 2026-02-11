@@ -28,6 +28,7 @@ import {
   getBlockedAliases,
   detectToolIntent,
   getFreeToolModels,
+  categorizeModel,
   type ModelInfo,
   type ReasoningLevel,
 } from '../openrouter/models';
@@ -419,13 +420,25 @@ interface SyncModelCandidate {
   contextK: number;
   vision: boolean;
   tools?: boolean;
+  reasoning?: boolean;
+  category?: 'coding' | 'reasoning' | 'fast' | 'general';
+  description?: string;
+}
+
+/** A replacement recommendation: new model is better than existing one in same category */
+interface SyncReplacement {
+  newAlias: string;
+  oldAlias: string;
+  reason: string;
 }
 
 interface SyncSession {
   newModels: SyncModelCandidate[];
   staleModels: SyncModelCandidate[];
+  replacements: SyncReplacement[];
   selectedAdd: string[];
   selectedRemove: string[];
+  selectedReplace: string[]; // newAlias values — each replace = add new + block old
   chatId: number;
   messageId: number;
 }
@@ -1850,32 +1863,108 @@ export class TelegramHandler {
   }
 
   /**
+   * Detect replacement recommendations: new models that are better than existing ones in the same category.
+   */
+  private detectReplacements(newModels: SyncModelCandidate[], currentModels: Record<string, ModelInfo>): SyncReplacement[] {
+    const replacements: SyncReplacement[] = [];
+    const existingFree = Object.values(currentModels).filter(m => m.isFree && !m.isImageGen);
+
+    for (const newModel of newModels) {
+      const newCat = newModel.category || 'general';
+
+      for (const existing of existingFree) {
+        const existingCat = categorizeModel(existing.id, existing.name, false);
+        if (existingCat !== newCat) continue;
+
+        const existingCtxK = existing.maxContext ? Math.round(existing.maxContext / 1024) : 0;
+        const reasons: string[] = [];
+
+        // Bigger context window is a significant upgrade
+        if (newModel.contextK > existingCtxK * 1.5 && existingCtxK > 0) {
+          reasons.push(`${newModel.contextK}K vs ${existingCtxK}K ctx`);
+        }
+        // Gains tool support
+        if (newModel.tools && !existing.supportsTools) {
+          reasons.push('adds tool support 🔧');
+        }
+        // Gains reasoning
+        if (newModel.reasoning && !existing.reasoning) {
+          reasons.push('adds reasoning');
+        }
+
+        if (reasons.length > 0) {
+          replacements.push({
+            newAlias: newModel.alias,
+            oldAlias: existing.alias,
+            reason: reasons.join(', '),
+          });
+        }
+      }
+    }
+    return replacements;
+  }
+
+  /**
    * Build the sync picker message text from session state.
    */
   private buildSyncMessage(session: SyncSession): string {
     const currentModels = getAllModels();
     const catalogCount = Object.values(currentModels).filter(m => m.isFree && !m.isImageGen).length;
 
-    let msg = `🔄 OpenRouter Free Models Sync\n`;
+    const categoryLabels: Record<string, string> = {
+      coding: '💻 Coding & Agents',
+      reasoning: '🧠 Reasoning & Math',
+      fast: '⚡ Fast & Light',
+      general: '🌐 General',
+    };
+
+    let msg = `🔄 Free Models Sync\n`;
     msg += `📊 ${catalogCount} free models in catalog\n`;
 
+    // Group new models by category
     if (session.newModels.length > 0) {
-      msg += `\n━━━ New (can add) ━━━\n`;
+      const byCategory = new Map<string, SyncModelCandidate[]>();
       for (const m of session.newModels) {
-        const sel = session.selectedAdd.includes(m.alias) ? '☑' : '☐';
-        const badges = [m.vision ? '👁️' : '', m.tools ? '🔧' : ''].filter(Boolean).join('');
-        const badgeStr = badges ? ` ${badges}` : '';
-        msg += `${sel} /${m.alias} — ${m.name}${badgeStr}\n`;
-        msg += `   ${m.contextK}K ctx | ${m.modelId}\n`;
+        const cat = m.category || 'general';
+        if (!byCategory.has(cat)) byCategory.set(cat, []);
+        byCategory.get(cat)!.push(m);
+      }
+
+      // Show categories in priority order: coding > reasoning > fast > general
+      const catOrder = ['coding', 'reasoning', 'fast', 'general'];
+      for (const cat of catOrder) {
+        const models = byCategory.get(cat);
+        if (!models || models.length === 0) continue;
+
+        msg += `\n━━━ ${categoryLabels[cat] || cat} (new) ━━━\n`;
+        for (const m of models) {
+          const isAdded = session.selectedAdd.includes(m.alias);
+          const isReplacing = session.selectedReplace.includes(m.alias);
+          const sel = (isAdded || isReplacing) ? '☑' : '☐';
+          const badges = [m.vision ? '👁️' : '', m.tools ? '🔧' : '', m.reasoning ? '💭' : ''].filter(Boolean).join('');
+          const badgeStr = badges ? ` ${badges}` : '';
+          msg += `${sel} /${m.alias} — ${m.name}${badgeStr}\n`;
+          // Show replacement recommendation if exists
+          const repl = session.replacements.find(r => r.newAlias === m.alias);
+          if (repl) {
+            msg += `   ${m.contextK}K ctx | ↑ replaces /${repl.oldAlias} (${repl.reason})\n`;
+          } else {
+            msg += `   ${m.contextK}K ctx\n`;
+          }
+          if (m.description) {
+            // Truncate description to keep message manageable
+            const desc = m.description.length > 60 ? m.description.slice(0, 57) + '...' : m.description;
+            msg += `   ${desc}\n`;
+          }
+        }
       }
     }
 
     if (session.staleModels.length > 0) {
-      msg += `\n━━━ Stale (can remove) ━━━\n`;
+      msg += `\n━━━ ❌ No Longer Free ━━━\n`;
       for (const m of session.staleModels) {
         const sel = session.selectedRemove.includes(m.alias) ? '☑' : '☐';
         msg += `${sel} /${m.alias} — ${m.name}\n`;
-        msg += `   No longer free on OpenRouter\n`;
       }
     }
 
@@ -1883,11 +1972,14 @@ export class TelegramHandler {
       msg += `\n✅ Catalog is up to date — no changes needed.`;
     } else {
       const addCount = session.selectedAdd.length;
+      const replCount = session.selectedReplace.length;
       const rmCount = session.selectedRemove.length;
-      msg += `\nTap models to select, then Validate.`;
-      if (addCount > 0 || rmCount > 0) {
-        msg += ` (${addCount} to add, ${rmCount} to remove)`;
-      }
+      msg += `\nTap to select. ↻ = add & replace old.`;
+      const parts: string[] = [];
+      if (addCount > 0) parts.push(`${addCount} add`);
+      if (replCount > 0) parts.push(`${replCount} replace`);
+      if (rmCount > 0) parts.push(`${rmCount} remove`);
+      if (parts.length > 0) msg += ` (${parts.join(', ')})`;
     }
 
     return msg;
@@ -1899,14 +1991,23 @@ export class TelegramHandler {
   private buildSyncButtons(session: SyncSession): InlineKeyboardButton[][] {
     const buttons: InlineKeyboardButton[][] = [];
 
-    // New models — 2 per row
-    for (let i = 0; i < session.newModels.length; i += 2) {
+    // New models — each gets Add button, plus Replace button if replacement exists
+    for (const m of session.newModels) {
       const row: InlineKeyboardButton[] = [];
-      for (let j = i; j < Math.min(i + 2, session.newModels.length); j++) {
-        const m = session.newModels[j];
-        const sel = session.selectedAdd.includes(m.alias) ? '☑' : '☐';
-        row.push({ text: `${sel} ${m.alias}`, callback_data: `s:a:${m.alias}` });
+      const isAdded = session.selectedAdd.includes(m.alias);
+      const isReplacing = session.selectedReplace.includes(m.alias);
+
+      // Add button
+      const addSel = isAdded ? '☑' : '☐';
+      row.push({ text: `${addSel} + ${m.alias}`, callback_data: `s:a:${m.alias}` });
+
+      // Replace button (if this model has a replacement recommendation)
+      const repl = session.replacements.find(r => r.newAlias === m.alias);
+      if (repl) {
+        const replSel = isReplacing ? '☑' : '☐';
+        row.push({ text: `${replSel} ↻ ${m.alias}→${repl.oldAlias}`, callback_data: `s:rp:${m.alias}` });
       }
+
       buttons.push(row);
     }
 
@@ -1923,8 +2024,9 @@ export class TelegramHandler {
 
     // Bottom row: Validate + Cancel
     const addCount = session.selectedAdd.length;
+    const replCount = session.selectedReplace.length;
     const rmCount = session.selectedRemove.length;
-    const total = addCount + rmCount;
+    const total = addCount + replCount + rmCount;
     buttons.push([
       { text: `✓ Validate${total > 0 ? ` (${total})` : ''}`, callback_data: 's:ok' },
       { text: '✗ Cancel', callback_data: 's:x' },
@@ -1956,6 +2058,7 @@ export class TelegramHandler {
       const rawData = await response.json() as { data: Array<{
         id: string;
         name: string;
+        description?: string;
         context_length: number;
         architecture: { modality: string };
         pricing: { prompt: string; completion: string };
@@ -1965,11 +2068,13 @@ export class TelegramHandler {
       const allApiModels = rawData.data.map(m => ({
         id: m.id,
         name: m.name,
+        description: m.description || '',
         contextLength: m.context_length,
         modality: m.architecture?.modality || 'text->text',
         promptCost: parseFloat(m.pricing?.prompt || '0'),
         completionCost: parseFloat(m.pricing?.completion || '0'),
         supportsTools: Array.isArray(m.supported_parameters) && m.supported_parameters.includes('tools'),
+        supportsReasoning: Array.isArray(m.supported_parameters) && m.supported_parameters.includes('reasoning'),
       }));
 
       // 2. Filter for free text models
@@ -1995,13 +2100,18 @@ export class TelegramHandler {
         while (usedAliases.has(alias)) alias = alias + 'f';
         usedAliases.add(alias);
 
+        const hasReasoning = m.supportsReasoning;
+        const contextK = Math.round(m.contextLength / 1024);
         newModels.push({
           alias,
           name: m.name,
           modelId: m.id,
-          contextK: Math.round(m.contextLength / 1024),
+          contextK,
           vision: m.modality.includes('image'),
           tools: m.supportsTools,
+          reasoning: hasReasoning,
+          category: categorizeModel(m.id, m.name, hasReasoning),
+          description: m.description ? m.description.split(/[.\n]/)[0].trim() : undefined,
         });
       }
 
@@ -2022,12 +2132,17 @@ export class TelegramHandler {
         }
       }
 
-      // 4. Create session
+      // 4. Detect replacement recommendations
+      const replacements = this.detectReplacements(newModels, currentModels);
+
+      // 5. Create session
       const session: SyncSession = {
         newModels,
         staleModels,
+        replacements,
         selectedAdd: [],
         selectedRemove: [],
+        selectedReplace: [],
         chatId,
         messageId: 0,
       };
@@ -2062,22 +2177,38 @@ export class TelegramHandler {
     chatId: number
   ): Promise<void> {
     // Load session from R2 (persists across Worker instances)
-    const session = await this.storage.loadSyncSession(userId);
+    const session = await this.storage.loadSyncSession(userId) as SyncSession | null;
     if (!session) {
       await this.bot.answerCallbackQuery(query.id, { text: 'Session expired. Run /syncmodels again.' });
       return;
     }
 
-    const subAction = parts[1]; // a=add toggle, r=remove toggle, ok=validate, x=cancel
+    const subAction = parts[1]; // a=add, r=remove, rp=replace, ok=validate, x=cancel
     const alias = parts[2];
 
     switch (subAction) {
-      case 'a': { // Toggle add selection
+      case 'a': { // Toggle add selection (deselect replace if active)
         const idx = session.selectedAdd.indexOf(alias);
         if (idx >= 0) {
           session.selectedAdd.splice(idx, 1);
         } else {
           session.selectedAdd.push(alias);
+          // Deselect replace for same alias (mutually exclusive)
+          const rpIdx = session.selectedReplace.indexOf(alias);
+          if (rpIdx >= 0) session.selectedReplace.splice(rpIdx, 1);
+        }
+        break;
+      }
+
+      case 'rp': { // Toggle replace selection (deselect add if active)
+        const idx = session.selectedReplace.indexOf(alias);
+        if (idx >= 0) {
+          session.selectedReplace.splice(idx, 1);
+        } else {
+          session.selectedReplace.push(alias);
+          // Deselect add for same alias (mutually exclusive)
+          const addIdx = session.selectedAdd.indexOf(alias);
+          if (addIdx >= 0) session.selectedAdd.splice(addIdx, 1);
         }
         break;
       }
@@ -2093,7 +2224,8 @@ export class TelegramHandler {
       }
 
       case 'ok': { // Validate — apply changes
-        if (session.selectedAdd.length === 0 && session.selectedRemove.length === 0) {
+        const totalSelections = session.selectedAdd.length + session.selectedReplace.length + session.selectedRemove.length;
+        if (totalSelections === 0) {
           await this.bot.answerCallbackQuery(query.id, { text: 'No models selected!' });
           return;
         }
@@ -2103,24 +2235,48 @@ export class TelegramHandler {
         const dynamicModels = existing?.models || {};
         const blockedList = existing?.blocked || [];
 
+        // Helper to create ModelInfo from candidate
+        const candidateToModelInfo = (candidate: SyncModelCandidate): ModelInfo => ({
+          id: candidate.modelId,
+          alias: candidate.alias,
+          name: candidate.name,
+          specialty: candidate.category
+            ? `Free ${candidate.category.charAt(0).toUpperCase() + candidate.category.slice(1)} (synced)`
+            : 'Free (synced from OpenRouter)',
+          score: `${candidate.contextK}K context`,
+          cost: 'FREE',
+          isFree: true,
+          supportsVision: candidate.vision || undefined,
+          supportsTools: candidate.tools || undefined,
+          maxContext: candidate.contextK * 1024,
+        });
+
         // Add selected new models
         const addedNames: string[] = [];
         for (const addAlias of session.selectedAdd) {
           const candidate = session.newModels.find(m => m.alias === addAlias);
           if (!candidate) continue;
-          dynamicModels[addAlias] = {
-            id: candidate.modelId,
-            alias: addAlias,
-            name: candidate.name,
-            specialty: 'Free (synced from OpenRouter)',
-            score: `${candidate.contextK}K context`,
-            cost: 'FREE',
-            isFree: true,
-            supportsVision: candidate.vision || undefined,
-            supportsTools: candidate.tools || undefined,
-            maxContext: candidate.contextK * 1024,
-          };
+          dynamicModels[addAlias] = candidateToModelInfo(candidate);
           addedNames.push(addAlias);
+        }
+
+        // Process replacements (add new + block old)
+        const replacedNames: string[] = [];
+        for (const replAlias of session.selectedReplace) {
+          const repl = session.replacements.find(r => r.newAlias === replAlias);
+          if (!repl) continue;
+          const candidate = session.newModels.find(m => m.alias === replAlias);
+          if (!candidate) continue;
+
+          // Add new model
+          dynamicModels[replAlias] = candidateToModelInfo(candidate);
+
+          // Block old model
+          if (!blockedList.includes(repl.oldAlias)) {
+            blockedList.push(repl.oldAlias);
+          }
+          delete dynamicModels[repl.oldAlias];
+          replacedNames.push(`/${replAlias} ↻ /${repl.oldAlias}`);
         }
 
         // Block selected stale models
@@ -2146,6 +2302,10 @@ export class TelegramHandler {
         if (addedNames.length > 0) {
           result += `Added ${addedNames.length} model(s):\n`;
           for (const a of addedNames) result += `  /${a}\n`;
+        }
+        if (replacedNames.length > 0) {
+          result += `Replaced ${replacedNames.length} model(s):\n`;
+          for (const a of replacedNames) result += `  ${a}\n`;
         }
         if (removedNames.length > 0) {
           result += `Removed ${removedNames.length} model(s):\n`;

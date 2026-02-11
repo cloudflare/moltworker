@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectToolIntent, getModel, getFreeToolModels } from './models';
+import { detectToolIntent, getModel, getFreeToolModels, categorizeModel } from './models';
 
 // --- detectToolIntent ---
 
@@ -151,6 +151,46 @@ describe('getFreeToolModels', () => {
       const model = getModel(alias);
       expect(model).toBeDefined();
     }
+  });
+});
+
+// --- categorizeModel ---
+
+describe('categorizeModel', () => {
+  it('detects coding models from ID/name', () => {
+    expect(categorizeModel('qwen/qwen3-coder-free', 'Qwen3 Coder')).toBe('coding');
+    expect(categorizeModel('mistralai/devstral-small', 'Devstral Small')).toBe('coding');
+    expect(categorizeModel('bigcode/starcoder2', 'StarCoder2')).toBe('coding');
+    expect(categorizeModel('openai/codex-mini', 'Codex Mini')).toBe('coding');
+  });
+
+  it('detects reasoning models from ID/name', () => {
+    expect(categorizeModel('deepseek/deepseek-r1', 'DeepSeek R1')).toBe('reasoning');
+    expect(categorizeModel('some/model-thinking', 'Model Thinking')).toBe('reasoning');
+    expect(categorizeModel('provider/math-model', 'Math Model')).toBe('reasoning');
+    expect(categorizeModel('tng/r1t-chimera', 'R1T Chimera')).toBe('reasoning');
+  });
+
+  it('detects reasoning via hasReasoning flag', () => {
+    expect(categorizeModel('some/generic-model', 'Generic Model', true)).toBe('reasoning');
+  });
+
+  it('detects fast models from ID/name', () => {
+    expect(categorizeModel('google/gemini-flash', 'Gemini Flash')).toBe('fast');
+    expect(categorizeModel('anthropic/claude-mini', 'Claude Mini')).toBe('fast');
+    expect(categorizeModel('step/step-fast', 'Step Fast')).toBe('fast');
+    expect(categorizeModel('provider/turbo-model', 'Turbo Model')).toBe('fast');
+  });
+
+  it('falls back to general for unrecognized models', () => {
+    expect(categorizeModel('openrouter/auto', 'Auto')).toBe('general');
+    expect(categorizeModel('meta-llama/llama-70b', 'Llama 70B')).toBe('general');
+    expect(categorizeModel('glm/glm-4', 'GLM 4.5 Air')).toBe('general');
+  });
+
+  it('coding takes priority over fast (e.g., devstral-small)', () => {
+    // "small" would match fast, but "devstral" matches coding first
+    expect(categorizeModel('mistralai/devstral-small', 'Devstral Small')).toBe('coding');
   });
 });
 
