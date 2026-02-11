@@ -68,6 +68,12 @@ Examples:
 - Do not store production secrets in `.env`.
 - Validate required secrets before deploy.
 
+## Public Rate Limits
+
+- Public endpoints are rate-limited in the Worker using KV.
+- Configure with `PUBLIC_RATE_LIMIT_MAX` and `PUBLIC_RATE_LIMIT_WINDOW_SECONDS`.
+- Defaults: 60 requests per 60 seconds per IP.
+
 ## Operational Checklist
 
 - `skclaw resources check --json`

@@ -97,7 +97,10 @@ Required Cloudflare API token permissions (least privilege):
 - D1: Edit (migrations and database access)
 - Workers KV Storage: Edit (namespaces)
 - R2 Storage: Edit (buckets)
+- Access: Service Tokens = Edit (E2E/Smoke tests)
 - Account Settings: Read (account ID resolution)
+
+For a full scope map, see [docs/engineering/runbook-cloudflare-api-scopes.md](docs/engineering/runbook-cloudflare-api-scopes.md).
 
 Required Cloudflare account resources (per environment):
 

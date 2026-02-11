@@ -60,6 +60,7 @@ _Cloudflare Sandboxes are available on the [Workers Paid plan](https://dash.clou
 
 For the internal CLI overview, see [docs/engineering/cli/skclaw.md](docs/engineering/cli/skclaw.md).
 For the end-state CLI spec, see [docs/engineering/cli/skclaw-spec.md](docs/engineering/cli/skclaw-spec.md).
+For Cloudflare API token scopes, see [docs/engineering/runbook-cloudflare-api-scopes.md](docs/engineering/runbook-cloudflare-api-scopes.md).
 
 Note: `skclaw` reads `.skclaw.json` by default. For local-only configs, set `SKCLAW_CONFIG` and keep the file out of git.
 AI Gateway commands require `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) with AI Gateway write permissions.
@@ -216,7 +217,7 @@ npx wrangler secret put R2_ACCESS_KEY_ID
 npx wrangler secret put R2_SECRET_ACCESS_KEY
 
 # Your Cloudflare Account ID
-npx wrangler secret put CF_ACCOUNT_ID
+npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
 ```
 
 To find your Account ID: Go to the [Cloudflare Dashboard](https://dash.cloudflare.com/), click the three dots menu next to your account name, and select "Copy Account ID".
@@ -438,7 +439,7 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `SANDBOX_SLEEP_AFTER` | No | Container sleep timeout: `never` (default) or duration like `10m`, `1h` |
 | `R2_ACCESS_KEY_ID` | No | R2 access key for persistent storage |
 | `R2_SECRET_ACCESS_KEY` | No | R2 secret key for persistent storage |
-| `CF_ACCOUNT_ID` | No | Cloudflare account ID (required for R2 storage) |
+| `CLOUDFLARE_ACCOUNT_ID` | No | Cloudflare account ID (required for R2 storage) |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
 | `TELEGRAM_DM_POLICY` | No | Telegram DM policy: `pairing` (default) or `open` |
 | `DISCORD_BOT_TOKEN` | No | Discord bot token |
@@ -470,7 +471,7 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 **Slow first request:** Cold starts take 1-2 minutes. Subsequent requests are faster.
 
-**R2 not mounting:** Check that all three R2 secrets are set (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CF_ACCOUNT_ID`). Note: R2 mounting only works in production, not with `wrangler dev`.
+**R2 not mounting:** Check that all three R2 secrets are set (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `CLOUDFLARE_ACCOUNT_ID`). Note: R2 mounting only works in production, not with `wrangler dev`.
 
 **Access denied on admin routes:** Ensure `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are set, and that your Cloudflare Access application is configured correctly.
 
