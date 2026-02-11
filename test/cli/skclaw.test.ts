@@ -47,6 +47,24 @@ describe("skclaw", () => {
     expect(payload.code).toBe(0);
     expect(payload.data?.usage).toContain("skclaw");
   });
+
+  test("help includes core command groups", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+    });
+
+    const code = await skclaw.run(["--help"]);
+
+    expect(code).toBe(0);
+    const output = buffer.info.join(" ");
+    expect(output).toContain("skclaw env validate");
+    expect(output).toContain("skclaw secrets sync");
+    expect(output).toContain("skclaw resources");
+    expect(output).toContain("skclaw migrations");
+    expect(output).toContain("skclaw tenant");
+    expect(output).toContain("skclaw routing");
+  });
   test("lint runs through bun", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
     const calls: Array<{ command: string; args: string[] }> = [];
@@ -202,6 +220,26 @@ describe("skclaw", () => {
     expect(payload.status).toBe("error");
     expect(payload.code).toBe(1);
     expect(payload.message).toContain("Config not found");
+  });
+
+  test("unknown command returns JSON error with usage", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+    });
+
+    const code = await skclaw.run(["nope", "--json"]);
+
+    expect(code).toBe(1);
+    const payload = JSON.parse(buffer.error[0]) as {
+      status: string;
+      code: number;
+      message: string;
+      data?: { usage?: string };
+    };
+    expect(payload.status).toBe("error");
+    expect(payload.message).toContain("Unknown command");
+    expect(payload.data?.usage).toContain("skclaw");
   });
 
   test("env status returns JSON output", async () => {
