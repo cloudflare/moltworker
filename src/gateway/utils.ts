@@ -3,6 +3,7 @@
  */
 
 import type { Sandbox } from '@cloudflare/sandbox';
+import { isGatewayProcess } from './process';
 
 export interface CommandResult {
   stdout: string;
@@ -58,11 +59,7 @@ export async function cleanupExitedProcesses(sandbox: Sandbox): Promise<number> 
   try {
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
-      const isGateway =
-        proc.command.includes('start-moltbot.sh') ||
-        proc.command.includes('clawdbot gateway') ||
-        proc.command.includes('openclaw gateway');
-      if (!isGateway && proc.status !== 'running' && proc.status !== 'starting') {
+      if (!isGatewayProcess(proc.command) && proc.status !== 'running' && proc.status !== 'starting') {
         try { await proc.kill(); cleaned++; } catch { /* ignore */ }
       }
     }

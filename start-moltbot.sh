@@ -31,17 +31,6 @@ echo "============================================"
 CONFIG_DIR="/root/.openclaw"
 R2_BACKUP_DIR="/data/moltbot/openclaw-backup"
 
-# Function to sync OpenClaw data to R2
-sync_to_r2() {
-  if [ -d "/data/moltbot" ]; then
-    echo "Syncing OpenClaw data to R2..."
-    mkdir -p "$R2_BACKUP_DIR"
-    # Use cp with timeout to avoid hanging on S3FS
-    timeout 60 cp -rf "$CONFIG_DIR"/* "$R2_BACKUP_DIR/" 2>/dev/null || true
-    echo "Sync to R2 complete"
-  fi
-}
-
 # Function to restore OpenClaw data from R2
 restore_from_r2() {
   if [ -d "$R2_BACKUP_DIR" ] && [ -f "$R2_BACKUP_DIR/openclaw.json" ]; then
@@ -203,19 +192,6 @@ log_timing "Channels configured"
 openclaw models set anthropic/claude-sonnet-4-5 2>/dev/null || true
 log_timing "Model set to claude-sonnet-4-5"
 
-# Start background sync process (every 60 seconds)
-(
-  while true; do
-    sleep 60
-    sync_to_r2
-  done
-) &
-SYNC_PID=$!
-echo "Background sync started (PID: $SYNC_PID)"
-
-# Trap to sync on exit
-trap 'echo "Shutting down, syncing to R2..."; sync_to_r2; kill $SYNC_PID 2>/dev/null' EXIT INT TERM
-
 # Clean up stale session lock files from previous gateway runs
 find /root/.openclaw -name "*.lock" -delete 2>/dev/null || true
 echo "Stale lock files cleaned"
@@ -252,7 +228,7 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
               --name "auto-study" \
               --every "24h" \
               --session isolated \
-              --model "anthropic/claude-3-haiku-20240307" \
+              --model "anthropic/claude-3-5-haiku-20241022" \
               --thinking off \
               $TOKEN_FLAG \
               --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js — summarize output, save to memory." \
@@ -273,7 +249,7 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
               --name "brain-memory" \
               --every "24h" \
               --session isolated \
-              --model "anthropic/claude-3-haiku-20240307" \
+              --model "anthropic/claude-3-5-haiku-20241022" \
               --thinking off \
               $TOKEN_FLAG \
               --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js — Analyze the output. Extract key facts, decisions, user preferences, and important topics from each conversation. Save a concise daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (use today's date). Create the directory if needed." \

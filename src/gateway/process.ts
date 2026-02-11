@@ -4,6 +4,14 @@ import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
 import { mountR2Storage } from './r2';
 
+/** Commands that identify a gateway process (vs CLI commands) */
+export const GATEWAY_COMMANDS = ['start-moltbot.sh', 'clawdbot gateway', 'openclaw gateway'];
+
+/** Check if a command string is a gateway process */
+export function isGatewayProcess(command: string): boolean {
+  return GATEWAY_COMMANDS.some(cmd => command.includes(cmd));
+}
+
 // Auto-recovery configuration
 const MAX_RECOVERY_ATTEMPTS = 3;
 const RECOVERY_COOLDOWN_MS = 30_000; // 30s minimum between recovery cycles
@@ -20,16 +28,11 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
   try {
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
-      // Only match the gateway process, not CLI commands like "clawdbot devices list"
-      // Note: CLI is still named "clawdbot" until upstream renames it
-      const isGatewayProcess = 
-        proc.command.includes('start-moltbot.sh') ||
-        proc.command.includes('clawdbot gateway');
-      const isCliCommand = 
+      const isCliCommand =
         proc.command.includes('clawdbot devices') ||
         proc.command.includes('clawdbot --version');
-      
-      if (isGatewayProcess && !isCliCommand) {
+
+      if (isGatewayProcess(proc.command) && !isCliCommand) {
         if (proc.status === 'starting' || proc.status === 'running') {
           return proc;
         }
