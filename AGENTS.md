@@ -233,6 +233,16 @@ npx wrangler secret list
 
 Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
 
+## Troubleshooting
+
+- **Health OK but no reply from agent / Control UI hangs**
+  - Check `GET /api/status`: `gatewayProcess.status`, `gatewayProcess.exitCode`, and `lastStderrPreview` (if present) for the last failed gateway run.
+  - Check `GET /debug/processes?logs=true` or `GET /debug/processes?logs=true&failed=1` for full stderr of gateway/start-moltbot processes.
+  - Run `npx wrangler tail` and look for `[WS] close` / `[WS] error` JSON lines (code, reason, side) when reproducing the issue.
+
+- **Gateway exits with code 126**
+  - Usually caused by script not executable or CRLF line endings in `start-moltbot.sh`. Ensure the Dockerfile runs `tr -d '\\r'` on the script and `chmod 755` before use. Keep `*.sh` as LF in `.gitattributes`.
+
 ## R2 Storage Notes
 
 R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
