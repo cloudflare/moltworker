@@ -48,7 +48,7 @@ fi
 
 # Check required environment variables
 : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
-: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
 : "${WORKERS_SUBDOMAIN:?WORKERS_SUBDOMAIN is required}"
 : "${CF_ACCESS_TEAM_DOMAIN:?CF_ACCESS_TEAM_DOMAIN is required}"
 : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is required}"
@@ -105,7 +105,7 @@ log "Step 2: Deploying worker..."
 # Step 3: Create Access application (must be after worker exists)
 log "Step 3: Creating Access application..."
 SERVICE_TOKEN_ID=$(echo "$TERRAFORM_OUTPUT" | jq -r '.service_token_id.value')
-export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
+export CLOUDFLARE_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
 ACCESS_OUTPUT=$("$SCRIPT_DIR/create-access-app" "$WORKER_NAME" "$SERVICE_TOKEN_ID")
 ACCESS_APP_ID=$(echo "$ACCESS_OUTPUT" | head -1)
 ACCESS_AUD=$(echo "$ACCESS_OUTPUT" | tail -1)

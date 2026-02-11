@@ -3,7 +3,7 @@
 #
 # Required environment variables:
 # - CLOUDFLARE_API_TOKEN: API token with Workers, Access, R2 permissions
-# - CF_ACCOUNT_ID: Cloudflare account ID
+# - CLOUDFLARE_ACCOUNT_ID: Cloudflare account ID
 # - WORKERS_SUBDOMAIN: Your workers.dev subdomain
 # - CF_ACCESS_TEAM_DOMAIN: Cloudflare Access team domain
 # - R2_ACCESS_KEY_ID: R2 access key for bucket mounting

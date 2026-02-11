@@ -10,6 +10,7 @@
 - [Secrets Runbook](runbook-secrets.md)
 - [Discord App Setup Runbook](runbook-discord.md)
 - [Runbook: Adding E2E Fixtures](runbook-e2e-fixtures.md)
+- [Smoke Test Runbook](runbook-smoke-test.md)
 
 ## ADRs
 

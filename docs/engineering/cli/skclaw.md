@@ -47,6 +47,9 @@ AI Gateway commands require `CLOUDFLARE_API_TOKEN` (or `CF_API_TOKEN`) with AI G
 KV namespace commands require a token with Workers KV Storage edit permissions.
 D1 commands require a token with D1 edit permissions.
 R2 commands require a token with R2 edit permissions.
+E2E smoke tests require Access: Service Tokens = Edit (Zero Trust) to create service tokens.
+
+For full scope details, see [docs/engineering/runbook-cloudflare-api-scopes.md](docs/engineering/runbook-cloudflare-api-scopes.md).
 
 Required fields:
 

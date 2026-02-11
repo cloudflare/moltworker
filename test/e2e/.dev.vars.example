@@ -38,7 +38,7 @@
 CLOUDFLARE_API_TOKEN=
 
 # =============================================================================
-# CF_ACCOUNT_ID
+# CLOUDFLARE_ACCOUNT_ID
 # =============================================================================
 # Required: Your Cloudflare account ID
 #
@@ -49,7 +49,7 @@ CLOUDFLARE_API_TOKEN=
 #
 # Or: Dashboard → any zone → Overview → scroll down to "API" section
 #
-CF_ACCOUNT_ID=
+CLOUDFLARE_ACCOUNT_ID=
 
 # =============================================================================
 # WORKERS_SUBDOMAIN

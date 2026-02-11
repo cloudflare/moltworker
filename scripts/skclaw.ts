@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -55,6 +56,17 @@ const REQUIRED_ENV_KEYS = [
   "CF_AI_GATEWAY_ACCOUNT_ID",
   "CF_AI_GATEWAY_GATEWAY_ID",
 ] as const;
+
+const E2E_REQUIRED_ENV_KEYS = [
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "WORKERS_SUBDOMAIN",
+  "CF_ACCESS_TEAM_DOMAIN",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+] as const;
+
+const E2E_ENV_DEFAULT_PATH = "test/e2e/.dev.vars";
 
 const createDefaultDeps = (): SkclawDeps => ({
   logger: console,
@@ -125,7 +137,8 @@ const callCloudflareApi = async (
     throw new Error("Missing CLOUDFLARE_API_TOKEN for AI Gateway commands");
   }
 
-  const response = await deps.fetchFn(`https://api.cloudflare.com/client/v4${path}`,
+  const response = await deps.fetchFn(
+    `https://api.cloudflare.com/client/v4${path}`,
     {
       method,
       headers: {
@@ -256,6 +269,26 @@ const runCommand = (deps: SkclawDeps, command: string, args: string[]) =>
     });
   });
 
+const runCommandWithEnv = (
+  deps: SkclawDeps,
+  command: string,
+  args: string[],
+  envOverrides: Record<string, string>,
+) =>
+  new Promise<void>((resolvePromise, rejectPromise) => {
+    const child = deps.spawnCommand(command, args, {
+      stdio: "inherit",
+      env: { ...deps.env, ...envOverrides },
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolvePromise();
+      } else {
+        rejectPromise(new Error(`${command} exited with code ${code}`));
+      }
+    });
+  });
+
 const getUsage = () => `skclaw - StreamKinetics OpenClaw CLI
 
 Usage:
@@ -274,11 +307,11 @@ Usage:
   skclaw migrations <list|apply|status> [--env production] [--remote]
   skclaw logs <tail|search> [query] [--env production]
   skclaw quality <lint|typecheck|test|test cli>
-  skclaw test [cli]
+  skclaw test [cli|smoke]
   skclaw ai-gateway <create|list|get|update|delete|url>
   skclaw kv <create|list|get|rename|delete>
   skclaw d1 <create|list|get|delete>
-  skclaw r2 <create|list|get|delete>
+  skclaw r2 <create|list|get|delete|setup>
   skclaw tenant <create|update|get|list>
   skclaw routing <set|test|list>
 
@@ -301,6 +334,7 @@ Flags:
   --database-id  D1 database id (d1 get/delete)
   --database-name D1 database name (d1 create)
   --bucket-name  R2 bucket name (r2 create/get/delete)
+  --bucket-name  R2 bucket name (r2 setup)
   --name         Worker name (worker delete)
   --provider     AI Gateway provider for URL lookup (ai-gateway url)
   --authentication Enable AI Gateway auth (ai-gateway update)
@@ -313,6 +347,8 @@ Flags:
   --domain       Routing domain
   --tenant       Routing tenant slug
   --limit        Query limit
+  --pattern      Smoke test pattern (skclaw test smoke)
+  --tail-logs    Tail worker logs during smoke test (skclaw test smoke)
   --dry-run      Show actions without executing
   --remote       Use remote D1 resources for migrations
   --force        Force destructive operations where supported
@@ -408,20 +444,34 @@ const handleSecretsSync = async (
   const envName = resolveEnvName(deps, flags);
   const dryRun = Boolean(flags["dry-run"]);
 
-  const missingKeys = requiredKeys.filter((key) => !env[key]);
-  if (missingKeys.length > 0) {
-    throw new Error(`Missing secrets in ${envFile}: ${missingKeys.join(", ")}`);
+  const missingRequired = requiredKeys.filter((key) => !env[key]);
+  const autoResolved: Record<string, string> = {};
+  const accountId = resolveAccountId(config, flags);
+  if (accountId) {
+    autoResolved.CF_AI_GATEWAY_ACCOUNT_ID = accountId;
+  }
+  const gatewayId = resolveGatewayId(config, flags);
+  if (gatewayId) {
+    autoResolved.CF_AI_GATEWAY_GATEWAY_ID = gatewayId;
   }
 
-  const keysToSync = keys.filter((key) => Boolean(env[key]));
+  const resolvedEnv = { ...env, ...autoResolved };
+  const remainingMissing = missingRequired.filter((key) => !resolvedEnv[key]);
 
-  for (const key of keysToSync) {
-    const value = env[key];
+  if (remainingMissing.length > 0) {
+    throw new Error(`Missing required secrets: ${remainingMissing.join(", ")}`);
+  }
+
+  for (const key of keys) {
+    const value = resolvedEnv[key];
+    if (!value) {
+      continue;
+    }
     const args = ["wrangler", "secret", "put", key];
     if (envName) {
       args.push("--env", envName);
     } else {
-      args.push("--name", config.workerName);
+      args.push("--name", String(config.workerName));
     }
     if (dryRun) {
       deps.logger.info(`[dry-run] bunx ${args.join(" ")}`);
@@ -444,6 +494,7 @@ const handleSecretsSync = async (
       });
     });
   }
+
   return dryRun ? "Secrets sync dry-run complete" : "Secrets sync complete";
 };
 
@@ -528,7 +579,11 @@ const handleDeploy = async (
   } else {
     deployArgs.push("--name", config.workerName);
   }
-  await runCommand(deps, "bun", ["run", "build"]);
+  if (envName) {
+    await runCommand(deps, "bun", ["run", "build", "--", "--mode", envName]);
+  } else {
+    await runCommand(deps, "bun", ["run", "build"]);
+  }
   await runCommand(deps, "bunx", deployArgs);
   return "Deploy complete";
 };
@@ -722,7 +777,7 @@ const handleLogsTail = async (
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
   const envName = resolveEnvName(deps, flags);
-  const args = ["wrangler", "tail", "--name", String(config.workerName)];
+  const args = ["wrangler", "tail", String(config.workerName)];
   if (envName) {
     args.push("--env", envName);
   }
@@ -733,7 +788,7 @@ const handleLogsTail = async (
 const handleLogsSearch = async (
   deps: SkclawDeps,
   flags: Record<string, string | boolean>,
-  query: string | undefined,
+  query?: string,
 ) => {
   if (!query) {
     throw new Error("Logs search requires a query");
@@ -1414,6 +1469,27 @@ const handleR2Delete = async (
   return { message: "R2 delete complete", data: { accountId, bucketName: name } };
 };
 
+const handleR2Setup = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config, configPath } = loadConfig(deps, flags);
+  validateConfig(config, ["projectName"]);
+  const envName = resolveEnvName(deps, flags, "dev") || "dev";
+  const nameOverride = flags["bucket-name"] as string | undefined;
+  const names = buildResourceNames(envName, String(config.projectName), { r2: nameOverride });
+  const args = ["wrangler", "r2", "bucket", "create", names.r2];
+  if (envName) {
+    args.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", args);
+  if (flags["set-config"]) {
+    const nextConfig = { ...config, r2BucketName: names.r2 };
+    deps.writeFile(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+  }
+  return "R2 setup complete";
+};
+
 const handleLint = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "lint"]);
   return "Lint complete";
@@ -1432,6 +1508,191 @@ const handleTest = async (deps: SkclawDeps) => {
 const handleTestCli = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "test:cli"]);
   return "CLI tests complete";
+};
+
+const handleTestSmoke = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const pattern = flags.pattern as string | undefined;
+  const args = ["test/e2e/"];
+  const verboseFlag = flags.verbose;
+  const verbosity = parseNumberFlag(verboseFlag) ?? (verboseFlag ? 1 : 0);
+  if (pattern) {
+    args.push("-p", pattern);
+  } else {
+    args.push("-p", "pairing");
+  }
+  if (verbosity >= 2) {
+    args.push("-vv");
+  } else if (verbosity === 1) {
+    args.push("-v");
+  }
+
+  const shouldTailLogs = parseBooleanFlag(flags["tail-logs"]) === true;
+  const fixtureDir = shouldTailLogs
+    ? deps.resolvePath(tmpdir(), `moltworker-e2e-${Date.now()}`)
+    : undefined;
+  if (fixtureDir) {
+    mkdirSync(fixtureDir, { recursive: true });
+  }
+
+  const envOverrides = fixtureDir ? { CCTR_FIXTURE_DIR: fixtureDir } : undefined;
+  const cctrProcess = deps.spawnCommand("cctr", args, {
+    stdio: "inherit",
+    env: envOverrides ? { ...deps.env, ...envOverrides } : deps.env,
+  });
+
+  const waitForWorkerName = async () => {
+    if (!fixtureDir) {
+      return undefined;
+    }
+    const workerNamePath = deps.resolvePath(fixtureDir, "worker-name.txt");
+    const maxWaitMs = 5 * 60 * 1000;
+    const pollIntervalMs = 1000;
+    const deadline = Date.now() + maxWaitMs;
+    while (Date.now() < deadline) {
+      if (deps.fileExists(workerNamePath)) {
+        const value = deps.readFile(workerNamePath).trim();
+        return value || undefined;
+      }
+      if (cctrProcess.exitCode !== null) {
+        return undefined;
+      }
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, pollIntervalMs));
+    }
+    return undefined;
+  };
+
+  let tailProcess: ChildProcess | undefined;
+  if (shouldTailLogs) {
+    const workerName = await waitForWorkerName();
+    if (workerName) {
+      tailProcess = deps.spawnCommand(
+        "bunx",
+        ["wrangler", "tail", workerName],
+        { stdio: "inherit" },
+      );
+    } else {
+      deps.logger.error("Unable to find e2e worker name for log tailing.");
+    }
+  }
+
+  try {
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      cctrProcess.on("close", (code) => {
+        if (code === 0) {
+          resolvePromise();
+        } else {
+          rejectPromise(new Error(`cctr exited with code ${code}`));
+        }
+      });
+    });
+  } finally {
+    if (tailProcess && tailProcess.exitCode === null) {
+      tailProcess.kill("SIGINT");
+    }
+  }
+  return "Smoke test complete";
+};
+
+const resolveE2eEnvFile = (deps: SkclawDeps, flags: Record<string, string | boolean>) =>
+  (flags["env-file"] as string | undefined) || E2E_ENV_DEFAULT_PATH;
+
+const checkAccessServiceTokenPermission = async (
+  deps: SkclawDeps,
+  accountId: string,
+  apiToken: string,
+) => {
+  const response = await deps.fetchFn(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/service_tokens`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+
+  if (response.ok) {
+    return { ok: true as const };
+  }
+
+  let message = "Access service token permission check failed";
+  try {
+    const payload = (await response.json()) as {
+      errors?: Array<{ message?: string }>;
+    };
+    message = payload?.errors?.[0]?.message || message;
+  } catch {
+    // Ignore parse errors and use the default message.
+  }
+
+  return {
+    ok: false as const,
+    error: `${message} (status=${response.status})`,
+  };
+};
+
+const handleE2eDoctor = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const envFile = resolveE2eEnvFile(deps, flags);
+  const env = parseEnvFile(deps, envFile);
+  const missing = E2E_REQUIRED_ENV_KEYS.filter((key) => !env[key]);
+
+  const hasGateway =
+    !!env.CLOUDFLARE_AI_GATEWAY_API_KEY &&
+    !!env.CF_AI_GATEWAY_ACCOUNT_ID &&
+    !!env.CF_AI_GATEWAY_GATEWAY_ID;
+  const hasLegacyGateway = !!env.AI_GATEWAY_API_KEY && !!env.AI_GATEWAY_BASE_URL;
+  const hasDirectProvider = !!env.ANTHROPIC_API_KEY || !!env.OPENAI_API_KEY;
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required e2e env vars: ${missing.join(", ")}`);
+  }
+
+  const providerReady = hasGateway || hasLegacyGateway || hasDirectProvider;
+  const accessCheck =
+    env.CLOUDFLARE_API_TOKEN && env.CLOUDFLARE_ACCOUNT_ID
+      ? await checkAccessServiceTokenPermission(
+          deps,
+          env.CLOUDFLARE_ACCOUNT_ID,
+          env.CLOUDFLARE_API_TOKEN,
+        )
+      : undefined;
+
+  const data = {
+    envFile,
+    providerReady,
+    accessTokenReady: accessCheck?.ok,
+    accessTokenError: accessCheck?.ok === false ? accessCheck.error : undefined,
+  };
+
+  if (!providerReady) {
+    return { message: "E2E doctor complete (AI provider missing)", data };
+  }
+
+  return { message: "E2E doctor complete", data };
+};
+
+const handleE2eSetup = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const envFile = resolveE2eEnvFile(deps, flags);
+  const env = parseEnvFile(deps, envFile);
+  const { data } = await handleE2eDoctor(deps, flags);
+  if (data?.accessTokenReady === false) {
+    throw new Error(
+      data.accessTokenError || "Cloudflare API token missing Access permissions",
+    );
+  }
+  const scriptPath = deps.resolvePath(deps.cwd(), "test/e2e/fixture/start-server");
+  await runCommandWithEnv(deps, "bash", [scriptPath, "-v"], env);
+  return "E2E setup complete";
 };
 
 const handleWorkerDelete = async (
@@ -1759,10 +2020,32 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
           emitSuccess(resolvedDeps, flags, message, data);
           return 0;
         }
+        if (action === "setup") {
+          const message = await handleR2Setup(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "e2e") {
+        if (action === "doctor") {
+          const { message, data } = await handleE2eDoctor(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "setup") {
+          const message = await handleE2eSetup(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
       }
       if (group === "test") {
         if (action === "cli") {
           const message = await handleTestCli(resolvedDeps);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "smoke") {
+          const message = await handleTestSmoke(resolvedDeps, flags);
           emitSuccess(resolvedDeps, flags, message);
           return 0;
         }

@@ -7,18 +7,18 @@ cd "$SCRIPT_DIR"
 
 # Required environment variables
 : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
-: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
 : "${WORKERS_SUBDOMAIN:?WORKERS_SUBDOMAIN is required}"
 
 # Validate we're targeting the correct account
 echo "Validating Cloudflare account..." >&2
-ACCOUNT_NAME=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID" \
+ACCOUNT_NAME=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID" \
     -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
     -H "Content-Type: application/json" | jq -r '.result.name // empty')
 
 if [ -z "$ACCOUNT_NAME" ]; then
-    echo "ERROR: Could not fetch account info for CF_ACCOUNT_ID=$CF_ACCOUNT_ID" >&2
-    echo "Check your CLOUDFLARE_API_TOKEN and CF_ACCOUNT_ID" >&2
+    echo "ERROR: Could not fetch account info for CLOUDFLARE_ACCOUNT_ID=$CLOUDFLARE_ACCOUNT_ID" >&2
+    echo "Check your CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID" >&2
     exit 1
 fi
 
@@ -33,7 +33,7 @@ terraform init -input=false -upgrade >&2
 echo "Applying terraform configuration..." >&2
 terraform apply -auto-approve -input=false \
     -var="cloudflare_api_token=$CLOUDFLARE_API_TOKEN" \
-    -var="cloudflare_account_id=$CF_ACCOUNT_ID" \
+    -var="cloudflare_account_id=$CLOUDFLARE_ACCOUNT_ID" \
     -var="workers_subdomain=$WORKERS_SUBDOMAIN" \
     -var="test_run_id=$TEST_RUN_ID" \
     >&2

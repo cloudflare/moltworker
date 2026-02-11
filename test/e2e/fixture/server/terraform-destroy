@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 
 # Required environment variables
 : "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
-: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
 : "${WORKERS_SUBDOMAIN:?WORKERS_SUBDOMAIN is required}"
 
 # Optional: unique test run ID (defaults to "local")
@@ -40,7 +40,7 @@ fi
 echo "Destroying terraform-managed infrastructure..." >&2
 terraform destroy -auto-approve -input=false \
     -var="cloudflare_api_token=$CLOUDFLARE_API_TOKEN" \
-    -var="cloudflare_account_id=$CF_ACCOUNT_ID" \
+    -var="cloudflare_account_id=$CLOUDFLARE_ACCOUNT_ID" \
     -var="workers_subdomain=$WORKERS_SUBDOMAIN" \
     -var="test_run_id=$TEST_RUN_ID"
 

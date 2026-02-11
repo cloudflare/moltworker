@@ -25,8 +25,8 @@ if [ -f "$E2E_DIR/.dev.vars" ]; then
     set +a
 fi
 
-# Export CLOUDFLARE_ACCOUNT_ID (wrangler prefers this over CF_ACCOUNT_ID)
-export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID:-}"
+# Export CLOUDFLARE_ACCOUNT_ID for wrangler usage
+export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
 
 # Support running directly (not via cctr)
 if [ -z "$CCTR_FIXTURE_DIR" ]; then
@@ -66,7 +66,7 @@ if [ -n "$WORKER_NAME" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
         -H "Content-Type: application/json" | \
         jq -r ".result[] | select(.name == \"$CONTAINER_NAME\") | .id" 2>/dev/null || echo "")
-    
+
     if [ -n "$CONTAINER_ID" ]; then
         curl -s -X DELETE \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/containers/applications/$CONTAINER_ID" \
@@ -95,7 +95,7 @@ if [ -n "$TEST_RUN_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
         -H "Content-Type: application/json" | \
         jq -r ".result[] | select(.name == \"moltbot-e2e-$TEST_RUN_ID\") | .id" 2>/dev/null || echo "")
-    
+
     if [ -n "$TOKEN_ID" ]; then
         curl -s -X DELETE \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens/$TOKEN_ID" \

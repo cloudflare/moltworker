@@ -68,6 +68,8 @@ describe("skclaw", () => {
     expect(output).toContain("skclaw kv");
     expect(output).toContain("skclaw d1");
     expect(output).toContain("skclaw r2");
+    expect(output).toContain("skclaw e2e");
+    expect(output).toContain("skclaw test smoke");
   });
 
   test("ai-gateway create calls Cloudflare API and updates config", async () => {

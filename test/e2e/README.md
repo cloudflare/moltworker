@@ -157,6 +157,7 @@ wait for response containing the correct answer
 2. Install dependencies: `npm install`
 3. Install cctr: `brew install andreasjansson/tap/cctr` or `cargo install cctr`
 4. Install playwright-cli: `npm install -g playwright-cli`
+5. Create a Cloudflare API token with Access: Service Tokens = Edit and R2 Storage: Edit
 
 ### Run tests
 
@@ -168,10 +169,14 @@ cctr test/e2e/
 cctr test/e2e/ -v
 
 # Run specific test file
-cctr test/e2e/ -p pairing
+skclaw e2e setup
+skclaw test smoke
 
 # Watch test output in real-time (for debugging)
 cctr test/e2e/ -vv
+
+# Run smoke tests with verbose output and worker log tailing
+skclaw test smoke --verbose --tail-logs
 ```
 
 ### Run headed (see the browser)
