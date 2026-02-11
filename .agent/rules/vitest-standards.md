@@ -7,7 +7,7 @@
 
 ---
 
-## πŸ"œ **Principles**
+## Principles
 
 1. **Mock Export Names Must Match:** `vi.mock()` export names must exactly match actual module exports
 2. **Isolation First:** Module-level mocks are global - use `beforeEach` for test-specific behavior
@@ -16,7 +16,7 @@
 
 ---
 
-## πŸ" **Vitest vs Bun Test**
+## Vitest vs Bun Test
 
 ### Test Execution Differences
 
@@ -45,7 +45,7 @@ vi.mock("$lib/server/crypto/token-encryption", () => ({
   encryptToken: vi.fn()
 }));
 
-// βœ… GOOD - Matches actual module exports
+// GOOD - Matches actual module exports
 vi.mock("$lib/server/crypto/token-encryption", () => ({
   tryDecryptToken: vi.fn(), // Correct export name
   encryptToken: vi.fn(),
@@ -61,7 +61,7 @@ vi.mock("$lib/server/crypto/token-encryption", () => ({
 
 ---
 
-## 🎭 **Mock Patterns**
+## Mock Patterns
 
 ### Pattern 1: Crypto/Encoding Mocks
 
@@ -71,7 +71,7 @@ vi.mock("$lib/server/crypto/token-encryption", () => ({
 // ❌ BAD - Unrealistic mock
 export const createMockEncrypt = () => vi.fn(async (token: string) => `ENCRYPTED_${token}`);
 
-// βœ… GOOD - Real base64 encoding
+// GOOD - Real base64 encoding
 export const createMockEncrypt = () =>
   vi.fn(async (token: string, _secret: string) =>
     Buffer.from(`ENCRYPTED_${token}`).toString("base64")
@@ -94,7 +94,7 @@ export const createMockDecrypt = () =>
 // ❌ BAD - Mocking rejection bypasses fallback logic
 (crypto.tryDecryptToken as Mock).mockRejectedValue(new Error("Failed"));
 
-// βœ… GOOD - Mock the fallback return value
+// GOOD - Mock the fallback return value
 (crypto.tryDecryptToken as Mock).mockResolvedValue(plaintextJSON);
 // Simulates: tryDecryptToken detects plaintext and returns it directly
 ```
@@ -117,7 +117,7 @@ test("test 2", async () => {
   mockFn.mockResolvedValue("value2"); // Pollutes other tests!
 });
 
-// βœ… GOOD - Reset in beforeEach
+// GOOD - Reset in beforeEach
 let mockFn: Mock;
 
 beforeEach(() => {
@@ -144,7 +144,7 @@ test("test 2", async () => {
 // ❌ BAD - Missing type cast
 expect(result).toBe("expected"); // Fails if result is any
 
-// βœ… GOOD - Explicit type cast
+// GOOD - Explicit type cast
 expect(result as string).toBe("expected");
 
 // For complex types
@@ -202,7 +202,7 @@ test.skip("RED: Feature not yet implemented", async () => {
 
 ---
 
-## βœ… **Quality Checklist**
+## Quality Checklist
 
 Before committing test changes:
 
@@ -216,7 +216,7 @@ Before committing test changes:
 
 ---
 
-## πŸ"š **References**
+## References
 
 - **Vitest Mocking:** https://vitest.dev/guide/mocking.html
 - **Type Management:** `.agent/rules/type-management.md`
@@ -225,7 +225,7 @@ Before committing test changes:
 
 ---
 
-## πŸ" **Hazards & Lessons Learned**
+## Hazards & Lessons Learned
 
 ### HAZ-TEST-001: Mock Export Name Mismatch
 

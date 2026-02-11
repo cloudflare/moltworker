@@ -1,5 +1,5 @@
 ---
-description: Promote staging to production. Guides the safe promotion of validated staging code to the main branch and production environment.
+description: Promote validated changes to production. Guides a safe release to the main branch and production environment.
 ---
 
 ## Persona
@@ -12,15 +12,15 @@ You are the **Release Manager**.
 ## Pre-Flight Checklist
 
 > [!CAUTION]
-> Do NOT proceed unless staging has passed all quality gates.
+> Do NOT proceed unless the release branch has passed all quality gates.
 
-### 1. Verify Staging Health
+### 1. Verify Release Health
 
 // turbo
 
 ```bash
-# Check staging deployment status
-gh run list --workflow=staging.yml --limit=1
+# Check release workflow status
+gh run list --workflow=test.yml --limit=1
 ```
 
 **Expected:** ✅ Last run succeeded.
@@ -32,7 +32,7 @@ gh run list --workflow=staging.yml --limit=1
 git branch --show-current
 ```
 
-**Expected:** You should be on `staging` or ready to work with it.
+**Expected:** You should be on the release branch (often `main`), or ready to work with it.
 
 ---
 
@@ -44,22 +44,21 @@ git branch --show-current
 
 ```bash
 git fetch origin
-git checkout staging
-git pull origin staging
+git checkout main
+git pull origin main
 ```
 
-### 3. Create Pull Request (Staging → Main)
+### 3. Create Pull Request (Release → Main, if applicable)
 
 ```bash
-gh pr create --base main --head staging --title "chore(release): Promote Staging to Production" --body "## Release Summary
+gh pr create --base main --head <release-branch> --title "chore(release): Promote to Production" --body "## Release Summary
 
 ### Changes
-- [List key changes from staging]
+- [List key changes from release branch]
 
 ### Pre-Promotion Verification
-- [ ] Staging E2E tests passed
-- [ ] Staging smoke tests passed
-- [ ] Manual QA on staging environment completed
+- [ ] Release branch tests passed
+- [ ] Manual QA on release environment completed (if applicable)
 
 ### Post-Merge Checklist
 - [ ] D1 migrations applied to production
@@ -80,8 +79,8 @@ gh pr diff --web
 
 **Verify:**
 
-- No accidental `wrangler.toml` changes to root (production) config
-- No hardcoded staging URLs or secrets
+- No accidental `wrangler.jsonc` changes to production config
+- No hardcoded release URLs or secrets
 - No debug/test code
 
 ### 5. Merge the Pull Request
@@ -91,7 +90,7 @@ gh pr merge --merge --delete-branch=false
 ```
 
 > [!IMPORTANT]
-> Do NOT delete the `staging` branch. It is a persistent environment branch.
+> If your repo uses a persistent release branch, do NOT delete it.
 
 ---
 
@@ -103,7 +102,7 @@ gh pr merge --merge --delete-branch=false
 
 ```bash
 # Watch the production deploy workflow
-gh run watch --workflow=deploy.yml
+gh run watch --workflow=test.yml
 ```
 
 **Expected:** ✅ Deploy succeeds.
@@ -133,9 +132,8 @@ bunx wrangler d1 migrations apply <db-name> --remote
 // turbo
 
 ```bash
-# Run smoke tests against production
-# Replace <prod-url> with the production base URL (if smoke tests exist).
-PLAYWRIGHT_BASE_URL=<prod-url> bun run test:smoke
+# Run tests against production (if applicable)
+PLAYWRIGHT_BASE_URL=<prod-url> bun run test
 ```
 
 **Expected:** ✅ All smoke tests pass.
@@ -187,11 +185,11 @@ gh release create v$(date +%Y.%m.%d) --generate-notes --target main
 
 ## Quick Reference: Environment Mapping
 
-| Aspect           | Staging                  | Production       |
+| Aspect           | Release                  | Production       |
 | ---------------- | ------------------------ | ---------------- |
-| Branch           | `staging`                | `main`           |
-| URL              | <staging-url>            | <prod-url>       |
-| D1 Database      | <staging-db>             | <prod-db>        |
-| Wrangler Section | <staging-section>        | <prod-section>   |
+| Branch           | <release-branch>         | `main`           |
+| URL              | <release-url>            | <prod-url>       |
+| D1 Database      | <release-db>             | <prod-db>        |
+| Wrangler Section | <release-section>        | <prod-section>   |
 | Auto-Deploy      | ✅ On push               | ✅ On push       |
 | Auto-Migrate     | ✅ In CI                 | ❌ Manual        |

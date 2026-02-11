@@ -21,8 +21,8 @@ You are the **QA Engineer**.
     - **Refactor:** Run full suite (`run_quality_check`).
 
 3.  **Verification Phase**
-        - Use the repo's CLI-driven quality gates (see the "Quality Gate and Testing" track for the current command set).
-        - Do not hardcode local commands here; keep the workflow aligned to the CLI contract.
+        - Run CLI-driven quality gates: `bun run skclaw lint` and `bun run skclaw typecheck`.
+        - Run test suite: `bun run test` (and `bun run test:cli` when CLI changes).
     - **IF any failures detected:**
       - **STOP.** Do NOT proceed or mark as passing.
       - Perform root cause analysis:
@@ -37,7 +37,7 @@ You are the **QA Engineer**.
     - 100% of tests passing (no skips, no "known failures")
     - 0 linting errors (warnings must be justified)
     - 0 type errors
-    - Test coverage >= 80% for new code
+    - Test coverage >= 80% for new code (when coverage is configured)
     - **Failure = Handoff to appropriate specialist, not compromise**
 
 5.  **Handoff**
@@ -54,7 +54,6 @@ When E2E tests require OAuth credentials or complex data relationships:
 
 **Reference Docs:**
 
-- [ADR: E2E Fixture Pattern](docs/engineering/adr-e2e-fixture-pattern.md)
-- [Runbook: Adding E2E Fixtures](docs/engineering/runbook-e2e-fixtures.md)
-- [E2E Testing Patterns](docs/engineering/e2e-testing-patterns.md)
-    - Note: These docs are stubs for now. See the "Quality Gate and Testing" track for planned updates.
+- [ADR: E2E Fixture Pattern](../../docs/engineering/adr-e2e-fixture-pattern.md)
+- [Runbook: Adding E2E Fixtures](../../docs/engineering/runbook-e2e-fixtures.md)
+- [E2E Testing Patterns](../../docs/engineering/e2e-testing-patterns.md)
