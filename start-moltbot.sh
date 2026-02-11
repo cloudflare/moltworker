@@ -262,6 +262,44 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
             echo "[STUDY] auto-study cron already exists, skipping"
           fi
         fi
+
+        # Register brain memory consolidation crons
+        BRAIN_SCRIPT="/root/clawd/skills/brain-memory/scripts/brain-memory-system.js"
+        if [ -f "$BRAIN_SCRIPT" ]; then
+          # Daily memory consolidation (Haiku)
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "brain-memory"; then
+            echo "[BRAIN] Registering daily brain-memory cron..."
+            openclaw cron add \
+              --name "brain-memory" \
+              --every "24h" \
+              --session isolated \
+              --model "anthropic/claude-3-haiku-20240307" \
+              --thinking off \
+              $TOKEN_FLAG \
+              --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js — Analyze the output. Extract key facts, decisions, user preferences, and important topics from each conversation. Save a concise daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (use today's date). Create the directory if needed." \
+              2>&1 || echo "[WARN] brain-memory cron registration failed"
+            echo "[BRAIN] brain-memory cron registered (every 24h, haiku, thinking off)"
+          else
+            echo "[BRAIN] brain-memory cron already exists, skipping"
+          fi
+
+          # Weekly cross-memory insights (Sonnet)
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "brain-insights"; then
+            echo "[BRAIN] Registering weekly brain-insights cron..."
+            openclaw cron add \
+              --name "brain-insights" \
+              --every "168h" \
+              --session isolated \
+              --model "anthropic/claude-sonnet-4-5-20250929" \
+              --thinking off \
+              $TOKEN_FLAG \
+              --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --weekly — Analyze the output which includes this week's conversations and daily summaries. Find non-obvious connections, patterns, and emerging themes across all memories. Save the most valuable insights to memory." \
+              2>&1 || echo "[WARN] brain-insights cron registration failed"
+            echo "[BRAIN] brain-insights cron registered (every 168h, sonnet, thinking off)"
+          else
+            echo "[BRAIN] brain-insights cron already exists, skipping"
+          fi
+        fi
         break
       fi
     done
