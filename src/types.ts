@@ -29,6 +29,8 @@ export interface MoltbotEnv {
   APP_DOMAIN?: string; // Base domain for tenant subdomains (e.g., streamkinetics.com)
   TENANT_DOMAIN_MAP?: string; // JSON mapping for custom domains: {"host":"tenant"}
   TENANT_CACHE_TTL_SECONDS?: string; // Cache TTL for tenant domain lookups
+  PUBLIC_RATE_LIMIT_MAX?: string; // Max requests per window for public routes
+  PUBLIC_RATE_LIMIT_WINDOW_SECONDS?: string; // Window length for public rate limit
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_DM_POLICY?: string;
   DISCORD_BOT_TOKEN?: string;
@@ -42,7 +44,7 @@ export interface MoltbotEnv {
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
   R2_BUCKET_NAME?: string; // Override bucket name (default: 'moltbot-data')
-  CF_ACCOUNT_ID?: string; // Cloudflare account ID for R2 endpoint
+  CLOUDFLARE_ACCOUNT_ID?: string; // Cloudflare account ID for R2 endpoint
   // Browser Rendering binding for CDP shim
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication

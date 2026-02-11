@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT } from '../config';
 import { findExistingMoltbotProcess } from '../gateway';
+import { checkPublicRateLimit } from '../rate-limit';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -10,6 +11,37 @@ import { findExistingMoltbotProcess } from '../gateway';
  * Includes: health checks, static assets, and public API endpoints.
  */
 const publicRoutes = new Hono<AppEnv>();
+
+publicRoutes.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (
+    path.startsWith('/_admin/assets/') ||
+    path === '/logo.png' ||
+    path === '/logo-small.png'
+  ) {
+    return next();
+  }
+
+  const result = await checkPublicRateLimit(c.env, c.req.raw.headers);
+  if (!result.allowed) {
+    c.header('Retry-After', String(result.resetSeconds));
+    c.header('X-RateLimit-Limit', String(result.limit));
+    c.header('X-RateLimit-Remaining', String(result.remaining));
+    return c.json(
+      {
+        error: 'Rate limit exceeded',
+        limit: result.limit,
+        retryAfterSeconds: result.resetSeconds,
+      },
+      429,
+    );
+  }
+
+  c.header('X-RateLimit-Limit', String(result.limit));
+  c.header('X-RateLimit-Remaining', String(result.remaining));
+  c.header('X-RateLimit-Reset', String(result.resetSeconds));
+  return next();
+});
 
 // GET /sandbox-health - Health check endpoint
 publicRoutes.get('/sandbox-health', (c) => {

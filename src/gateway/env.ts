@@ -1,4 +1,5 @@
 import type { MoltbotEnv } from '../types';
+import type { GatewayRouting } from './routing';
 
 /**
  * Build environment variables to pass to the OpenClaw container process
@@ -6,8 +7,17 @@ import type { MoltbotEnv } from '../types';
  * @param env - Worker environment bindings
  * @returns Environment variables record
  */
-export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
+export function buildEnvVars(
+  env: MoltbotEnv,
+  routing?: GatewayRouting,
+): Record<string, string> {
   const envVars: Record<string, string> = {};
+
+  const hasCloudflareGateway = Boolean(
+    env.CLOUDFLARE_AI_GATEWAY_API_KEY &&
+      env.CF_AI_GATEWAY_ACCOUNT_ID &&
+      env.CF_AI_GATEWAY_GATEWAY_ID,
+  );
 
   // Cloudflare AI Gateway configuration (new native provider)
   if (env.CLOUDFLARE_AI_GATEWAY_API_KEY) {
@@ -45,8 +55,19 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.DISCORD_DM_POLICY) envVars.DISCORD_DM_POLICY = env.DISCORD_DM_POLICY;
   if (env.SLACK_BOT_TOKEN) envVars.SLACK_BOT_TOKEN = env.SLACK_BOT_TOKEN;
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
-  if (env.CF_AI_GATEWAY_MODEL) envVars.CF_AI_GATEWAY_MODEL = env.CF_AI_GATEWAY_MODEL;
-  if (env.CF_ACCOUNT_ID) envVars.CF_ACCOUNT_ID = env.CF_ACCOUNT_ID;
+  if (env.CF_AI_GATEWAY_MODEL) {
+    envVars.CF_AI_GATEWAY_MODEL = env.CF_AI_GATEWAY_MODEL;
+  }
+
+  if (hasCloudflareGateway && routing) {
+    if (!envVars.CF_AI_GATEWAY_MODEL) {
+      envVars.CF_AI_GATEWAY_MODEL = routing.model;
+    }
+    envVars.CF_AIG_METADATA = JSON.stringify(routing.metadata);
+    envVars.CF_AIG_REQUEST_TIMEOUT_MS = String(routing.requestTimeoutMs);
+    envVars.CF_AIG_MAX_ATTEMPTS = String(routing.maxAttempts);
+  }
+  if (env.CLOUDFLARE_ACCOUNT_ID) envVars.CLOUDFLARE_ACCOUNT_ID = env.CLOUDFLARE_ACCOUNT_ID;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
 

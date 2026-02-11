@@ -9,6 +9,7 @@ import {
   waitForProcess,
 } from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
+import { buildGatewayRouting } from '../gateway/routing';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -35,7 +36,8 @@ adminApi.get('/devices', async (c) => {
 
   try {
     // Ensure moltbot is running first
-    await ensureMoltbotGateway(sandbox, c.env);
+    const routing = buildGatewayRouting(c.env, c.get('tenant'));
+    await ensureMoltbotGateway(sandbox, c.env, routing);
 
     // Run OpenClaw CLI to list devices
     // Must specify --url and --token (OpenClaw v2026.2.3 requires explicit credentials with --url)
@@ -92,7 +94,8 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
 
   try {
     // Ensure moltbot is running first
-    await ensureMoltbotGateway(sandbox, c.env);
+    const routing = buildGatewayRouting(c.env, c.get('tenant'));
+    await ensureMoltbotGateway(sandbox, c.env, routing);
 
     // Run OpenClaw CLI to approve the device
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
@@ -128,7 +131,8 @@ adminApi.post('/devices/approve-all', async (c) => {
 
   try {
     // Ensure moltbot is running first
-    await ensureMoltbotGateway(sandbox, c.env);
+    const routing = buildGatewayRouting(c.env, c.get('tenant'));
+    await ensureMoltbotGateway(sandbox, c.env, routing);
 
     // First, get the list of pending devices
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
@@ -199,14 +203,14 @@ adminApi.get('/storage', async (c) => {
   const hasCredentials = !!(
     c.env.R2_ACCESS_KEY_ID &&
     c.env.R2_SECRET_ACCESS_KEY &&
-    c.env.CF_ACCOUNT_ID
+    c.env.CLOUDFLARE_ACCOUNT_ID
   );
 
   // Check which credentials are missing
   const missing: string[] = [];
   if (!c.env.R2_ACCESS_KEY_ID) missing.push('R2_ACCESS_KEY_ID');
   if (!c.env.R2_SECRET_ACCESS_KEY) missing.push('R2_SECRET_ACCESS_KEY');
-  if (!c.env.CF_ACCOUNT_ID) missing.push('CF_ACCOUNT_ID');
+  if (!c.env.CLOUDFLARE_ACCOUNT_ID) missing.push('CLOUDFLARE_ACCOUNT_ID');
 
   let lastSync: string | null = null;
 
@@ -286,7 +290,8 @@ adminApi.post('/gateway/restart', async (c) => {
     }
 
     // Start a new gateway in the background
-    const bootPromise = ensureMoltbotGateway(sandbox, c.env).catch((err) => {
+    const routing = buildGatewayRouting(c.env, c.get('tenant'));
+    const bootPromise = ensureMoltbotGateway(sandbox, c.env, routing).catch((err) => {
       console.error('Gateway restart failed:', err);
     });
     c.executionCtx.waitUntil(bootPromise);

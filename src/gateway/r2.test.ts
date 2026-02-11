@@ -18,7 +18,7 @@ describe('mountR2Storage', () => {
       const { sandbox } = createMockSandbox();
       const env = createMockEnv({
         R2_SECRET_ACCESS_KEY: 'secret',
-        CF_ACCOUNT_ID: 'account123',
+        CLOUDFLARE_ACCOUNT_ID: 'account123',
       });
 
       const result = await mountR2Storage(sandbox, env);
@@ -30,7 +30,7 @@ describe('mountR2Storage', () => {
       const { sandbox } = createMockSandbox();
       const env = createMockEnv({
         R2_ACCESS_KEY_ID: 'key123',
-        CF_ACCOUNT_ID: 'account123',
+        CLOUDFLARE_ACCOUNT_ID: 'account123',
       });
 
       const result = await mountR2Storage(sandbox, env);
@@ -38,7 +38,7 @@ describe('mountR2Storage', () => {
       expect(result).toBe(false);
     });
 
-    it('returns false when CF_ACCOUNT_ID is missing', async () => {
+    it('returns false when CLOUDFLARE_ACCOUNT_ID is missing', async () => {
       const { sandbox } = createMockSandbox();
       const env = createMockEnv({
         R2_ACCESS_KEY_ID: 'key123',
@@ -69,7 +69,7 @@ describe('mountR2Storage', () => {
       const env = createMockEnvWithR2({
         R2_ACCESS_KEY_ID: 'key123',
         R2_SECRET_ACCESS_KEY: 'secret',
-        CF_ACCOUNT_ID: 'account123',
+        CLOUDFLARE_ACCOUNT_ID: 'account123',
       });
 
       const result = await mountR2Storage(sandbox, env);
@@ -89,7 +89,7 @@ describe('mountR2Storage', () => {
       const env = createMockEnvWithR2({
         R2_ACCESS_KEY_ID: 'key123',
         R2_SECRET_ACCESS_KEY: 'secret',
-        CF_ACCOUNT_ID: 'account123',
+        CLOUDFLARE_ACCOUNT_ID: 'account123',
         R2_BUCKET_NAME: 'moltbot-e2e-test123',
       });
 

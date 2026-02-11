@@ -31,6 +31,9 @@ import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import { resolveTenantIdentity, generateSandboxId } from './tenant/resolve';
 import { lookupTenantByDomain, lookupTenantBySlug } from './tenant/lookup';
+import { buildGatewayRouting } from './gateway/routing';
+import { recordUsage } from './usage';
+import { validateRequiredBindings } from './bindings';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -93,6 +96,10 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   return missing;
 }
 
+function isTestMode(env: MoltbotEnv): boolean {
+  return env.DEV_MODE === 'true' || env.E2E_TEST_MODE === 'true';
+}
+
 /**
  * Build sandbox options based on environment configuration.
  *
@@ -133,6 +140,42 @@ app.use('*', async (c, next) => {
   console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
   console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
   await next();
+});
+
+// Middleware: Validate required bindings (fail fast outside dev/test)
+app.use('*', async (c, next) => {
+  const missingBindings = validateRequiredBindings(c.env);
+  if (missingBindings.length === 0) {
+    return next();
+  }
+
+  if (isTestMode(c.env)) {
+    console.warn(
+      '[CONFIG] Missing required bindings (DEV/E2E mode):',
+      missingBindings.join(', '),
+    );
+    return next();
+  }
+
+  console.error('[CONFIG] Missing required bindings:', missingBindings.join(', '));
+
+  const acceptsHtml = c.req.header('Accept')?.includes('text/html');
+  if (acceptsHtml) {
+    const html = String(configErrorHtml).replace(
+      '{{MISSING_VARS}}',
+      missingBindings.join(', '),
+    );
+    return c.html(html, 503);
+  }
+
+  return c.json(
+    {
+      error: 'Configuration error',
+      message: 'Required bindings are not configured',
+      missing: missingBindings,
+    },
+    503,
+  );
 });
 
 // Middleware: Resolve tenant context
@@ -288,8 +331,9 @@ app.all('*', async (c) => {
     console.log('[PROXY] Gateway not ready, serving loading page');
 
     // Start the gateway in the background (don't await)
+    const routing = buildGatewayRouting(c.env, c.get('tenant'));
     c.executionCtx.waitUntil(
-      ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
+      ensureMoltbotGateway(sandbox, c.env, routing).catch((err: Error) => {
         console.error('[PROXY] Background gateway start failed:', err);
       }),
     );
@@ -300,7 +344,8 @@ app.all('*', async (c) => {
 
   // Ensure moltbot is running (this will wait for startup)
   try {
-    await ensureMoltbotGateway(sandbox, c.env);
+    const routing = buildGatewayRouting(c.env, c.get('tenant'));
+    await ensureMoltbotGateway(sandbox, c.env, routing);
   } catch (error) {
     console.error('[PROXY] Failed to start Moltbot:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -472,8 +517,34 @@ app.all('*', async (c) => {
   }
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
+  const startTime = Date.now();
   const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
+  const latencyMs = Date.now() - startTime;
   console.log('[HTTP] Response status:', httpResponse.status);
+
+  const cfAigStep = httpResponse.headers.get('cf-aig-step');
+  if (cfAigStep) {
+    console.log('[AIG] cf-aig-step:', cfAigStep);
+  }
+
+  if (httpResponse.ok) {
+    const modelHeader = httpResponse.headers.get('cf-aig-model');
+    const logIdHeader = httpResponse.headers.get('cf-aig-log-id');
+    const hasAigHeaders = !!(modelHeader || logIdHeader);
+    const model = modelHeader || c.env.CF_AI_GATEWAY_MODEL;
+
+    if (hasAigHeaders && model) {
+      const tenant = c.get('tenant');
+      c.executionCtx.waitUntil(
+        recordUsage(c.env, tenant, {
+          model,
+          latencyMs,
+        }).catch((err) => {
+          console.error('[USAGE] Failed to record usage:', err);
+        }),
+      );
+    }
+  }
 
   // Add debug header to verify worker handled the request
   const newHeaders = new Headers(httpResponse.headers);

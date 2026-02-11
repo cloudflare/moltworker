@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildEnvVars } from './env';
 import { createMockEnv } from '../test-utils';
+import { buildGatewayRouting } from './routing';
 
 describe('buildEnvVars', () => {
   it('returns empty object when no env vars set', () => {
@@ -138,10 +139,35 @@ describe('buildEnvVars', () => {
     expect(result.CF_AI_GATEWAY_MODEL).toBe('workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast');
   });
 
-  it('passes CF_ACCOUNT_ID to container', () => {
-    const env = createMockEnv({ CF_ACCOUNT_ID: 'acct-123' });
+  it('adds routing metadata and default model when AI Gateway is configured', () => {
+    const env = createMockEnv({
+      CLOUDFLARE_AI_GATEWAY_API_KEY: 'cf-gw-key',
+      CF_AI_GATEWAY_ACCOUNT_ID: 'acct',
+      CF_AI_GATEWAY_GATEWAY_ID: 'gw',
+    });
+    const routing = buildGatewayRouting(env, {
+      id: 'tenant-1',
+      slug: 'acme',
+      platform: 'web',
+      tier: 'premium',
+    });
+
+    const result = buildEnvVars(env, routing);
+
+    expect(result.CF_AI_GATEWAY_MODEL).toBe(
+      'workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    );
+    expect(result.CF_AIG_METADATA).toBe(
+      JSON.stringify({ platform: 'web', tier: 'premium', workload: 'chat' }),
+    );
+    expect(result.CF_AIG_REQUEST_TIMEOUT_MS).toBe('20000');
+    expect(result.CF_AIG_MAX_ATTEMPTS).toBe('2');
+  });
+
+  it('passes CLOUDFLARE_ACCOUNT_ID to container', () => {
+    const env = createMockEnv({ CLOUDFLARE_ACCOUNT_ID: 'acct-123' });
     const result = buildEnvVars(env);
-    expect(result.CF_ACCOUNT_ID).toBe('acct-123');
+    expect(result.CLOUDFLARE_ACCOUNT_ID).toBe('acct-123');
   });
 
   it('combines all env vars correctly', () => {
