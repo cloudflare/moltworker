@@ -96,7 +96,7 @@ jobs:
         env:
           # Cloud infrastructure credentials (from repo secrets with E2E_ prefix)
           CLOUDFLARE_API_TOKEN: ${{ secrets.E2E_CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.E2E_CF_ACCOUNT_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.E2E_CF_ACCOUNT_ID }}
           WORKERS_SUBDOMAIN: ${{ secrets.E2E_WORKERS_SUBDOMAIN }}
           CF_ACCESS_TEAM_DOMAIN: ${{ secrets.E2E_CF_ACCESS_TEAM_DOMAIN }}
           R2_ACCESS_KEY_ID: ${{ secrets.E2E_R2_ACCESS_KEY_ID }}
@@ -127,15 +127,15 @@ jobs:
             for webm in /tmp/moltworker-e2e-videos/*.webm; do
               mp4="${webm%.webm}.mp4"
               thumb="${webm%.webm}.png"
-              
+
               # Convert to mp4
               ffmpeg -y -i "$webm" -c:v libx264 -preset fast -crf 22 -c:a aac "$mp4"
-              
+
               # Extract middle frame as thumbnail
               duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")
               midpoint=$(echo "$duration / 2" | bc -l)
               ffmpeg -y -ss "$midpoint" -i "$mp4" -vframes 1 -update 1 -q:v 2 "$thumb"
-              
+
               # Add play button overlay using ImageMagick
               width=$(identify -format '%w' "$thumb")
               height=$(identify -format '%h' "$thumb")
@@ -145,7 +145,7 @@ jobs:
                 -fill 'rgba(0,0,0,0.6)' -draw "circle ${cx},${cy} $((cx+50)),${cy}" \
                 -fill 'white' -draw "polygon $((cx-15)),$((cy-25)) $((cx-15)),$((cy+25)) $((cx+30)),${cy}" \
                 "$thumb"
-              
+
               echo "video_path=$mp4" >> $GITHUB_OUTPUT
               echo "video_name=$(basename $mp4)" >> $GITHUB_OUTPUT
               echo "thumb_path=$thumb" >> $GITHUB_OUTPUT

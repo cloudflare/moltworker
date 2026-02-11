@@ -194,6 +194,26 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
 // so we don't need to patch the provider config. Writing a provider
 // entry without a models array breaks OpenClaw's config validation.
 
+function buildAigHeaders() {
+    const headers = {};
+    if (process.env.CF_AIG_METADATA) {
+        headers['cf-aig-metadata'] = process.env.CF_AIG_METADATA;
+    }
+    if (process.env.CF_AIG_REQUEST_TIMEOUT_MS) {
+        headers['cf-aig-request-timeout'] = process.env.CF_AIG_REQUEST_TIMEOUT_MS;
+    }
+    if (process.env.CF_AIG_MAX_ATTEMPTS) {
+        headers['cf-aig-max-attempts'] = process.env.CF_AIG_MAX_ATTEMPTS;
+    }
+    if (process.env.CF_AIG_RETRY_DELAY_MS) {
+        headers['cf-aig-retry-delay'] = process.env.CF_AIG_RETRY_DELAY_MS;
+    }
+    if (process.env.CF_AIG_BACKOFF) {
+        headers['cf-aig-backoff'] = process.env.CF_AIG_BACKOFF;
+    }
+    return headers;
+}
+
 // AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
 // Adds a provider entry for any AI Gateway provider and sets it as default model.
 // Examples:
@@ -214,8 +234,8 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     if (accountId && gatewayId) {
         baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
         if (gwProvider === 'workers-ai') baseUrl += '/v1';
-    } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
-        baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
+    } else if (gwProvider === 'workers-ai' && process.env.CLOUDFLARE_ACCOUNT_ID) {
+        baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CLOUDFLARE_ACCOUNT_ID + '/ai/v1';
     }
 
     if (baseUrl && apiKey) {
@@ -224,12 +244,17 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
 
         config.models = config.models || {};
         config.models.providers = config.models.providers || {};
-        config.models.providers[providerName] = {
+        const headers = buildAigHeaders();
+        const provider = {
             baseUrl: baseUrl,
             apiKey: apiKey,
             api: api,
             models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
         };
+        if (Object.keys(headers).length > 0) {
+            provider.headers = headers;
+        }
+        config.models.providers[providerName] = provider;
         config.agents = config.agents || {};
         config.agents.defaults = config.agents.defaults || {};
         config.agents.defaults.model = { primary: providerName + '/' + modelId };
@@ -237,6 +262,17 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     } else {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
     }
+}
+
+// Apply AI Gateway headers to existing providers (when configured)
+const aigHeaders = buildAigHeaders();
+if (Object.keys(aigHeaders).length > 0 && config.models && config.models.providers) {
+    Object.values(config.models.providers).forEach((provider) => {
+        if (!provider || typeof provider !== 'object') return;
+        if (!provider.baseUrl || typeof provider.baseUrl !== 'string') return;
+        if (!provider.baseUrl.includes('gateway.ai.cloudflare.com')) return;
+        provider.headers = { ...(provider.headers || {}), ...aigHeaders };
+    });
 }
 
 // Telegram configuration
