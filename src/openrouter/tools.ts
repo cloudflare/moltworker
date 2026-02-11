@@ -1564,25 +1564,27 @@ async function getCrypto(action: 'price' | 'top' | 'dex', query?: string): Promi
  * Get price for a single coin via CoinCap + CoinPaprika
  */
 async function getCryptoPrice(symbol: string): Promise<string> {
-  const sym = symbol.toUpperCase().trim();
+  const sym = symbol.toUpperCase().trim().replace(/^\$/, ''); // Strip leading $ if present
 
-  // Try CoinCap first (fast, good for top coins)
+  // Search both APIs with multiple results to handle symbol ambiguity (e.g., JUP matches multiple tokens)
   const [coincapResult, paprikaResult] = await Promise.allSettled([
-    fetch(`https://api.coincap.io/v2/assets?search=${encodeURIComponent(sym)}&limit=1`, {
+    fetch(`https://api.coincap.io/v2/assets?search=${encodeURIComponent(sym)}&limit=5`, {
       headers: { 'User-Agent': 'MoltworkerBot/1.0' },
     }),
-    fetch(`https://api.coinpaprika.com/v1/search?q=${encodeURIComponent(sym)}&limit=1`, {
+    fetch(`https://api.coinpaprika.com/v1/search?q=${encodeURIComponent(sym)}&limit=5`, {
       headers: { 'User-Agent': 'MoltworkerBot/1.0' },
     }),
   ]);
 
   const lines: string[] = [];
 
-  // CoinCap data
+  // CoinCap data — pick highest market cap match for the symbol
   if (coincapResult.status === 'fulfilled' && coincapResult.value.ok) {
     const data = await coincapResult.value.json() as { data: Array<{ id: string; rank: string; symbol: string; name: string; priceUsd: string; changePercent24Hr: string; marketCapUsd: string; volumeUsd24Hr: string; supply: string; maxSupply: string | null }> };
-    const coin = data.data?.[0];
-    if (coin && coin.symbol.toUpperCase() === sym) {
+    // Filter to exact symbol matches and pick highest market cap
+    const matches = (data.data || []).filter(c => c.symbol.toUpperCase() === sym);
+    const coin = matches.sort((a, b) => parseFloat(b.marketCapUsd || '0') - parseFloat(a.marketCapUsd || '0'))[0];
+    if (coin) {
       const price = parseFloat(coin.priceUsd);
       const change = parseFloat(coin.changePercent24Hr);
       const mcap = parseFloat(coin.marketCapUsd);
@@ -1597,10 +1599,13 @@ async function getCryptoPrice(symbol: string): Promise<string> {
     }
   }
 
-  // CoinPaprika detailed data (ATH, multi-timeframe changes)
+  // CoinPaprika detailed data — pick highest-ranked match for the symbol
   if (paprikaResult.status === 'fulfilled' && paprikaResult.value.ok) {
-    const searchData = await paprikaResult.value.json() as { currencies?: Array<{ id: string; name: string; symbol: string }> };
-    const coinId = searchData.currencies?.[0]?.id;
+    const searchData = await paprikaResult.value.json() as { currencies?: Array<{ id: string; name: string; symbol: string; rank: number }> };
+    // Filter to exact symbol matches and pick highest ranked (lowest rank number)
+    const matches = (searchData.currencies || []).filter(c => c.symbol.toUpperCase() === sym);
+    const bestMatch = matches.sort((a, b) => (a.rank || 9999) - (b.rank || 9999))[0];
+    const coinId = bestMatch?.id;
     if (coinId) {
       try {
         const tickerRes = await fetch(`https://api.coinpaprika.com/v1/tickers/${coinId}`, {
@@ -1608,10 +1613,15 @@ async function getCryptoPrice(symbol: string): Promise<string> {
         });
         if (tickerRes.ok) {
           const ticker = await tickerRes.json() as {
-            quotes: { USD: { percent_change_1h: number; percent_change_7d: number; percent_change_30d: number; ath_price: number; ath_date: string; percent_from_price_ath: number } };
+            quotes: { USD: { price: number; percent_change_1h: number; percent_change_7d: number; percent_change_30d: number; ath_price: number; ath_date: string; percent_from_price_ath: number } };
           };
           const q = ticker.quotes?.USD;
           if (q) {
+            // If CoinCap didn't have data, use CoinPaprika price as primary
+            if (lines.length === 0 && q.price) {
+              lines.push(`${bestMatch.name} (${bestMatch.symbol.toUpperCase()})`);
+              lines.push(`Price: ${formatPrice(q.price)}`);
+            }
             lines.push('');
             lines.push(`Changes: 1h ${q.percent_change_1h >= 0 ? '+' : ''}${q.percent_change_1h?.toFixed(2)}% | 7d ${q.percent_change_7d >= 0 ? '+' : ''}${q.percent_change_7d?.toFixed(2)}% | 30d ${q.percent_change_30d >= 0 ? '+' : ''}${q.percent_change_30d?.toFixed(2)}%`);
             if (q.ath_price) {
@@ -2019,20 +2029,43 @@ function extractSection(
 async function fetchBriefingWeather(latitude: string, longitude: string): Promise<string> {
   const lat = parseFloat(latitude);
   const lon = parseFloat(longitude);
-  const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto&forecast_days=3`;
-  const response = await fetch(apiUrl, {
-    headers: { 'User-Agent': 'MoltworkerBot/1.0' },
-  });
 
-  if (!response.ok) {
-    throw new Error(`Weather API HTTP ${response.status}`);
+  // Fetch weather and reverse geocode in parallel
+  const [weatherRes, geoRes] = await Promise.allSettled([
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=temperature_2m_max,temperature_2m_min,weathercode&timezone=auto&forecast_days=3`, {
+      headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+    }),
+    fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10&accept-language=en`, {
+      headers: { 'User-Agent': 'MoltworkerBot/1.0' },
+    }),
+  ]);
+
+  if (weatherRes.status !== 'fulfilled' || !weatherRes.value.ok) {
+    throw new Error(`Weather API HTTP ${weatherRes.status === 'fulfilled' ? weatherRes.value.status : 'failed'}`);
   }
 
-  const data = await response.json() as OpenMeteoResponse;
+  const data = await weatherRes.value.json() as OpenMeteoResponse;
   const current = data.current_weather;
   const weatherDesc = WMO_WEATHER_CODES[current.weathercode] || 'Unknown';
 
-  let output = `${weatherDesc}, ${current.temperature}\u00B0C, wind ${current.windspeed} km/h\n`;
+  // Extract location name from reverse geocoding
+  let locationName = '';
+  if (geoRes.status === 'fulfilled' && geoRes.value.ok) {
+    try {
+      const geo = await geoRes.value.json() as { address?: { city?: string; town?: string; village?: string; state?: string; country?: string } };
+      const city = geo.address?.city || geo.address?.town || geo.address?.village || '';
+      const country = geo.address?.country || '';
+      if (city && country) {
+        locationName = ` (${city}, ${country})`;
+      } else if (city || country) {
+        locationName = ` (${city || country})`;
+      }
+    } catch {
+      // Geocoding failed, proceed without location name
+    }
+  }
+
+  let output = `${weatherDesc}, ${current.temperature}\u00B0C, wind ${current.windspeed} km/h${locationName}\n`;
   const days = Math.min(data.daily.time.length, 3);
   for (let i = 0; i < days; i++) {
     const dayWeather = WMO_WEATHER_CODES[data.daily.weathercode[i]] || 'Unknown';
@@ -2067,7 +2100,7 @@ async function fetchBriefingHN(): Promise<string> {
 
   return items
     .filter((item): item is HNItem => item !== null && !!item.title)
-    .map((item, i) => `${i + 1}. ${item.title} (${item.score || 0}\u2B06)`)
+    .map((item, i) => `${i + 1}. ${item.title} (${item.score || 0}\u2B06)\n   ${item.url || `https://news.ycombinator.com/item?id=${item.id}`}`)
     .join('\n');
 }
 
@@ -2084,7 +2117,7 @@ async function fetchBriefingReddit(subreddit: string): Promise<string> {
 
   const data = await response.json() as RedditListing;
   return data.data.children
-    .map((child, i) => `${i + 1}. ${child.data.title} (${child.data.score}\u2B06, ${child.data.num_comments} comments)`)
+    .map((child, i) => `${i + 1}. ${child.data.title} (${child.data.score}\u2B06, ${child.data.num_comments} comments)\n   https://reddit.com${child.data.permalink}`)
     .join('\n');
 }
 
@@ -2106,7 +2139,8 @@ async function fetchBriefingArxiv(category: string): Promise<string> {
   while ((match = entryRegex.exec(xml)) !== null) {
     const entry = match[1];
     const title = entry.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\s+/g, ' ').trim() || 'Untitled';
-    entries.push(`${entries.length + 1}. ${title}`);
+    const paperUrl = entry.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim() || '';
+    entries.push(`${entries.length + 1}. ${title}${paperUrl ? `\n   ${paperUrl}` : ''}`);
   }
 
   return entries.length > 0 ? entries.join('\n') : 'No recent papers found';
