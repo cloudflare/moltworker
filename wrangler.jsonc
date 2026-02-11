@@ -1,13 +1,14 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "moltbot-sandbox",
+	"name": "prod-stream-sandbox",
 	"main": "src/index.ts",
-	"compatibility_date": "2025-05-06",
+	"compatibility_date": "2025-03-07",
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
 	"observability": {
 		"enabled": true,
+		"head_sampling_rate": 1,
 	},
 	// Static assets for admin UI (built by vite)
 	"assets": {
@@ -67,25 +68,25 @@
 	"r2_buckets": [
 		{
 			"binding": "MOLTBOT_BUCKET",
-			"bucket_name": "moltbot-data",
+			"bucket_name": "prod-stream-memory",
 		},
 	],
 	// Tenant lookup storage
 	"d1_databases": [
 		{
 			"binding": "TENANT_DB",
-			"database_name": "prod-molt-tenant-db",
-			"database_id": "b6a126a4-7e5c-4045-a08f-cf56a3b03b02",
+			"database_name": "prod-stream-tenant-db",
+			"database_id": "d72d60fd-af43-4b8f-8d41-0c87b9b6af9b",
 		},
 	],
 	"kv_namespaces": [
 		{
 			"binding": "TENANT_KV",
-			"id": "f671b9ef2a534befbce262993556ad1c",
+			"id": "dfe6c51ccb4f4e84ab9998aa755f0542",
 		},
 		{
-			"binding": "prod_molt_session_kv",
-			"id": "f671b9ef2a534befbce262993556ad1c"
+			"binding": "SESSION_KV",
+			"id": "dfe6c51ccb4f4e84ab9998aa755f0542"
 		},
 	],
 	// Cron trigger to sync moltbot data to R2 every 5 minutes
@@ -97,6 +98,98 @@
 	// Browser Rendering binding for CDP shim
 	"browser": {
 		"binding": "BROWSER",
+	},
+	"env": {
+		"production": {
+			"name": "prod-stream-sandbox",
+			"containers": [
+				{
+					"class_name": "Sandbox",
+					"image": "./Dockerfile",
+					"instance_type": "standard-1",
+					"max_instances": 1,
+				},
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"class_name": "Sandbox",
+						"name": "Sandbox",
+					},
+				],
+			},
+			"browser": {
+				"binding": "BROWSER",
+			},
+			"d1_databases": [
+				{
+					"binding": "TENANT_DB",
+					"database_name": "prod-stream-tenant-db",
+					"database_id": "d72d60fd-af43-4b8f-8d41-0c87b9b6af9b",
+				}
+			],
+			"kv_namespaces": [
+				{
+					"binding": "TENANT_KV",
+					"id": "dfe6c51ccb4f4e84ab9998aa755f0542",
+				},
+				{
+					"binding": "SESSION_KV",
+					"id": "dfe6c51ccb4f4e84ab9998aa755f0542"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "MOLTBOT_BUCKET",
+					"bucket_name": "prod-stream-memory",
+				}
+			],
+		},
+		"staging": {
+			"name": "stg-stream-sandbox",
+			"containers": [
+				{
+					"class_name": "Sandbox",
+					"image": "./Dockerfile",
+					"instance_type": "standard-1",
+					"max_instances": 1,
+				},
+			],
+			"durable_objects": {
+				"bindings": [
+					{
+						"class_name": "Sandbox",
+						"name": "Sandbox",
+					},
+				],
+			},
+			"browser": {
+				"binding": "BROWSER",
+			},
+			"d1_databases": [
+				{
+					"binding": "TENANT_DB",
+					"database_name": "stg-stream-tenant-db",
+					"database_id": "1dec4037-799a-4319-9ec8-d247f331a706",
+				}
+			],
+			"kv_namespaces": [
+				{
+					"binding": "TENANT_KV",
+					"id": "6cc965fa43ce4d5da75105e7e61a6aab",
+				},
+				{
+					"binding": "SESSION_KV",
+					"id": "faa91cbd22b0408692822f319a112356",
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "MOLTBOT_BUCKET",
+					"bucket_name": "stg-stream-memory",
+				}
+			],
+		},
 	},
 	// Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
 	// Secrets to configure via `wrangler secret put`:

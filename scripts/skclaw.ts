@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 type Logger = {
@@ -10,14 +11,18 @@ type Logger = {
   error: (message: string) => void;
 };
 
+type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+
 type SkclawDeps = {
   logger: Logger;
   env: NodeJS.ProcessEnv;
   cwd: () => string;
   spawnCommand: (command: string, args: string[], options?: Record<string, unknown>) =>
     ChildProcess;
+  fetchFn: FetchLike;
   fileExists: (path: string) => boolean;
   readFile: (path: string) => string;
+  writeFile: (path: string, content: string) => void;
   resolvePath: (...parts: string[]) => string;
 };
 
@@ -34,13 +39,16 @@ const REQUIRED_CONFIG_FIELDS = [
   "d1DatabaseId",
 ] as const;
 
-const DEFAULT_SECRET_KEYS = [
+const REQUIRED_SECRET_KEYS = [
   "CLOUDFLARE_AI_GATEWAY_API_KEY",
   "CF_AI_GATEWAY_ACCOUNT_ID",
   "CF_AI_GATEWAY_GATEWAY_ID",
-  "CF_AI_GATEWAY_MODEL",
   "MOLTBOT_GATEWAY_TOKEN",
 ] as const;
+
+const OPTIONAL_SECRET_KEYS = ["CF_AI_GATEWAY_MODEL"] as const;
+
+const DEFAULT_SECRET_KEYS = [...REQUIRED_SECRET_KEYS, ...OPTIONAL_SECRET_KEYS] as const;
 
 const REQUIRED_ENV_KEYS = [
   "CLOUDFLARE_AI_GATEWAY_API_KEY",
@@ -53,8 +61,10 @@ const createDefaultDeps = (): SkclawDeps => ({
   env: process.env,
   cwd: () => process.cwd(),
   spawnCommand: spawn,
+  fetchFn: fetch,
   fileExists: (path) => existsSync(path),
   readFile: (path) => readFileSync(path, "utf-8"),
+  writeFile: (path, content) => writeFileSync(path, content, "utf-8"),
   resolvePath: (...parts) => resolve(...parts),
 });
 
@@ -79,6 +89,84 @@ export const parseArgs = (argv: string[]) => {
   return { flags, positionals };
 };
 
+const resolveEnvName = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+  fallback?: string,
+) => (flags.env as string | undefined) || deps.env.SKCLAW_ENV || fallback;
+
+const resolveApiToken = (deps: SkclawDeps) =>
+  deps.env.CLOUDFLARE_API_TOKEN || deps.env.CF_API_TOKEN;
+
+const resolveAccountId = (
+  config: Record<string, unknown>,
+  flags: Record<string, string | boolean>,
+) =>
+  (flags["account-id"] as string | undefined) ||
+  (config.aiGatewayAccountId as string | undefined) ||
+  (config.accountId as string | undefined);
+
+const resolveGatewayId = (
+  config: Record<string, unknown>,
+  flags: Record<string, string | boolean>,
+) =>
+  (flags["gateway-id"] as string | undefined) ||
+  (config.aiGatewayId as string | undefined);
+
+const callCloudflareApi = async (
+  deps: SkclawDeps,
+  method: string,
+  path: string,
+  body?: Record<string, unknown>,
+  debug = false,
+) => {
+  const token = resolveApiToken(deps);
+  if (!token) {
+    throw new Error("Missing CLOUDFLARE_API_TOKEN for AI Gateway commands");
+  }
+
+  const response = await deps.fetchFn(`https://api.cloudflare.com/client/v4${path}`,
+    {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    },
+  );
+
+  type CloudflareResponse = {
+    success?: boolean;
+    result?: unknown;
+    errors?: Array<{ message?: string }>;
+    raw?: string;
+    [key: string]: unknown;
+  };
+
+  let payload: CloudflareResponse | undefined;
+  let rawText = "";
+  try {
+    rawText = await response.text();
+    payload = rawText ? (JSON.parse(rawText) as CloudflareResponse) : undefined;
+  } catch {
+    payload = rawText ? { raw: rawText } : undefined;
+  }
+
+  if (!response.ok || payload?.success === false) {
+    const errorMessage =
+      payload?.errors?.[0]?.message || "Cloudflare API request failed";
+    if (debug) {
+      throw new Error(
+        `${errorMessage} | status=${response.status} url=${path} payload=${JSON.stringify(payload)}`,
+      );
+    }
+    throw new Error(errorMessage);
+  }
+
+  return payload?.result ?? payload;
+};
+
 const loadConfig = (deps: SkclawDeps, flags: Record<string, string | boolean>) => {
   const configPath =
     (flags.config as string | undefined) ||
@@ -92,8 +180,11 @@ const loadConfig = (deps: SkclawDeps, flags: Record<string, string | boolean>) =
   return { config: JSON.parse(raw), configPath: fullPath };
 };
 
-const validateConfig = (config: Record<string, unknown>) => {
-  const missing = REQUIRED_CONFIG_FIELDS.filter((key) => !config[key]);
+const validateConfig = (
+  config: Record<string, unknown>,
+  requiredFields: readonly string[] = REQUIRED_CONFIG_FIELDS,
+) => {
+  const missing = requiredFields.filter((key) => !config[key]);
   if (missing.length > 0) {
     throw new Error(`Missing config fields: ${missing.join(", ")}`);
   }
@@ -128,6 +219,31 @@ const parseEnvFile = (deps: SkclawDeps, filePath: string) => {
   return env;
 };
 
+const parseBooleanFlag = (value: string | boolean | undefined): boolean | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "n"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
+};
+
+const parseNumberFlag = (value: string | boolean | undefined): number | undefined => {
+  if (value === undefined || typeof value === "boolean") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isNaN(parsed) ? undefined : parsed;
+};
+
 const runCommand = (deps: SkclawDeps, command: string, args: string[]) =>
   new Promise<void>((resolvePromise, rejectPromise) => {
     const child = deps.spawnCommand(command, args, { stdio: "inherit" });
@@ -147,16 +263,22 @@ Usage:
   skclaw env status
   skclaw env doctor
   skclaw secrets sync --env production [--env-file .dev.vars] [--dry-run]
+  skclaw secrets doctor [--env-file .dev.vars]
   skclaw secrets diff [--env-file .dev.vars]
   skclaw secrets rotate [--env-file .dev.vars] [--keys key1,key2] [--dry-run]
   skclaw deploy [--env production]
   skclaw deploy preview --env preview
   skclaw deploy status [--env production]
+  skclaw worker delete [--env production] [--name worker-name] [--force]
   skclaw resources <check|create|bind>
-  skclaw migrations <list|apply|status> [--env production]
+  skclaw migrations <list|apply|status> [--env production] [--remote]
   skclaw logs <tail|search> [query] [--env production]
   skclaw quality <lint|typecheck|test|test cli>
   skclaw test [cli]
+  skclaw ai-gateway <create|list|get|update|delete|url>
+  skclaw kv <create|list|get|rename|delete>
+  skclaw d1 <create|list|get|delete>
+  skclaw r2 <create|list|get|delete>
   skclaw tenant <create|update|get|list>
   skclaw routing <set|test|list>
 
@@ -168,15 +290,41 @@ Flags:
   --d1-name      D1 database name (resources create, default uses naming standard)
   --kv-name      KV namespace name (resources create, default uses naming standard)
   --r2-name      R2 bucket name (resources create, default uses naming standard)
+  --id           Tenant UUID (tenant create)
   --slug         Tenant slug
-  --sandbox-id   Tenant sandbox id
+  --platform     Tenant platform
+  --tier         Tenant tier
+  --gateway-id   AI Gateway id (ai-gateway create/get/update/delete)
+  --account-id   Cloudflare account id (ai-gateway create/list/get/update/delete)
+  --set-config   Write AI Gateway settings into .skclaw.json
+  --namespace-id KV namespace id (kv get/delete)
+  --database-id  D1 database id (d1 get/delete)
+  --database-name D1 database name (d1 create)
+  --bucket-name  R2 bucket name (r2 create/get/delete)
+  --name         Worker name (worker delete)
+  --provider     AI Gateway provider for URL lookup (ai-gateway url)
+  --authentication Enable AI Gateway auth (ai-gateway update)
+  --collect-logs Enable AI Gateway logging (ai-gateway update)
+  --cache-ttl    AI Gateway cache TTL seconds (ai-gateway update)
+  --rate-limit   AI Gateway rate limit (ai-gateway update)
+  --rate-interval AI Gateway rate interval seconds (ai-gateway update)
+  --rate-technique AI Gateway rate technique (ai-gateway update)
+  --cache-invalidate Enable cache invalidate on update (ai-gateway create/update)
   --domain       Routing domain
   --tenant       Routing tenant slug
   --limit        Query limit
   --dry-run      Show actions without executing
+  --remote       Use remote D1 resources for migrations
+  --force        Force destructive operations where supported
+  --debug        Show API error details
   --json         Output machine-readable JSON
   --verbose      Output additional details
   --yes          Skip confirmations where supported
+
+Env vars:
+  SKCLAW_CONFIG  Path to .skclaw.json
+  SKCLAW_ENV     Wrangler environment name
+  CLOUDFLARE_API_TOKEN  Cloudflare API token for AI Gateway, KV, D1, and R2 commands
 `;
 
 const emitSuccess = (
@@ -225,8 +373,8 @@ const handleEnvValidate = (deps: SkclawDeps, flags: Record<string, string | bool
 
 const handleEnvStatus = (deps: SkclawDeps, flags: Record<string, string | boolean>) => {
   const { config, configPath } = loadConfig(deps, flags);
-  validateConfig(config);
-  const envName = (flags.env as string | undefined) || "default";
+  validateConfig(config, ["accountId"]);
+  const envName = resolveEnvName(deps, flags, "default");
   return {
     message: "Env status OK",
     data: {
@@ -239,7 +387,7 @@ const handleEnvStatus = (deps: SkclawDeps, flags: Record<string, string | boolea
 
 const handleEnvDoctor = (deps: SkclawDeps, flags: Record<string, string | boolean>) => {
   const { config } = loadConfig(deps, flags);
-  validateConfig(config);
+  validateConfig(config, ["accountId"]);
   const missing = REQUIRED_ENV_KEYS.filter((key) => !deps.env[key]);
   if (missing.length > 0) {
     throw new Error(`Missing required env vars: ${missing.join(", ")}`);
@@ -251,24 +399,29 @@ const handleSecretsSync = async (
   deps: SkclawDeps,
   flags: Record<string, string | boolean>,
   keys: readonly string[] = DEFAULT_SECRET_KEYS,
+  requiredKeys: readonly string[] = REQUIRED_SECRET_KEYS,
 ) => {
   const { config } = loadConfig(deps, flags);
-  validateConfig(config);
+  validateConfig(config, ["accountId"]);
   const envFile = (flags["env-file"] as string | undefined) || ".dev.vars";
   const env = parseEnvFile(deps, envFile);
-  const envName = flags.env as string | undefined;
+  const envName = resolveEnvName(deps, flags);
   const dryRun = Boolean(flags["dry-run"]);
 
-  const missingKeys = keys.filter((key) => !env[key]);
+  const missingKeys = requiredKeys.filter((key) => !env[key]);
   if (missingKeys.length > 0) {
     throw new Error(`Missing secrets in ${envFile}: ${missingKeys.join(", ")}`);
   }
 
-  for (const key of keys) {
+  const keysToSync = keys.filter((key) => Boolean(env[key]));
+
+  for (const key of keysToSync) {
     const value = env[key];
-    const args = ["wrangler", "secret", "put", key, "--name", config.workerName];
+    const args = ["wrangler", "secret", "put", key];
     if (envName) {
       args.push("--env", envName);
+    } else {
+      args.push("--name", config.workerName);
     }
     if (dryRun) {
       deps.logger.info(`[dry-run] bunx ${args.join(" ")}`);
@@ -294,16 +447,47 @@ const handleSecretsSync = async (
   return dryRun ? "Secrets sync dry-run complete" : "Secrets sync complete";
 };
 
+const handleSecretsDoctor = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const envFile = (flags["env-file"] as string | undefined) || ".dev.vars";
+  const env = parseEnvFile(deps, envFile);
+  const missing = REQUIRED_SECRET_KEYS.filter((key) => !env[key]);
+
+  const autoResolved: Record<string, string> = {};
+  const accountId = resolveAccountId(config, flags);
+  if (accountId) {
+    autoResolved.CF_AI_GATEWAY_ACCOUNT_ID = accountId;
+  }
+  const gatewayId = resolveGatewayId(config, flags);
+  if (gatewayId) {
+    autoResolved.CF_AI_GATEWAY_GATEWAY_ID = gatewayId;
+  }
+
+  const remainingMissing = missing.filter((key) => !(key in autoResolved));
+
+  return {
+    message: "Secrets doctor complete",
+    data: {
+      envFile,
+      missing: remainingMissing,
+      autoResolved,
+    },
+  };
+};
+
 const handleSecretsDiff = (
   deps: SkclawDeps,
   flags: Record<string, string | boolean>,
 ) => {
   const envFile = (flags["env-file"] as string | undefined) || ".dev.vars";
   const env = parseEnvFile(deps, envFile);
-  const missing = DEFAULT_SECRET_KEYS.filter((key) => !env[key]);
-  const extra = Object.keys(env).filter(
-    (key) => !DEFAULT_SECRET_KEYS.includes(key as (typeof DEFAULT_SECRET_KEYS)[number]),
-  );
+  const missing = REQUIRED_SECRET_KEYS.filter((key) => !env[key]);
+  const allowedKeys = new Set<string>([...REQUIRED_SECRET_KEYS, ...OPTIONAL_SECRET_KEYS]);
+  const extra = Object.keys(env).filter((key) => !allowedKeys.has(key));
   return {
     message: "Secrets diff complete",
     data: {
@@ -324,11 +508,11 @@ const handleSecretsRotate = async (
         .split(",")
         .map((key) => key.trim())
         .filter(Boolean)
-    : [...DEFAULT_SECRET_KEYS];
+    : [...REQUIRED_SECRET_KEYS];
   if (selectedKeys.length === 0) {
     throw new Error("No secret keys provided");
   }
-  return handleSecretsSync(deps, flags, selectedKeys);
+  return handleSecretsSync(deps, flags, selectedKeys, selectedKeys);
 };
 
 const handleDeploy = async (
@@ -336,11 +520,13 @@ const handleDeploy = async (
   flags: Record<string, string | boolean>,
 ) => {
   const { config } = loadConfig(deps, flags);
-  validateConfig(config);
-  const envName = flags.env as string | undefined;
-  const deployArgs = ["wrangler", "deploy", "--name", config.workerName];
+  validateConfig(config, ["accountId"]);
+  const envName = resolveEnvName(deps, flags);
+  const deployArgs = ["wrangler", "deploy"];
   if (envName) {
     deployArgs.push("--env", envName);
+  } else {
+    deployArgs.push("--name", config.workerName);
   }
   await runCommand(deps, "bun", ["run", "build"]);
   await runCommand(deps, "bunx", deployArgs);
@@ -352,7 +538,10 @@ const handleDeployPreview = async (
   flags: Record<string, string | boolean>,
 ) => {
   if (!flags.env) {
-    throw new Error("Preview deploy requires --env");
+    const envName = resolveEnvName(deps, flags);
+    if (!envName) {
+      throw new Error("Preview deploy requires --env or SKCLAW_ENV");
+    }
   }
   return handleDeploy(deps, flags);
 };
@@ -363,10 +552,12 @@ const handleDeployStatus = async (
 ) => {
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const envName = flags.env as string | undefined;
-  const args = ["wrangler", "deployments", "list", "--name", config.workerName];
+  const envName = resolveEnvName(deps, flags);
+  const args = ["wrangler", "deployments", "list"];
   if (envName) {
     args.push("--env", envName);
+  } else {
+    args.push("--name", config.workerName);
   }
   await runCommand(deps, "bunx", args);
   return "Deploy status complete";
@@ -423,7 +614,7 @@ const handleResourcesCreate = async (
   const kvName = flags["kv-name"] as string | undefined;
   const r2Name = flags["r2-name"] as string | undefined;
   const dryRun = Boolean(flags["dry-run"]);
-  const envName = (flags.env as string | undefined) || "dev";
+  const envName = resolveEnvName(deps, flags, "dev") || "dev";
   const names = buildResourceNames(envName, String(config.projectName), {
     d1: d1Name,
     kv: kvName,
@@ -467,10 +658,16 @@ const handleMigrationsList = async (
 ) => {
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const envName = flags.env as string | undefined;
-  const args = ["wrangler", "d1", "migrations", "list", String(config.d1DatabaseId)];
+  const envName = resolveEnvName(deps, flags);
+  const remote = Boolean(flags.remote);
+  const databaseId =
+    (flags["database-id"] as string | undefined) || String(config.d1DatabaseId);
+  const args = ["wrangler", "d1", "migrations", "list", databaseId];
   if (envName) {
     args.push("--env", envName);
+  }
+  if (remote) {
+    args.push("--remote");
   }
   await runCommand(deps, "bunx", args);
   return "Migrations list complete";
@@ -482,24 +679,31 @@ const handleMigrationsApply = async (
 ) => {
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const envName = flags.env as string | undefined;
+  const envName = resolveEnvName(deps, flags);
+  const remote = Boolean(flags.remote);
+  const databaseId =
+    (flags["database-id"] as string | undefined) || String(config.d1DatabaseId);
   const listArgs = [
     "wrangler",
     "d1",
     "migrations",
     "list",
-    String(config.d1DatabaseId),
+    databaseId,
   ];
   const applyArgs = [
     "wrangler",
     "d1",
     "migrations",
     "apply",
-    String(config.d1DatabaseId),
+    databaseId,
   ];
   if (envName) {
     listArgs.push("--env", envName);
     applyArgs.push("--env", envName);
+  }
+  if (remote) {
+    listArgs.push("--remote");
+    applyArgs.push("--remote");
   }
   await runCommand(deps, "bunx", listArgs);
   await runCommand(deps, "bunx", applyArgs);
@@ -517,7 +721,7 @@ const handleLogsTail = async (
 ) => {
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const envName = flags.env as string | undefined;
+  const envName = resolveEnvName(deps, flags);
   const args = ["wrangler", "tail", "--name", String(config.workerName)];
   if (envName) {
     args.push("--env", envName);
@@ -536,7 +740,7 @@ const handleLogsSearch = async (
   }
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const envName = flags.env as string | undefined;
+  const envName = resolveEnvName(deps, flags);
   const args = [
     "wrangler",
     "tail",
@@ -553,6 +757,7 @@ const handleLogsSearch = async (
 };
 
 const escapeSqlValue = (value: string) => value.replace(/'/g, "''");
+const generateTenantId = () => randomUUID();
 
 const runD1Execute = async (
   deps: SkclawDeps,
@@ -560,7 +765,7 @@ const runD1Execute = async (
   databaseId: string,
   sql: string,
 ) => {
-  const envName = flags.env as string | undefined;
+  const envName = resolveEnvName(deps, flags);
   const args = ["wrangler", "d1", "execute", databaseId, "--command", sql];
   if (envName) {
     args.push("--env", envName);
@@ -576,12 +781,24 @@ const handleTenantCreate = async (
   if (!slug) {
     throw new Error("tenant create requires --slug");
   }
-  const sandboxId = flags["sandbox-id"] as string | undefined;
+  const tenantId = (flags.id as string | undefined) || generateTenantId();
+  const platform = flags.platform as string | undefined;
+  const tier = flags.tier as string | undefined;
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const sql = sandboxId
-    ? `insert into tenants (slug, sandbox_id) values ('${escapeSqlValue(slug)}', '${escapeSqlValue(sandboxId)}')`
-    : `insert into tenants (slug) values ('${escapeSqlValue(slug)}')`;
+  const columns = ["id", "slug"];
+  const values = [tenantId, slug];
+  if (platform) {
+    columns.push("platform");
+    values.push(platform);
+  }
+  if (tier) {
+    columns.push("tier");
+    values.push(tier);
+  }
+  const sql = `insert into tenants (${columns.join(", ")}) values (${values
+    .map((value) => `'${escapeSqlValue(value)}'`)
+    .join(", ")})`;
   await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
   return "Tenant create complete";
 };
@@ -591,13 +808,26 @@ const handleTenantUpdate = async (
   flags: Record<string, string | boolean>,
 ) => {
   const slug = flags.slug as string | undefined;
-  const sandboxId = flags["sandbox-id"] as string | undefined;
-  if (!slug || !sandboxId) {
-    throw new Error("tenant update requires --slug and --sandbox-id");
+  const platform = flags.platform as string | undefined;
+  const tier = flags.tier as string | undefined;
+  if (!slug) {
+    throw new Error("tenant update requires --slug");
+  }
+  if (!platform && !tier) {
+    throw new Error("tenant update requires --platform or --tier");
   }
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
-  const sql = `update tenants set sandbox_id = '${escapeSqlValue(sandboxId)}' where slug = '${escapeSqlValue(slug)}'`;
+  const updates = [] as string[];
+  if (platform) {
+    updates.push(`platform = '${escapeSqlValue(platform)}'`);
+  }
+  if (tier) {
+    updates.push(`tier = '${escapeSqlValue(tier)}'`);
+  }
+  updates.push("updated_at = CURRENT_TIMESTAMP");
+  const sql = `update tenants set ${updates.join(", ")}
+    where slug = '${escapeSqlValue(slug)}'`;
   await runD1Execute(deps, flags, String(config.d1DatabaseId), sql);
   return "Tenant update complete";
 };
@@ -672,6 +902,518 @@ const handleRoutingList = async (
   return "Routing list complete";
 };
 
+const handleAiGatewayCreate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config, configPath } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const gatewayId = resolveGatewayId(config, flags);
+  if (!accountId) {
+    throw new Error("ai-gateway create requires --account-id or config accountId");
+  }
+  if (!gatewayId) {
+    throw new Error("ai-gateway create requires --gateway-id");
+  }
+
+  const authentication = parseBooleanFlag(flags.authentication);
+  const collectLogs = parseBooleanFlag(flags["collect-logs"]);
+  const cacheTtl = parseNumberFlag(flags["cache-ttl"]);
+  const rateLimit = parseNumberFlag(flags["rate-limit"]);
+  const rateInterval = parseNumberFlag(flags["rate-interval"]);
+  const rateTechnique = flags["rate-technique"] as string | undefined;
+  const cacheInvalidate = parseBooleanFlag(flags["cache-invalidate"]);
+
+  const body = {
+    id: gatewayId,
+    collect_logs: collectLogs ?? true,
+    cache_ttl: cacheTtl ?? 300,
+    cache_invalidate_on_update: cacheInvalidate ?? false,
+    rate_limiting_interval: rateInterval ?? 60,
+    rate_limiting_limit: rateLimit ?? 50,
+    rate_limiting_technique: rateTechnique ?? "fixed",
+    ...(authentication === undefined ? {} : { authentication }),
+  };
+
+  const result = (await callCloudflareApi(
+    deps,
+    "POST",
+    `/accounts/${accountId}/ai-gateway/gateways`,
+    body,
+    Boolean(flags.debug),
+  )) as { id?: string };
+
+  if (flags["set-config"]) {
+    const nextConfig = {
+      ...config,
+      aiGatewayId: result?.id || gatewayId,
+      aiGatewayAccountId: accountId,
+    };
+    deps.writeFile(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+  }
+
+  return {
+    message: "AI Gateway create complete",
+    data: {
+      gatewayId: result?.id || gatewayId,
+      accountId,
+    },
+  };
+};
+
+const handleAiGatewayList = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  if (!accountId) {
+    throw new Error("ai-gateway list requires --account-id or config accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/ai-gateway/gateways`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "AI Gateway list complete", data: { accountId, result } };
+};
+
+const handleAiGatewayGet = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const gatewayId = resolveGatewayId(config, flags);
+  if (!accountId || !gatewayId) {
+    throw new Error("ai-gateway get requires --gateway-id and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/ai-gateway/gateways/${gatewayId}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "AI Gateway get complete", data: { accountId, gatewayId, result } };
+};
+
+const handleAiGatewayDelete = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const gatewayId = resolveGatewayId(config, flags);
+  if (!accountId || !gatewayId) {
+    throw new Error("ai-gateway delete requires --gateway-id and accountId");
+  }
+  await callCloudflareApi(
+    deps,
+    "DELETE",
+    `/accounts/${accountId}/ai-gateway/gateways/${gatewayId}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return {
+    message: "AI Gateway delete complete",
+    data: { accountId, gatewayId },
+  };
+};
+
+const handleAiGatewayUpdate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const gatewayId = resolveGatewayId(config, flags);
+  if (!accountId || !gatewayId) {
+    throw new Error("ai-gateway update requires --gateway-id and accountId");
+  }
+
+  const authentication = parseBooleanFlag(flags.authentication);
+  const collectLogs = parseBooleanFlag(flags["collect-logs"]);
+  const cacheTtl = parseNumberFlag(flags["cache-ttl"]);
+  const rateLimit = parseNumberFlag(flags["rate-limit"]);
+  const rateInterval = parseNumberFlag(flags["rate-interval"]);
+  const rateTechnique = flags["rate-technique"] as string | undefined;
+  const cacheInvalidate = parseBooleanFlag(flags["cache-invalidate"]);
+
+  const current = (await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/ai-gateway/gateways/${gatewayId}`,
+    undefined,
+    Boolean(flags.debug),
+  )) as Record<string, unknown>;
+
+  const resolved = {
+    authentication: authentication ?? current.authentication ?? false,
+    collect_logs: collectLogs ?? current.collect_logs ?? true,
+    cache_ttl: cacheTtl ?? current.cache_ttl ?? 300,
+    cache_invalidate_on_update:
+      cacheInvalidate ?? current.cache_invalidate_on_update ?? false,
+    rate_limiting_limit: rateLimit ?? current.rate_limiting_limit ?? 50,
+    rate_limiting_interval:
+      rateInterval ?? current.rate_limiting_interval ?? 60,
+    rate_limiting_technique:
+      rateTechnique ?? current.rate_limiting_technique ?? "fixed",
+  } as Record<string, unknown>;
+
+  const result = await callCloudflareApi(
+    deps,
+    "PUT",
+    `/accounts/${accountId}/ai-gateway/gateways/${gatewayId}`,
+    resolved,
+    Boolean(flags.debug),
+  );
+  return {
+    message: "AI Gateway update complete",
+    data: { accountId, gatewayId, result },
+  };
+};
+
+const handleAiGatewayUrl = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const gatewayId = resolveGatewayId(config, flags);
+  const provider = flags.provider as string | undefined;
+  if (!accountId || !gatewayId || !provider) {
+    throw new Error("ai-gateway url requires --provider, --gateway-id, and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/ai-gateway/gateways/${gatewayId}/url/${provider}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return {
+    message: "AI Gateway url complete",
+    data: { accountId, gatewayId, provider, result },
+  };
+};
+
+const handleKvCreate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config, configPath } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const title = flags["kv-name"] as string | undefined;
+  if (!accountId) {
+    throw new Error("kv create requires --account-id or config accountId");
+  }
+  if (!title) {
+    throw new Error("kv create requires --kv-name");
+  }
+
+  const result = (await callCloudflareApi(
+    deps,
+    "POST",
+    `/accounts/${accountId}/storage/kv/namespaces`,
+    { title },
+    Boolean(flags.debug),
+  )) as { id?: string; title?: string };
+
+  if (flags["set-config"] && result?.id) {
+    const nextConfig = {
+      ...config,
+      kvNamespaceId: result.id,
+    };
+    deps.writeFile(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+  }
+
+  return {
+    message: "KV namespace create complete",
+    data: {
+      accountId,
+      namespaceId: result?.id,
+      title: result?.title || title,
+    },
+  };
+};
+
+const handleKvList = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  if (!accountId) {
+    throw new Error("kv list requires --account-id or config accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/storage/kv/namespaces`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "KV namespaces list complete", data: { accountId, result } };
+};
+
+const handleKvGet = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const namespaceId = flags["namespace-id"] as string | undefined;
+  if (!accountId || !namespaceId) {
+    throw new Error("kv get requires --namespace-id and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return {
+    message: "KV namespace get complete",
+    data: { accountId, namespaceId, result },
+  };
+};
+
+const handleKvDelete = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const namespaceId = flags["namespace-id"] as string | undefined;
+  if (!accountId || !namespaceId) {
+    throw new Error("kv delete requires --namespace-id and accountId");
+  }
+  await callCloudflareApi(
+    deps,
+    "DELETE",
+    `/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return {
+    message: "KV namespace delete complete",
+    data: { accountId, namespaceId },
+  };
+};
+
+const handleKvRename = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const namespaceId = flags["namespace-id"] as string | undefined;
+  const title = flags["kv-name"] as string | undefined;
+  if (!accountId || !namespaceId || !title) {
+    throw new Error("kv rename requires --namespace-id, --kv-name, and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "PUT",
+    `/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`,
+    { title },
+    Boolean(flags.debug),
+  );
+  return {
+    message: "KV namespace rename complete",
+    data: { accountId, namespaceId, result },
+  };
+};
+
+const handleD1Create = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config, configPath } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const name = flags["database-name"] as string | undefined;
+  if (!accountId || !name) {
+    throw new Error("d1 create requires --database-name and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "POST",
+    `/accounts/${accountId}/d1/database`,
+    { name },
+    Boolean(flags.debug),
+  );
+  if (flags["set-config"]) {
+    const nextConfig = { ...config, d1DatabaseId: name };
+    deps.writeFile(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+  }
+  return { message: "D1 create complete", data: { accountId, result } };
+};
+
+const handleD1List = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  if (!accountId) {
+    throw new Error("d1 list requires --account-id or config accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/d1/database`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "D1 list complete", data: { accountId, result } };
+};
+
+const handleD1Get = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const databaseId = flags["database-id"] as string | undefined;
+  if (!accountId || !databaseId) {
+    throw new Error("d1 get requires --database-id and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/d1/database/${databaseId}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "D1 get complete", data: { accountId, databaseId, result } };
+};
+
+const handleD1Delete = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const databaseId = flags["database-id"] as string | undefined;
+  if (!accountId || !databaseId) {
+    throw new Error("d1 delete requires --database-id and accountId");
+  }
+  await callCloudflareApi(
+    deps,
+    "DELETE",
+    `/accounts/${accountId}/d1/database/${databaseId}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "D1 delete complete", data: { accountId, databaseId } };
+};
+
+const handleR2Create = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config, configPath } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const name = flags["bucket-name"] as string | undefined;
+  if (!accountId || !name) {
+    throw new Error("r2 create requires --bucket-name and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "POST",
+    `/accounts/${accountId}/r2/buckets`,
+    { name },
+    Boolean(flags.debug),
+  );
+  if (flags["set-config"]) {
+    const nextConfig = { ...config, r2BucketName: name };
+    deps.writeFile(configPath, `${JSON.stringify(nextConfig, null, 2)}\n`);
+  }
+  return { message: "R2 create complete", data: { accountId, result } };
+};
+
+const handleR2List = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  if (!accountId) {
+    throw new Error("r2 list requires --account-id or config accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/r2/buckets`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "R2 list complete", data: { accountId, result } };
+};
+
+const handleR2Get = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const name = flags["bucket-name"] as string | undefined;
+  if (!accountId || !name) {
+    throw new Error("r2 get requires --bucket-name and accountId");
+  }
+  const result = await callCloudflareApi(
+    deps,
+    "GET",
+    `/accounts/${accountId}/r2/buckets/${name}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "R2 get complete", data: { accountId, bucketName: name, result } };
+};
+
+const handleR2Delete = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["accountId"]);
+  const accountId = resolveAccountId(config, flags);
+  const name = flags["bucket-name"] as string | undefined;
+  if (!accountId || !name) {
+    throw new Error("r2 delete requires --bucket-name and accountId");
+  }
+  await callCloudflareApi(
+    deps,
+    "DELETE",
+    `/accounts/${accountId}/r2/buckets/${name}`,
+    undefined,
+    Boolean(flags.debug),
+  );
+  return { message: "R2 delete complete", data: { accountId, bucketName: name } };
+};
+
 const handleLint = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "lint"]);
   return "Lint complete";
@@ -690,6 +1432,28 @@ const handleTest = async (deps: SkclawDeps) => {
 const handleTestCli = async (deps: SkclawDeps) => {
   await runCommand(deps, "bun", ["run", "test:cli"]);
   return "CLI tests complete";
+};
+
+const handleWorkerDelete = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config, ["workerName"]);
+  const envName = resolveEnvName(deps, flags);
+  const nameFlag = flags.name as string | undefined;
+  const workerName = nameFlag || String(config.workerName);
+  const args = ["wrangler", "delete"];
+  if (envName) {
+    args.push("--env", envName);
+  } else {
+    args.push("--name", workerName);
+  }
+  if (flags.force) {
+    args.push("--force");
+  }
+  await runCommand(deps, "bunx", args);
+  return "Worker delete complete";
 };
 
 export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
@@ -726,6 +1490,11 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
       if (group === "secrets" && action === "sync") {
         const message = await handleSecretsSync(resolvedDeps, flags);
         emitSuccess(resolvedDeps, flags, message);
+        return 0;
+      }
+      if (group === "secrets" && action === "doctor") {
+        const { message, data } = handleSecretsDoctor(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message, data);
         return 0;
       }
       if (group === "secrets" && action === "diff") {
@@ -803,6 +1572,11 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
           return 0;
         }
       }
+      if (group === "worker" && action === "delete") {
+        const message = await handleWorkerDelete(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message);
+        return 0;
+      }
       if (group === "lint") {
         const message = await handleLint(resolvedDeps);
         emitSuccess(resolvedDeps, flags, message);
@@ -871,6 +1645,118 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
         if (action === "list") {
           const message = await handleRoutingList(resolvedDeps, flags);
           emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "ai-gateway") {
+        if (action === "create") {
+          const { message, data } = await handleAiGatewayCreate(
+            resolvedDeps,
+            flags,
+          );
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "list") {
+          const { message, data } = await handleAiGatewayList(
+            resolvedDeps,
+            flags,
+          );
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "get") {
+          const { message, data } = await handleAiGatewayGet(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "delete") {
+          const { message, data } = await handleAiGatewayDelete(
+            resolvedDeps,
+            flags,
+          );
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "update") {
+          const { message, data } = await handleAiGatewayUpdate(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "url") {
+          const { message, data } = await handleAiGatewayUrl(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+      }
+      if (group === "kv") {
+        if (action === "create") {
+          const { message, data } = await handleKvCreate(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "list") {
+          const { message, data } = await handleKvList(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "get") {
+          const { message, data } = await handleKvGet(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "delete") {
+          const { message, data } = await handleKvDelete(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "rename") {
+          const { message, data } = await handleKvRename(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+      }
+      if (group === "d1") {
+        if (action === "create") {
+          const { message, data } = await handleD1Create(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "list") {
+          const { message, data } = await handleD1List(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "get") {
+          const { message, data } = await handleD1Get(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "delete") {
+          const { message, data } = await handleD1Delete(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+      }
+      if (group === "r2") {
+        if (action === "create") {
+          const { message, data } = await handleR2Create(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "list") {
+          const { message, data } = await handleR2List(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "get") {
+          const { message, data } = await handleR2Get(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
+          return 0;
+        }
+        if (action === "delete") {
+          const { message, data } = await handleR2Delete(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message, data);
           return 0;
         }
       }

@@ -1,0 +1,12 @@
+{
+  "accountId": "a9c661749d16228083b6047aa1e8a70e",
+  "zoneId": "38f51e3479133315790a7cb5bc5beb61",
+  "projectName": "streamkinetics",
+  "workerName": "stg-stream-sandbox",
+  "assetsDir": "dist/client",
+  "aiGatewayId": "stg-stream-aigw",
+  "aiGatewayAccountId": "a9c661749d16228083b6047aa1e8a70e",
+  "r2BucketName": "stg-stream-memory",
+  "kvNamespaceId": "6cc965fa43ce4d5da75105e7e61a6aab",
+  "d1DatabaseId": "stg-stream-tenant-db"
+}
