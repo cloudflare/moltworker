@@ -57,6 +57,13 @@ export interface AccessUser {
   name?: string;
 }
 
+export type TenantRecord = {
+  id: string;
+  slug: string;
+  platform?: string | null;
+  tier?: string | null;
+};
+
 /**
  * Hono app environment type
  */
@@ -66,6 +73,7 @@ export type AppEnv = {
     sandbox: Sandbox;
     tenantSlug?: string;
     sandboxId?: string;
+    tenant?: TenantRecord;
     accessUser?: AccessUser;
   };
 };

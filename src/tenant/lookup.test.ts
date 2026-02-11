@@ -21,9 +21,11 @@ function createEnv(overrides: Partial<MoltbotEnv>): MoltbotEnv {
 }
 
 describe('lookupTenantByDomain', () => {
-  it('returns cached tenant slug from KV', async () => {
+  it('returns cached tenant record from KV', async () => {
     const kv: MockKV = {
-      get: vi.fn().mockResolvedValue('{"tenantSlug":"acme"}'),
+      get: vi.fn().mockResolvedValue(
+        '{"id":"tenant-1","slug":"acme","platform":"streamkinetics.com","tier":"premium"}',
+      ),
       put: vi.fn(),
     };
     const d1: MockD1 = {
@@ -34,7 +36,12 @@ describe('lookupTenantByDomain', () => {
 
     const result = await lookupTenantByDomain(env, 'acme.example.com');
 
-    expect(result).toBe('acme');
+    expect(result).toEqual({
+      id: 'tenant-1',
+      slug: 'acme',
+      platform: 'streamkinetics.com',
+      tier: 'premium',
+    });
     expect(d1.prepare).not.toHaveBeenCalled();
   });
 
@@ -44,7 +51,9 @@ describe('lookupTenantByDomain', () => {
       put: vi.fn().mockResolvedValue(undefined),
     };
 
-    const first = vi.fn().mockResolvedValue({ tenant_slug: 'acme' });
+    const first = vi
+      .fn()
+      .mockResolvedValue({ id: 'tenant-1', slug: 'acme', platform: null, tier: 'free' });
     const bind = vi.fn().mockReturnValue({ first });
     const prepare = vi.fn().mockReturnValue({ bind });
     const d1: MockD1 = { prepare };
@@ -57,13 +66,17 @@ describe('lookupTenantByDomain', () => {
 
     const result = await lookupTenantByDomain(env, 'acme.example.com');
 
-    expect(result).toBe('acme');
+    expect(result).toEqual({ id: 'tenant-1', slug: 'acme', platform: null, tier: 'free' });
     expect(prepare).toHaveBeenCalledWith(
-      'SELECT tenant_slug FROM tenant_domains WHERE hostname = ? LIMIT 1',
+      `SELECT t.id, t.slug, t.platform, t.tier
+       FROM tenant_domains d
+       JOIN tenants t ON t.slug = d.tenant_slug
+       WHERE d.hostname = ?
+       LIMIT 1`,
     );
     expect(kv.put).toHaveBeenCalledWith(
       'tenant:domain:acme.example.com',
-      '{"tenantSlug":"acme"}',
+      '{"id":"tenant-1","slug":"acme","platform":null,"tier":"free"}',
       { expirationTtl: 120 },
     );
   });
@@ -74,9 +87,18 @@ describe('lookupTenantByDomain', () => {
       put: vi.fn().mockResolvedValue(undefined),
     };
 
-    const first = vi.fn().mockResolvedValue(null);
-    const bind = vi.fn().mockReturnValue({ first });
-    const prepare = vi.fn().mockReturnValue({ bind });
+    const domainFirst = vi.fn().mockResolvedValue(null);
+    const domainBind = vi.fn().mockReturnValue({ first: domainFirst });
+    const tenantFirst = vi
+      .fn()
+      .mockResolvedValue({ id: 'tenant-2', slug: 'custom', platform: null, tier: null });
+    const tenantBind = vi.fn().mockReturnValue({ first: tenantFirst });
+    const prepare = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes('FROM tenant_domains')) {
+        return { bind: domainBind };
+      }
+      return { bind: tenantBind };
+    });
     const d1: MockD1 = { prepare };
 
     const env = createEnv({
@@ -87,7 +109,7 @@ describe('lookupTenantByDomain', () => {
 
     const result = await lookupTenantByDomain(env, 'custom.example.com');
 
-    expect(result).toBe('custom');
+    expect(result).toEqual({ id: 'tenant-2', slug: 'custom', platform: null, tier: null });
     expect(kv.put).toHaveBeenCalled();
   });
 
@@ -97,9 +119,16 @@ describe('lookupTenantByDomain', () => {
       put: vi.fn().mockResolvedValue(undefined),
     };
 
-    const first = vi.fn().mockResolvedValue(null);
-    const bind = vi.fn().mockReturnValue({ first });
-    const prepare = vi.fn().mockReturnValue({ bind });
+    const domainFirst = vi.fn().mockResolvedValue(null);
+    const domainBind = vi.fn().mockReturnValue({ first: domainFirst });
+    const tenantFirst = vi.fn().mockResolvedValue(null);
+    const tenantBind = vi.fn().mockReturnValue({ first: tenantFirst });
+    const prepare = vi.fn().mockImplementation((sql: string) => {
+      if (sql.includes('FROM tenant_domains')) {
+        return { bind: domainBind };
+      }
+      return { bind: tenantBind };
+    });
     const d1: MockD1 = { prepare };
 
     const env = createEnv({

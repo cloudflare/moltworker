@@ -1,11 +1,9 @@
-import type { MoltbotEnv } from '../types';
+import type { MoltbotEnv, TenantRecord } from '../types';
 
 const CACHE_PREFIX = 'tenant:domain:';
 const DEFAULT_TTL_SECONDS = 300;
 
-type TenantCacheEntry = {
-  tenantSlug: string;
-};
+type TenantCacheEntry = TenantRecord;
 
 function getCacheKey(hostname: string): string {
   return `${CACHE_PREFIX}${hostname.toLowerCase()}`;
@@ -52,21 +50,50 @@ async function writeCache(
   });
 }
 
-async function lookupInD1(env: MoltbotEnv, hostname: string): Promise<string | null> {
+async function lookupDomainInD1(
+  env: MoltbotEnv,
+  hostname: string,
+): Promise<TenantRecord | null> {
   if (!env.TENANT_DB) {
     return null;
   }
 
   try {
     const row = await env.TENANT_DB.prepare(
-      'SELECT tenant_slug FROM tenant_domains WHERE hostname = ? LIMIT 1',
+      `SELECT t.id, t.slug, t.platform, t.tier
+       FROM tenant_domains d
+       JOIN tenants t ON t.slug = d.tenant_slug
+       WHERE d.hostname = ?
+       LIMIT 1`,
     )
       .bind(hostname.toLowerCase())
-      .first<{ tenant_slug?: string }>();
+      .first<TenantRecord>();
 
-    return row?.tenant_slug ?? null;
+    return row ?? null;
   } catch (error) {
     console.error('[TENANT] D1 lookup failed:', error);
+    return null;
+  }
+}
+
+export async function lookupTenantBySlug(
+  env: MoltbotEnv,
+  slug: string,
+): Promise<TenantRecord | null> {
+  if (!env.TENANT_DB) {
+    return null;
+  }
+
+  try {
+    const row = await env.TENANT_DB.prepare(
+      'SELECT id, slug, platform, tier FROM tenants WHERE slug = ? LIMIT 1',
+    )
+      .bind(slug.toLowerCase())
+      .first<TenantRecord>();
+
+    return row ?? null;
+  } catch (error) {
+    console.error('[TENANT] D1 lookup by slug failed:', error);
     return null;
   }
 }
@@ -74,7 +101,7 @@ async function lookupInD1(env: MoltbotEnv, hostname: string): Promise<string | n
 export async function lookupTenantByDomain(
   env: MoltbotEnv,
   hostname: string,
-): Promise<string | null> {
+): Promise<TenantRecord | null> {
   const normalizedHost = hostname.toLowerCase();
   const domainMap = parseDomainMap(env.TENANT_DOMAIN_MAP);
   const ttlSeconds = env.TENANT_CACHE_TTL_SECONDS
@@ -83,16 +110,28 @@ export async function lookupTenantByDomain(
 
   if (env.TENANT_KV) {
     const cached = await readCache(env.TENANT_KV, normalizedHost);
-    if (cached?.tenantSlug) {
-      return cached.tenantSlug;
+    if (cached?.id) {
+      return cached;
     }
   }
 
-  const tenantSlug = (await lookupInD1(env, normalizedHost)) ?? domainMap?.[normalizedHost] ?? null;
-
-  if (tenantSlug && env.TENANT_KV) {
-    await writeCache(env.TENANT_KV, normalizedHost, { tenantSlug }, ttlSeconds);
+  const tenant = await lookupDomainInD1(env, normalizedHost);
+  if (tenant) {
+    if (env.TENANT_KV) {
+      await writeCache(env.TENANT_KV, normalizedHost, tenant, ttlSeconds);
+    }
+    return tenant;
   }
 
-  return tenantSlug;
+  const fallbackSlug = domainMap?.[normalizedHost];
+  if (!fallbackSlug) {
+    return null;
+  }
+
+  const fallbackTenant = await lookupTenantBySlug(env, fallbackSlug);
+  if (fallbackTenant && env.TENANT_KV) {
+    await writeCache(env.TENANT_KV, normalizedHost, fallbackTenant, ttlSeconds);
+  }
+
+  return fallbackTenant;
 }

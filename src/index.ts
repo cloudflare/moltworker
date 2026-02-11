@@ -23,14 +23,14 @@
 import { Hono } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
-import type { AppEnv, MoltbotEnv } from './types';
+import type { AppEnv, MoltbotEnv, TenantRecord } from './types';
 import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2 } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
-import { resolveTenantSlug, generateSandboxId } from './tenant/resolve';
-import { lookupTenantByDomain } from './tenant/lookup';
+import { resolveTenantIdentity, generateSandboxId } from './tenant/resolve';
+import { lookupTenantByDomain, lookupTenantBySlug } from './tenant/lookup';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -139,11 +139,16 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const request = c.req.raw;
   const appDomain = c.env.APP_DOMAIN;
-  const tenantSlug = await resolveTenantSlug(request, c.env, appDomain || '', (hostname) =>
-    lookupTenantByDomain(c.env, hostname),
-  );
+  const resolution = resolveTenantIdentity(request, c.env, appDomain || '');
+  let tenant: TenantRecord | null = null;
 
-  if (!tenantSlug) {
+  if (resolution.mode === 'override' || resolution.mode === 'subdomain') {
+    tenant = await lookupTenantBySlug(c.env, resolution.slug);
+  } else if (resolution.mode === 'custom') {
+    tenant = await lookupTenantByDomain(c.env, resolution.hostname);
+  }
+
+  if (!tenant) {
     if (!appDomain) {
       c.set('tenantSlug', 'default');
       c.set('sandboxId', 'moltbot');
@@ -158,8 +163,9 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'Tenant not found' }, 404);
   }
 
-  const sandboxId = await generateSandboxId(tenantSlug);
-  c.set('tenantSlug', tenantSlug);
+  const sandboxId = await generateSandboxId(tenant.id);
+  c.set('tenantSlug', tenant.slug);
+  c.set('tenant', tenant);
   c.set('sandboxId', sandboxId);
 
   return next();

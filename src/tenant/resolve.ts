@@ -1,7 +1,5 @@
 import type { MoltbotEnv } from '../types';
 
-type TenantLookup = (hostname: string) => Promise<string | null>;
-
 const OVERRIDE_HEADER = 'X-Tenant-Override';
 const OVERRIDE_PATTERN = /^[a-z0-9-]+$/i;
 
@@ -26,27 +24,35 @@ function getOverrideTenant(request: Request, env: MoltbotEnv): string | null {
   return override.toLowerCase();
 }
 
-export async function resolveTenantSlug(
+export type TenantResolution =
+  | { mode: 'override'; slug: string; hostname: string }
+  | { mode: 'subdomain'; slug: string; hostname: string }
+  | { mode: 'custom'; hostname: string }
+  | { mode: 'none'; hostname: string };
+
+export function resolveTenantIdentity(
   request: Request,
   env: MoltbotEnv,
   appDomain: string,
-  lookup: TenantLookup,
-): Promise<string | null> {
+): TenantResolution {
+  const hostname = normalizeHostname(request);
   const override = getOverrideTenant(request, env);
   if (override) {
-    return override;
+    return { mode: 'override', slug: override, hostname };
   }
 
-  const hostname = normalizeHostname(request);
   const normalizedDomain = appDomain.toLowerCase();
-  const suffix = `.${normalizedDomain}`;
-
-  if (hostname.endsWith(suffix)) {
-    const subdomain = hostname.slice(0, -suffix.length);
-    return subdomain.length > 0 ? subdomain : null;
+  if (normalizedDomain) {
+    const suffix = `.${normalizedDomain}`;
+    if (hostname.endsWith(suffix)) {
+      const subdomain = hostname.slice(0, -suffix.length);
+      return subdomain.length > 0
+        ? { mode: 'subdomain', slug: subdomain, hostname }
+        : { mode: 'none', hostname };
+    }
   }
 
-  return lookup(hostname);
+  return { mode: 'custom', hostname };
 }
 
 function toHex(bytes: Uint8Array): string {
