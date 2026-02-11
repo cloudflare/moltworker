@@ -12,6 +12,20 @@ const createLogger = (buffer: LoggerBuffer) => ({
   error: (message: string) => buffer.error.push(message),
 });
 
+const getConfigJson = () =>
+  JSON.stringify({
+    accountId: "acct",
+    zoneId: "zone",
+    projectName: "project",
+    workerName: "worker",
+    assetsDir: "public",
+    aiGatewayId: "gw",
+    aiGatewayAccountId: "gw-acct",
+    r2BucketName: "bucket",
+    kvNamespaceId: "kv",
+    d1DatabaseId: "db",
+  });
+
 describe("skclaw", () => {
   test("help returns JSON when --json is set", async () => {
     const buffer = { info: [], error: [] } as LoggerBuffer;
@@ -168,5 +182,279 @@ describe("skclaw", () => {
     expect(payload.status).toBe("error");
     expect(payload.code).toBe(1);
     expect(payload.message).toContain("Config not found");
+  });
+
+  test("env status returns JSON output", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      resolvePath: () => "/repo/.skclaw.json",
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["env", "status", "--json"]);
+
+    expect(code).toBe(0);
+    const payload = JSON.parse(buffer.info[0]) as {
+      status: string;
+      code: number;
+      data: { configPath: string; workerName: string };
+    };
+    expect(payload.status).toBe("ok");
+    expect(payload.code).toBe(0);
+    expect(payload.data.configPath).toBe("/repo/.skclaw.json");
+    expect(payload.data.workerName).toBe("worker");
+  });
+
+  test("secrets diff reports missing keys in JSON", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: (path: string) =>
+        path.endsWith(".skclaw.json")
+          ? getConfigJson()
+          : "CLOUDFLARE_AI_GATEWAY_API_KEY=key\nCF_AI_GATEWAY_ACCOUNT_ID=acct\n",
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run([
+      "secrets",
+      "diff",
+      "--env-file",
+      ".dev.vars",
+      "--json",
+    ]);
+
+    expect(code).toBe(0);
+    const payload = JSON.parse(buffer.info[0]) as {
+      status: string;
+      code: number;
+      data: { missing: string[] };
+    };
+    expect(payload.status).toBe("ok");
+    expect(payload.data.missing.length).toBeGreaterThan(0);
+    expect(payload.data.missing).toContain("CF_AI_GATEWAY_GATEWAY_ID");
+  });
+
+  test("secrets rotate honors --keys with dry-run", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: (path: string) =>
+        path.endsWith(".skclaw.json")
+          ? getConfigJson()
+          : "CF_AI_GATEWAY_GATEWAY_ID=gwid\nMOLTBOT_GATEWAY_TOKEN=token\n",
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run([
+      "secrets",
+      "rotate",
+      "--env-file",
+      ".dev.vars",
+      "--keys",
+      "CF_AI_GATEWAY_GATEWAY_ID",
+      "--dry-run",
+    ]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([]);
+    expect(buffer.info.join(" ")).toContain("dry-run");
+    expect(buffer.info.join(" ")).toContain("CF_AI_GATEWAY_GATEWAY_ID");
+  });
+
+  test("deploy preview runs build and deploy", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["deploy", "preview", "--env", "preview"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      { command: "bun", args: ["run", "build"] },
+      {
+        command: "bunx",
+        args: ["wrangler", "deploy", "--name", "worker", "--env", "preview"],
+      },
+    ]);
+  });
+
+  test("deploy status calls wrangler deployments list", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["deploy", "status", "--env", "preview"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      {
+        command: "bunx",
+        args: [
+          "wrangler",
+          "deployments",
+          "list",
+          "--name",
+          "worker",
+          "--env",
+          "preview",
+        ],
+      },
+    ]);
+  });
+
+  test("migrations apply lists then applies", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run([
+      "migrations",
+      "apply",
+      "--env",
+      "preview",
+    ]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      {
+        command: "bunx",
+        args: [
+          "wrangler",
+          "d1",
+          "migrations",
+          "list",
+          "db",
+          "--env",
+          "preview",
+        ],
+      },
+      {
+        command: "bunx",
+        args: [
+          "wrangler",
+          "d1",
+          "migrations",
+          "apply",
+          "db",
+          "--env",
+          "preview",
+        ],
+      },
+    ]);
+  });
+
+  test("logs search calls wrangler tail with search", async () => {
+    const buffer = { info: [], error: [] } as LoggerBuffer;
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const skclaw = createSkclaw({
+      logger: createLogger(buffer),
+      fileExists: () => true,
+      readFile: () => getConfigJson(),
+      spawnCommand: (command: string, args: string[]) => {
+        calls.push({ command, args });
+        return {
+          on: (event: string, callback: (code: number) => void) => {
+            if (event === "close") {
+              callback(0);
+            }
+          },
+        } as unknown as ChildProcess;
+      },
+      resolvePath: (...parts: string[]) => parts.join("/"),
+      cwd: () => "/repo",
+      env: {} as NodeJS.ProcessEnv,
+    });
+
+    const code = await skclaw.run(["logs", "search", "tenant-a", "--env", "preview"]);
+
+    expect(code).toBe(0);
+    expect(calls).toEqual([
+      {
+        command: "bunx",
+        args: [
+          "wrangler",
+          "tail",
+          "--name",
+          "worker",
+          "--search",
+          "tenant-a",
+          "--env",
+          "preview",
+        ],
+      },
+    ]);
   });
 });

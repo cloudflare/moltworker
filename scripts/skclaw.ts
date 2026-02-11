@@ -144,8 +144,16 @@ const getUsage = () => `skclaw - StreamKinetics OpenClaw CLI
 
 Usage:
   skclaw env validate
+  skclaw env status
+  skclaw env doctor
   skclaw secrets sync --env production [--env-file .dev.vars] [--dry-run]
-  skclaw deploy --env production
+  skclaw secrets diff [--env-file .dev.vars]
+  skclaw secrets rotate [--env-file .dev.vars] [--keys key1,key2] [--dry-run]
+  skclaw deploy [--env production]
+  skclaw deploy preview --env preview
+  skclaw deploy status [--env production]
+  skclaw migrations <list|apply|status> [--env production]
+  skclaw logs <tail|search> [query] [--env production]
   skclaw quality <lint|typecheck|test|test cli>
   skclaw test [cli]
   skclaw tenant <create|update>
@@ -155,6 +163,7 @@ Flags:
   --config       Path to .skclaw.json
   --env          Wrangler environment name
   --env-file     Env file for secrets sync (default: .dev.vars)
+  --keys         Comma-separated secret keys (for rotate)
   --dry-run      Show actions without executing
   --json         Output machine-readable JSON
   --verbose      Output additional details
@@ -205,9 +214,34 @@ const handleEnvValidate = (deps: SkclawDeps, flags: Record<string, string | bool
   return "Env validation OK";
 };
 
+const handleEnvStatus = (deps: SkclawDeps, flags: Record<string, string | boolean>) => {
+  const { config, configPath } = loadConfig(deps, flags);
+  validateConfig(config);
+  const envName = (flags.env as string | undefined) || "default";
+  return {
+    message: "Env status OK",
+    data: {
+      configPath,
+      env: envName,
+      workerName: String(config.workerName),
+    },
+  };
+};
+
+const handleEnvDoctor = (deps: SkclawDeps, flags: Record<string, string | boolean>) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const missing = REQUIRED_ENV_KEYS.filter((key) => !deps.env[key]);
+  if (missing.length > 0) {
+    throw new Error(`Missing required env vars: ${missing.join(", ")}`);
+  }
+  return "Env doctor OK";
+};
+
 const handleSecretsSync = async (
   deps: SkclawDeps,
   flags: Record<string, string | boolean>,
+  keys: readonly string[] = DEFAULT_SECRET_KEYS,
 ) => {
   const { config } = loadConfig(deps, flags);
   validateConfig(config);
@@ -216,12 +250,12 @@ const handleSecretsSync = async (
   const envName = flags.env as string | undefined;
   const dryRun = Boolean(flags["dry-run"]);
 
-  const missingKeys = DEFAULT_SECRET_KEYS.filter((key) => !env[key]);
+  const missingKeys = keys.filter((key) => !env[key]);
   if (missingKeys.length > 0) {
     throw new Error(`Missing secrets in ${envFile}: ${missingKeys.join(", ")}`);
   }
 
-  for (const key of DEFAULT_SECRET_KEYS) {
+  for (const key of keys) {
     const value = env[key];
     const args = ["wrangler", "secret", "put", key, "--name", config.workerName];
     if (envName) {
@@ -251,6 +285,43 @@ const handleSecretsSync = async (
   return dryRun ? "Secrets sync dry-run complete" : "Secrets sync complete";
 };
 
+const handleSecretsDiff = (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const envFile = (flags["env-file"] as string | undefined) || ".dev.vars";
+  const env = parseEnvFile(deps, envFile);
+  const missing = DEFAULT_SECRET_KEYS.filter((key) => !env[key]);
+  const extra = Object.keys(env).filter(
+    (key) => !DEFAULT_SECRET_KEYS.includes(key as (typeof DEFAULT_SECRET_KEYS)[number]),
+  );
+  return {
+    message: "Secrets diff complete",
+    data: {
+      envFile,
+      missing,
+      extra,
+    },
+  };
+};
+
+const handleSecretsRotate = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const keysFlag = flags.keys as string | undefined;
+  const selectedKeys = keysFlag
+    ? keysFlag
+        .split(",")
+        .map((key) => key.trim())
+        .filter(Boolean)
+    : [...DEFAULT_SECRET_KEYS];
+  if (selectedKeys.length === 0) {
+    throw new Error("No secret keys provided");
+  }
+  return handleSecretsSync(deps, flags, selectedKeys);
+};
+
 const handleDeploy = async (
   deps: SkclawDeps,
   flags: Record<string, string | boolean>,
@@ -265,6 +336,122 @@ const handleDeploy = async (
   await runCommand(deps, "bun", ["run", "build"]);
   await runCommand(deps, "bunx", deployArgs);
   return "Deploy complete";
+};
+
+const handleDeployPreview = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  if (!flags.env) {
+    throw new Error("Preview deploy requires --env");
+  }
+  return handleDeploy(deps, flags);
+};
+
+const handleDeployStatus = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const envName = flags.env as string | undefined;
+  const args = ["wrangler", "deployments", "list", "--name", config.workerName];
+  if (envName) {
+    args.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", args);
+  return "Deploy status complete";
+};
+
+const handleMigrationsList = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const envName = flags.env as string | undefined;
+  const args = ["wrangler", "d1", "migrations", "list", String(config.d1DatabaseId)];
+  if (envName) {
+    args.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", args);
+  return "Migrations list complete";
+};
+
+const handleMigrationsApply = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const envName = flags.env as string | undefined;
+  const listArgs = [
+    "wrangler",
+    "d1",
+    "migrations",
+    "list",
+    String(config.d1DatabaseId),
+  ];
+  const applyArgs = [
+    "wrangler",
+    "d1",
+    "migrations",
+    "apply",
+    String(config.d1DatabaseId),
+  ];
+  if (envName) {
+    listArgs.push("--env", envName);
+    applyArgs.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", listArgs);
+  await runCommand(deps, "bunx", applyArgs);
+  return "Migrations apply complete";
+};
+
+const handleMigrationsStatus = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => handleMigrationsList(deps, flags);
+
+const handleLogsTail = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+) => {
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const envName = flags.env as string | undefined;
+  const args = ["wrangler", "tail", "--name", String(config.workerName)];
+  if (envName) {
+    args.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", args);
+  return "Logs tail complete";
+};
+
+const handleLogsSearch = async (
+  deps: SkclawDeps,
+  flags: Record<string, string | boolean>,
+  query: string | undefined,
+) => {
+  if (!query) {
+    throw new Error("Logs search requires a query");
+  }
+  const { config } = loadConfig(deps, flags);
+  validateConfig(config);
+  const envName = flags.env as string | undefined;
+  const args = [
+    "wrangler",
+    "tail",
+    "--name",
+    String(config.workerName),
+    "--search",
+    query,
+  ];
+  if (envName) {
+    args.push("--env", envName);
+  }
+  await runCommand(deps, "bunx", args);
+  return "Logs search complete";
 };
 
 const handleLint = async (deps: SkclawDeps) => {
@@ -308,15 +495,78 @@ export const createSkclaw = (deps?: Partial<SkclawDeps>) => {
         emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
+      if (group === "env" && action === "status") {
+        const { message, data } = handleEnvStatus(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message, data);
+        return 0;
+      }
+      if (group === "env" && action === "doctor") {
+        const message = handleEnvDoctor(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message);
+        return 0;
+      }
       if (group === "secrets" && action === "sync") {
         const message = await handleSecretsSync(resolvedDeps, flags);
         emitSuccess(resolvedDeps, flags, message);
         return 0;
       }
+      if (group === "secrets" && action === "diff") {
+        const { message, data } = handleSecretsDiff(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message, data);
+        return 0;
+      }
+      if (group === "secrets" && action === "rotate") {
+        const message = await handleSecretsRotate(resolvedDeps, flags);
+        emitSuccess(resolvedDeps, flags, message);
+        return 0;
+      }
       if (group === "deploy") {
+        if (action === "preview") {
+          const message = await handleDeployPreview(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "status") {
+          const message = await handleDeployStatus(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
         const message = await handleDeploy(resolvedDeps, flags);
         emitSuccess(resolvedDeps, flags, message);
         return 0;
+      }
+      if (group === "migrations") {
+        if (action === "list") {
+          const message = await handleMigrationsList(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "apply") {
+          const message = await handleMigrationsApply(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "status") {
+          const message = await handleMigrationsStatus(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+      }
+      if (group === "logs") {
+        if (action === "tail") {
+          const message = await handleLogsTail(resolvedDeps, flags);
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
+        if (action === "search") {
+          const message = await handleLogsSearch(
+            resolvedDeps,
+            flags,
+            positionals[2],
+          );
+          emitSuccess(resolvedDeps, flags, message);
+          return 0;
+        }
       }
       if (group === "lint") {
         const message = await handleLint(resolvedDeps);
