@@ -188,9 +188,10 @@ if [ -n "$SLACK_BOT_TOKEN" ]; then
 fi
 log_timing "Channels configured"
 
-# Set model AFTER doctor (doctor wipes model config)
+# Set models AFTER doctor (doctor wipes model config)
 openclaw models set anthropic/claude-sonnet-4-5 2>/dev/null || true
-log_timing "Model set to claude-sonnet-4-5"
+openclaw models set anthropic/claude-3-5-haiku-20241022 2>/dev/null || true
+log_timing "Models set (sonnet-4-5, haiku-3-5)"
 
 # Clean up stale session lock files from previous gateway runs
 find /root/.openclaw -name "*.lock" -delete 2>/dev/null || true
