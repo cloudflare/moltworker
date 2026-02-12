@@ -61,3 +61,5 @@ test/e2e/.dev.vars
 
 # npm config
 .npmrc
+
+.install_state

@@ -39,6 +39,84 @@ success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Load environment variables from a file
+load_env_file() {
+    local file="$1"
+
+    if [ ! -f "$file" ]; then
+        error "Environment file not found: $file"
+        return 1
+    fi
+
+    info "Loading environment from: $file"
+
+    # Parse .env file, handling comments and empty lines
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Skip empty lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+
+        # Remove leading/trailing whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        # Skip if not a valid assignment
+        [[ ! "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] && continue
+
+        # Extract key and value
+        local key="${line%%=*}"
+        local value="${line#*=}"
+
+        # Remove surrounding quotes from value
+        value="${value#\"}"
+        value="${value%\"}"
+        value="${value#\'}"
+        value="${value%\'}"
+
+        # Export the variable
+        export "$key=$value"
+    done < "$file"
+
+    success "Environment loaded"
+    return 0
+}
+
+# Get value from environment or prompt user
+get_env_or_prompt() {
+    local var_name="$1"
+    local prompt_text="$2"
+    local is_secret="${3:-false}"
+    local is_required="${4:-true}"
+
+    # Check if variable is already set in environment
+    local current_value="${!var_name:-}"
+
+    if [ -n "$current_value" ]; then
+        if [ "$is_secret" = "true" ]; then
+            success "$var_name loaded from environment (***hidden***)"
+        else
+            success "$var_name loaded from environment: $current_value"
+        fi
+        echo "$current_value"
+        return 0
+    fi
+
+    # If we have an env file but the value wasn't found, and it's required
+    if [ -n "$ENV_FILE" ] && [ "$is_required" = "true" ]; then
+        warn "$var_name not found in $ENV_FILE"
+    fi
+
+    # Prompt user
+    echo "$prompt_text" >&2
+    if [ "$is_secret" = "true" ]; then
+        read -r -s value
+        echo "" >&2
+    else
+        read -r value
+    fi
+
+    echo "$value"
+}
+
 # State management functions
 save_state() {
     local step="$1"
@@ -264,8 +342,14 @@ EOF
     return 0
 }
 
-# Setup wrangler secrets interactively
+# Setup wrangler secrets interactively or from env file
 setup_secrets() {
+    # If env file provided, run in non-interactive mode
+    if [ -n "$ENV_FILE" ]; then
+        setup_secrets_from_env
+        return $?
+    fi
+
     echo -e "${YELLOW}Would you like to configure Cloudflare secrets now? (y/n)${NC}"
     read -r response
 
@@ -284,8 +368,8 @@ setup_secrets() {
     echo "   Set up at: https://dash.cloudflare.com/?to=/:account/ai/ai-gateway/general"
     echo ""
 
-    echo "Enter CF_AI_GATEWAY_ACCOUNT_ID (your Cloudflare account ID):"
-    read -r cf_account_id
+    local cf_account_id
+    cf_account_id=$(get_env_or_prompt "CF_AI_GATEWAY_ACCOUNT_ID" "Enter CF_AI_GATEWAY_ACCOUNT_ID (your Cloudflare account ID):" "false" "true")
     if [ -n "$cf_account_id" ]; then
         if ! echo "$cf_account_id" | npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID; then
             error "Failed to set CF_AI_GATEWAY_ACCOUNT_ID"
@@ -297,8 +381,8 @@ setup_secrets() {
         return 1
     fi
 
-    echo "Enter CF_AI_GATEWAY_GATEWAY_ID (your AI Gateway ID):"
-    read -r cf_gateway_id
+    local cf_gateway_id
+    cf_gateway_id=$(get_env_or_prompt "CF_AI_GATEWAY_GATEWAY_ID" "Enter CF_AI_GATEWAY_GATEWAY_ID (your AI Gateway ID):" "false" "true")
     if [ -n "$cf_gateway_id" ]; then
         if ! echo "$cf_gateway_id" | npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID; then
             error "Failed to set CF_AI_GATEWAY_GATEWAY_ID"
@@ -310,9 +394,8 @@ setup_secrets() {
         return 1
     fi
 
-    echo "Enter CLOUDFLARE_AI_GATEWAY_API_KEY (API key for AI Gateway):"
-    read -r -s cf_api_key
-    echo ""
+    local cf_api_key
+    cf_api_key=$(get_env_or_prompt "CLOUDFLARE_AI_GATEWAY_API_KEY" "Enter CLOUDFLARE_AI_GATEWAY_API_KEY (API key for AI Gateway):" "true" "true")
     if [ -n "$cf_api_key" ]; then
         if ! echo "$cf_api_key" | npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY; then
             error "Failed to set CLOUDFLARE_AI_GATEWAY_API_KEY"
@@ -327,49 +410,148 @@ setup_secrets() {
 
     # MOLTBOT_GATEWAY_TOKEN
     echo -e "${BLUE}2. Gateway Token${NC}"
-    echo -e "${YELLOW}Generate a new gateway token? (y/n)${NC}"
-    read -r gen_token
-    if [[ "$gen_token" =~ ^[Yy]$ ]]; then
-        GATEWAY_TOKEN=$(openssl rand -hex 32)
-        if ! echo "$GATEWAY_TOKEN" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN; then
+
+    # Check if token exists in environment
+    local existing_token="${MOLTBOT_GATEWAY_TOKEN:-}"
+    if [ -n "$existing_token" ]; then
+        if ! echo "$existing_token" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN; then
             error "Failed to set MOLTBOT_GATEWAY_TOKEN"
             return 1
         fi
-        success "MOLTBOT_GATEWAY_TOKEN configured"
-        info "Token: $GATEWAY_TOKEN"
-        info "Save this token - you'll need it to connect!"
+        success "MOLTBOT_GATEWAY_TOKEN configured from environment"
     else
-        warn "Skipped MOLTBOT_GATEWAY_TOKEN"
+        echo -e "${YELLOW}Generate a new gateway token? (y/n)${NC}"
+        read -r gen_token
+        if [[ "$gen_token" =~ ^[Yy]$ ]]; then
+            local gateway_token
+            gateway_token=$(openssl rand -hex 32)
+            if ! echo "$gateway_token" | npx wrangler secret put MOLTBOT_GATEWAY_TOKEN; then
+                error "Failed to set MOLTBOT_GATEWAY_TOKEN"
+                return 1
+            fi
+            success "MOLTBOT_GATEWAY_TOKEN configured"
+            info "Token: $gateway_token"
+            info "Save this token - you'll need it to connect!"
+        else
+            warn "Skipped MOLTBOT_GATEWAY_TOKEN"
+        fi
     fi
     echo ""
 
     # Cloudflare Access (optional)
     echo -e "${BLUE}3. Cloudflare Access (for admin UI auth) - Optional${NC}"
-    echo -e "${YELLOW}Configure Cloudflare Access? (y/n)${NC}"
-    read -r cf_access
-    if [[ "$cf_access" =~ ^[Yy]$ ]]; then
-        echo "Enter CF_ACCESS_TEAM_DOMAIN (e.g., myteam.cloudflareaccess.com):"
-        read -r team_domain
-        if [ -n "$team_domain" ]; then
-            if ! echo "$team_domain" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN; then
+
+    # Check if CF Access vars exist in environment
+    local env_team_domain="${CF_ACCESS_TEAM_DOMAIN:-}"
+    local env_cf_aud="${CF_ACCESS_AUD:-}"
+
+    if [ -n "$env_team_domain" ] || [ -n "$env_cf_aud" ]; then
+        if [ -n "$env_team_domain" ]; then
+            if ! echo "$env_team_domain" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN; then
                 error "Failed to set CF_ACCESS_TEAM_DOMAIN"
                 return 1
             fi
+            success "CF_ACCESS_TEAM_DOMAIN configured from environment"
         fi
-
-        echo "Enter CF_ACCESS_AUD (application audience UUID):"
-        read -r cf_aud
-        if [ -n "$cf_aud" ]; then
-            if ! echo "$cf_aud" | npx wrangler secret put CF_ACCESS_AUD; then
+        if [ -n "$env_cf_aud" ]; then
+            if ! echo "$env_cf_aud" | npx wrangler secret put CF_ACCESS_AUD; then
                 error "Failed to set CF_ACCESS_AUD"
                 return 1
             fi
+            success "CF_ACCESS_AUD configured from environment"
         fi
-        success "Cloudflare Access configured"
+    else
+        echo -e "${YELLOW}Configure Cloudflare Access? (y/n)${NC}"
+        read -r cf_access
+        if [[ "$cf_access" =~ ^[Yy]$ ]]; then
+            echo "Enter CF_ACCESS_TEAM_DOMAIN (e.g., myteam.cloudflareaccess.com):"
+            read -r team_domain
+            if [ -n "$team_domain" ]; then
+                if ! echo "$team_domain" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN; then
+                    error "Failed to set CF_ACCESS_TEAM_DOMAIN"
+                    return 1
+                fi
+            fi
+
+            echo "Enter CF_ACCESS_AUD (application audience UUID):"
+            read -r cf_aud
+            if [ -n "$cf_aud" ]; then
+                if ! echo "$cf_aud" | npx wrangler secret put CF_ACCESS_AUD; then
+                    error "Failed to set CF_ACCESS_AUD"
+                    return 1
+                fi
+            fi
+            success "Cloudflare Access configured"
+        fi
     fi
     echo ""
 
     return 0
+}
+
+# Setup secrets from environment file (non-interactive)
+setup_secrets_from_env() {
+    info "Configuring secrets from environment file..."
+
+    # Check required variables
+    local missing=()
+    for var in CF_AI_GATEWAY_ACCOUNT_ID CF_AI_GATEWAY_GATEWAY_ID CLOUDFLARE_AI_GATEWAY_API_KEY; do
+        if [ -z "${!var:-}" ]; then
+            missing+=("$var")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        error "Missing required variables in environment file:"
+        for var in "${missing[@]}"; do
+            echo "  - $var"
+        done
+        return 1
+    fi
+
+    # Generate MOLTBOT_GATEWAY_TOKEN if not provided
+    if [ -z "${MOLTBOT_GATEWAY_TOKEN:-}" ]; then
+        info "MOLTBOT_GATEWAY_TOKEN not in env file, generating new token..."
+        MOLTBOT_GATEWAY_TOKEN=$(openssl rand -hex 32)
+        info "Token: $MOLTBOT_GATEWAY_TOKEN"
+        info "Save this token - you'll need it to connect!"
+    fi
+
+    # Build JSON for wrangler secret bulk
+    local json="{"
+    local first=true
+
+    for var in CF_AI_GATEWAY_ACCOUNT_ID CF_AI_GATEWAY_GATEWAY_ID CLOUDFLARE_AI_GATEWAY_API_KEY MOLTBOT_GATEWAY_TOKEN CF_ACCESS_TEAM_DOMAIN CF_ACCESS_AUD; do
+        if [ -n "${!var:-}" ]; then
+            if [ "$first" = true ]; then
+                first=false
+            else
+                json+=","
+            fi
+            # Escape special characters in value for JSON
+            local value="${!var}"
+            value="${value//\\/\\\\}"
+            value="${value//\"/\\\"}"
+            json+="\"$var\":\"$value\""
+        fi
+    done
+
+    json+="}"
+
+    # Write to temp file and run wrangler secret bulk
+    local tmpfile
+    tmpfile=$(mktemp)
+    echo "$json" > "$tmpfile"
+
+    if npx wrangler secret bulk "$tmpfile"; then
+        success "All secrets configured"
+        rm -f "$tmpfile"
+        return 0
+    else
+        error "Failed to set secrets"
+        rm -f "$tmpfile"
+        return 1
+    fi
 }
 
 # Run type checking
@@ -516,56 +698,114 @@ quick_install() {
     print_next_steps
 }
 
-# Run with optional flags
-case "${1:-}" in
-    --help|-h)
-        echo "Usage: ./install.sh [OPTIONS]"
-        echo ""
-        echo "Options:"
-        echo "  --help, -h     Show this help message"
-        echo "  --quick, -q    Quick install (skip interactive prompts)"
-        echo "  --deps-only    Only install dependencies"
-        echo "  --reset        Clear saved progress and start fresh"
-        echo "  --status       Show current installation progress"
-        echo ""
-        exit 0
-        ;;
-    --quick|-q)
-        quick_install
-        ;;
-    --deps-only)
-        check_prerequisites
-        install_dependencies
-        success "Dependencies installed"
-        ;;
-    --reset)
-        clear_state
-        success "Installation state cleared. Run ./install.sh to start fresh."
-        ;;
-    --status)
-        saved_step=$(get_saved_state)
-        if [ -n "$saved_step" ]; then
-            step_idx=$(get_step_index "$saved_step")
-            if [ "$step_idx" -ge 0 ]; then
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                echo "Usage: ./install.sh [OPTIONS]"
                 echo ""
-                info "Installation progress:"
-                for i in "${!STEPS[@]}"; do
-                    if [ "$i" -lt "$step_idx" ]; then
-                        echo -e "  ${GREEN}✓${NC} ${STEP_DESCRIPTIONS[$i]}"
-                    elif [ "$i" -eq "$step_idx" ]; then
-                        echo -e "  ${YELLOW}→${NC} ${STEP_DESCRIPTIONS[$i]} ${YELLOW}(interrupted)${NC}"
-                    else
-                        echo -e "  ${BLUE}○${NC} ${STEP_DESCRIPTIONS[$i]}"
-                    fi
-                done
+                echo "Options:"
+                echo "  --help, -h              Show this help message"
+                echo "  --quick, -q             Quick install (skip interactive prompts)"
+                echo "  --deps-only             Only install dependencies"
+                echo "  --reset                 Clear saved progress and start fresh"
+                echo "  --status                Show current installation progress"
+                echo "  --env-file <file>       Load secrets from .env file"
+                echo "  -e <file>               Short form of --env-file"
                 echo ""
-                info "Run ./install.sh to resume from step $((step_idx + 1))"
-            fi
-        else
-            success "No saved installation state. Ready to start fresh."
+                echo "Environment file format (.env):"
+                echo "  CF_AI_GATEWAY_ACCOUNT_ID=your-account-id"
+                echo "  CF_AI_GATEWAY_GATEWAY_ID=your-gateway-id"
+                echo "  CLOUDFLARE_AI_GATEWAY_API_KEY=your-api-key"
+                echo "  MOLTBOT_GATEWAY_TOKEN=your-token  # optional, will generate if missing"
+                echo "  CF_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com  # optional"
+                echo "  CF_ACCESS_AUD=your-aud  # optional"
+                echo ""
+                echo "Examples:"
+                echo "  ./install.sh                      # Interactive installation"
+                echo "  ./install.sh --quick              # Quick install, skip prompts"
+                echo "  ./install.sh --env-file .env      # Use .env file for secrets"
+                echo "  ./install.sh -e prod.env          # Use prod.env file for secrets"
+                echo ""
+                exit 0
+                ;;
+            --quick|-q)
+                quick_install
+                exit 0
+                ;;
+            --deps-only)
+                check_prerequisites
+                install_dependencies
+                success "Dependencies installed"
+                exit 0
+                ;;
+            --reset)
+                clear_state
+                success "Installation state cleared. Run ./install.sh to start fresh."
+                exit 0
+                ;;
+            --status)
+                show_status
+                exit 0
+                ;;
+            --env-file|-e)
+                if [ -z "${2:-}" ]; then
+                    error "Missing argument for $1"
+                    exit 1
+                fi
+                ENV_FILE="$2"
+                if ! load_env_file "$ENV_FILE"; then
+                    exit 1
+                fi
+                shift
+                ;;
+            -*)
+                error "Unknown option: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+            *)
+                error "Unexpected argument: $1"
+                echo "Use --help for usage information"
+                exit 1
+                ;;
+        esac
+        shift
+    done
+}
+
+# Show installation status
+show_status() {
+    local saved_step
+    saved_step=$(get_saved_state)
+    if [ -n "$saved_step" ]; then
+        local step_idx
+        step_idx=$(get_step_index "$saved_step")
+        if [ "$step_idx" -ge 0 ]; then
+            echo ""
+            info "Installation progress:"
+            for i in "${!STEPS[@]}"; do
+                if [ "$i" -lt "$step_idx" ]; then
+                    echo -e "  ${GREEN}✓${NC} ${STEP_DESCRIPTIONS[$i]}"
+                elif [ "$i" -eq "$step_idx" ]; then
+                    echo -e "  ${YELLOW}→${NC} ${STEP_DESCRIPTIONS[$i]} ${YELLOW}(interrupted)${NC}"
+                else
+                    echo -e "  ${BLUE}○${NC} ${STEP_DESCRIPTIONS[$i]}"
+                fi
+            done
+            echo ""
+            info "Run ./install.sh to resume from step $((step_idx + 1))"
         fi
-        ;;
-    *)
-        main
-        ;;
-esac
+    else
+        success "No saved installation state. Ready to start fresh."
+    fi
+}
+
+# Parse arguments and run
+if [ $# -gt 0 ]; then
+    parse_args "$@"
+fi
+
+# If we get here without exiting, run main
+main
