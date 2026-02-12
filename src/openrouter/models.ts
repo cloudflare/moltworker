@@ -224,10 +224,11 @@ export const MODELS: Record<string, ModelInfo> = {
     id: 'moonshotai/kimi-k2:free',
     alias: 'kimifree',
     name: 'Kimi K2 (Free)',
-    specialty: 'Free Agent-Capable/Long Context',
+    specialty: 'Free General/Long Context',
     score: 'Agent tasks, long context',
     cost: 'FREE',
-    supportsTools: true,
+    // Note: OpenRouter lists tool support but multiple IDEs report it as broken
+    // (model responds in plain text instead of invoking tools). Omitting supportsTools.
     isFree: true,
     maxContext: 131072,
   },
@@ -242,7 +243,7 @@ export const MODELS: Record<string, ModelInfo> = {
     maxContext: 131072,
   },
   devstral2free: {
-    id: 'mistralai/devstral-2:free',
+    id: 'mistralai/devstral-2512:free',
     alias: 'devstral2free',
     name: 'Devstral 2 (Free)',
     specialty: 'Free Premium Agentic Coding',
