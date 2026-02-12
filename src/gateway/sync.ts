@@ -37,6 +37,8 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.openclaw/ ${R2_MOUNT_PATH}/openclaw/ 2>/dev/null || true`,
     `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' /root/.clawdbot/ ${R2_MOUNT_PATH}/clawdbot/ 2>/dev/null || true`,
     `rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/`,
+    `rsync -r --no-times /root/clawd/warm-memory/ ${R2_MOUNT_PATH}/warm-memory/ 2>/dev/null || true`,
+    `rsync -r --no-times /root/clawd/.modification-history/ ${R2_MOUNT_PATH}/modification-history/ 2>/dev/null || true`,
     // Write and read timestamp
     `date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`,
     `cat ${R2_MOUNT_PATH}/.last-sync`,

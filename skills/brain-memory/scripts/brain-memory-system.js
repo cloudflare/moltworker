@@ -117,16 +117,59 @@ function getNewJsonlFiles(state) {
   return files.sort((a, b) => a.mtime - b.mtime);
 }
 
-function formatConversation(relPath, messages) {
+function formatConversation(relPath, messages, compact) {
   if (messages.length === 0) return '';
+  const maxLen = compact ? 300 : 500;
   let out = `\n### Conversation: ${relPath}\n\n`;
   for (const msg of messages) {
     const label = msg.role === 'user' ? 'User' : 'Assistant';
-    // Truncate very long messages to keep output manageable
-    const text = msg.text.length > 500 ? msg.text.slice(0, 500) + '...' : msg.text;
+    const text = msg.text.length > maxLen ? msg.text.slice(0, maxLen) + '...' : msg.text;
     out += `**${label}**: ${text}\n\n`;
   }
   return out;
+}
+
+function formatCompact(files, conversations) {
+  const topics = new Set();
+  const highlights = [];
+
+  for (const { relPath, messages } of conversations) {
+    // Simple topic extraction from keywords
+    const allText = messages.map(m => m.text).join(' ').toLowerCase();
+    const topicKeywords = {
+      crypto: /crypto|bitcoin|btc|eth|defi|블록체인|코인/,
+      ai: /ai|ml|llm|model|학습|인공지능|claude|gpt/,
+      code: /code|bug|error|function|코드|에러|디버그/,
+      work: /project|deploy|서버|배포|work|업무/,
+      personal: /생일|약속|일정|여행|건강/,
+    };
+
+    const convoTopics = [];
+    for (const [topic, pattern] of Object.entries(topicKeywords)) {
+      if (pattern.test(allText)) {
+        topics.add(topic);
+        convoTopics.push(topic);
+      }
+    }
+
+    // Extract a short highlight from user messages
+    const userMsgs = messages.filter(m => m.role === 'user');
+    if (userMsgs.length > 0) {
+      const summary = userMsgs[0].text.slice(0, 150);
+      highlights.push({
+        topic: convoTopics.join(',') || 'general',
+        summary,
+        msgs: messages.length,
+      });
+    }
+  }
+
+  return JSON.stringify({
+    date: new Date().toISOString().split('T')[0],
+    convos: conversations.length,
+    topics: [...topics],
+    highlights: highlights.slice(0, 10),
+  }, null, 2);
 }
 
 function loadDailySummaries() {
@@ -151,6 +194,7 @@ function loadDailySummaries() {
 function main() {
   const args = process.argv.slice(2);
   const weeklyMode = args.includes('--weekly');
+  const compactMode = args.includes('--compact');
 
   const state = loadState();
   const files = getNewJsonlFiles(state);
@@ -161,29 +205,39 @@ function main() {
   }
 
   const now = new Date().toISOString();
-  const mode = weeklyMode ? 'Weekly' : 'Daily';
-  let output = `# Brain Memory — ${mode} Processing (${now})\n`;
-  output += `Files to process: ${files.length}\n\n`;
 
   // Process conversations
   const processedRelPaths = [];
-  let conversationCount = 0;
+  const conversations = [];
 
   for (const file of files) {
     const messages = parseJsonlFile(file.path);
-    const formatted = formatConversation(file.relPath, messages);
-    if (formatted) {
-      output += formatted;
-      conversationCount++;
+    if (messages.length > 0) {
+      conversations.push({ relPath: file.relPath, messages });
     }
     processedRelPaths.push(file.relPath);
   }
 
-  output += `\n---\nTotal conversations with relevant content: ${conversationCount}\n`;
+  let output;
 
-  // Weekly mode: also include daily summaries
-  if (weeklyMode) {
-    output += loadDailySummaries();
+  if (compactMode) {
+    // Compact JSON output for token efficiency
+    output = formatCompact(files, conversations);
+  } else {
+    // Full markdown output (original behavior)
+    const mode = weeklyMode ? 'Weekly' : 'Daily';
+    output = `# Brain Memory — ${mode} Processing (${now})\n`;
+    output += `Files to process: ${files.length}\n\n`;
+
+    for (const { relPath, messages } of conversations) {
+      output += formatConversation(relPath, messages, false);
+    }
+
+    output += `\n---\nTotal conversations with relevant content: ${conversations.length}\n`;
+
+    if (weeklyMode) {
+      output += loadDailySummaries();
+    }
   }
 
   // Update state

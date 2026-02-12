@@ -60,10 +60,26 @@ function runResearch(query) {
   }
 }
 
-function formatStudyReport(topic, researchResults) {
+function formatStudyReport(topic, researchResults, compact) {
   const timestamp = new Date().toISOString();
   const date = new Date().toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' });
   const time = new Date().toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+
+  if (compact) {
+    // Compact: JSON with top 1 result per query, limited snippet length
+    const items = [];
+    for (const research of researchResults) {
+      if (!research) continue;
+      const topResult = (research.results || [])[0];
+      items.push({
+        q: research.query,
+        kg: research.knowledgeGraph ? research.knowledgeGraph.description?.slice(0, 200) : null,
+        top: topResult ? { t: topResult.title, s: topResult.snippet?.slice(0, 300) } : null,
+      });
+    }
+    const report = JSON.stringify({ topic: topic.name, date, items }, null, 2);
+    return { report, timestamp, topic: topic.name };
+  }
 
   let report = `## Auto-Study: ${topic.name} (${date} ${time})\n\n`;
 
@@ -93,6 +109,7 @@ async function main() {
   const args = process.argv.slice(2);
   let targetTopic = null;
   let studyAll = false;
+  let compactMode = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--topic' && args[i + 1]) {
@@ -100,6 +117,8 @@ async function main() {
       i++;
     } else if (args[i] === '--all') {
       studyAll = true;
+    } else if (args[i] === '--compact') {
+      compactMode = true;
     }
   }
 
@@ -140,7 +159,7 @@ async function main() {
       researchResults.push(result);
     }
 
-    const { report, timestamp } = formatStudyReport(topic, researchResults);
+    const { report, timestamp } = formatStudyReport(topic, researchResults, compactMode);
     allReports.push(report);
 
     state.lastStudied[topic.name] = timestamp;

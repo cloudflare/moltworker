@@ -2,7 +2,7 @@ import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { runCommand } from './utils';
 
-const EXPECTED_CRONS = ['auto-study', 'brain-memory', 'brain-insights'];
+const EXPECTED_CRONS = ['auto-study', 'brain-memory', 'self-reflect'];
 
 /**
  * Check that expected cron jobs are registered in the gateway.

@@ -1,6 +1,6 @@
 #!/bin/bash
-# OpenClaw Startup Script v63 - Explicit channel plugin enable
-# Cache bust: 2026-02-10-v63-channel-fix
+# OpenClaw Startup Script v65 - Self-modify & self-reflect
+# Cache bust: 2026-02-13-v65-self-modify
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -53,6 +53,18 @@ mkdir -p "$CONFIG_DIR"
 
 # Restore from R2 first (restore credentials and sessions)
 restore_from_r2
+
+# Restore warm-memory and modification-history from R2
+if [ -d "/data/moltbot/warm-memory" ]; then
+  mkdir -p /root/clawd/warm-memory
+  timeout 15 cp -rf /data/moltbot/warm-memory/* /root/clawd/warm-memory/ 2>/dev/null || true
+  echo "Restored warm-memory from R2"
+fi
+if [ -d "/data/moltbot/modification-history" ]; then
+  mkdir -p /root/clawd/.modification-history
+  timeout 15 cp -rf /data/moltbot/modification-history/* /root/clawd/.modification-history/ 2>/dev/null || true
+  echo "Restored modification-history from R2"
+fi
 log_timing "R2 restore completed"
 
 # Clone GitHub repository if configured
@@ -232,7 +244,7 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
               --model "anthropic/claude-3-5-haiku-20241022" \
               --thinking off \
               $TOKEN_FLAG \
-              --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js — summarize output, save to memory." \
+              --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study" \
               2>&1 || echo "[WARN] Study cron registration failed"
             echo "[STUDY] Study cron registered (every 24h, haiku-3, thinking off)"
           else
@@ -253,28 +265,28 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
               --model "anthropic/claude-3-5-haiku-20241022" \
               --thinking off \
               $TOKEN_FLAG \
-              --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js — Analyze the output. Extract key facts, decisions, user preferences, and important topics from each conversation. Save a concise daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (use today's date). Create the directory if needed." \
+              --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update" \
               2>&1 || echo "[WARN] brain-memory cron registration failed"
             echo "[BRAIN] brain-memory cron registered (every 24h, haiku, thinking off)"
           else
             echo "[BRAIN] brain-memory cron already exists, skipping"
           fi
 
-          # Weekly cross-memory insights (Sonnet)
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "brain-insights"; then
-            echo "[BRAIN] Registering weekly brain-insights cron..."
+          # Weekly self-reflect (Sonnet) — combines cross-memory insights + self-optimization
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "self-reflect"; then
+            echo "[REFLECT] Registering weekly self-reflect cron..."
             openclaw cron add \
-              --name "brain-insights" \
+              --name "self-reflect" \
               --every "168h" \
               --session isolated \
               --model "anthropic/claude-sonnet-4-5-20250929" \
               --thinking off \
               $TOKEN_FLAG \
-              --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --weekly — Analyze the output which includes this week's conversations and daily summaries. Find non-obvious connections, patterns, and emerging themes across all memories. Save the most valuable insights to memory." \
-              2>&1 || echo "[WARN] brain-insights cron registration failed"
-            echo "[BRAIN] brain-insights cron registered (every 168h, sonnet, thinking off)"
+              --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md" \
+              2>&1 || echo "[WARN] self-reflect cron registration failed"
+            echo "[REFLECT] self-reflect cron registered (every 168h, sonnet, thinking off)"
           else
-            echo "[BRAIN] brain-insights cron already exists, skipping"
+            echo "[REFLECT] self-reflect cron already exists, skipping"
           fi
         fi
         break
