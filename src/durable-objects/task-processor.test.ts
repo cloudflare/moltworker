@@ -588,4 +588,341 @@ describe('TaskProcessor phases', () => {
       expect(['plan', 'work', 'review']).toContain(lastCheckpoint.phase);
     });
   });
+
+  describe('empty response recovery', () => {
+    it('should retry with aggressive compression when model returns empty after tools', async () => {
+      const mockState = createMockState();
+      const capturedBodies: Array<Record<string, unknown>> = [];
+
+      let apiCallCount = 0;
+      vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('api.telegram.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+            text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+          });
+        }
+
+        if (init?.body) {
+          try {
+            const parsed = JSON.parse(init.body as string);
+            if (parsed.messages) capturedBodies.push(parsed);
+          } catch { /* ignore */ }
+        }
+
+        apiCallCount++;
+        let responseData;
+        if (apiCallCount === 1) {
+          // Tool call
+          responseData = {
+            choices: [{
+              message: {
+                content: 'Let me fetch that.',
+                tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://example.com"}' } }],
+              },
+              finish_reason: 'tool_calls',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        } else if (apiCallCount === 2) {
+          // Empty response (triggers empty retry)
+          responseData = {
+            choices: [{
+              message: { content: '', tool_calls: undefined },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        } else {
+          // Successful response after retry
+          responseData = {
+            choices: [{
+              message: { content: 'Here is your answer after retry.', tool_calls: undefined },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        }
+
+        const body = JSON.stringify(responseData);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(body),
+          json: () => Promise.resolve(JSON.parse(body)),
+        });
+      }));
+
+      const processor = new TaskProcessorClass(mockState as never, {} as never);
+      await processor.fetch(new Request('https://do/process', {
+        method: 'POST',
+        body: JSON.stringify(createTaskRequest()),
+      }));
+
+      await vi.waitFor(
+        () => {
+          const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+          if (!task || task.status !== 'completed') throw new Error('not completed yet');
+        },
+        { timeout: 10000, interval: 50 }
+      );
+
+      const task = mockState.storage._store.get('task') as Record<string, unknown>;
+      expect(task.status).toBe('completed');
+      // Should have recovered with an actual answer (not fallback)
+      expect(task.result).toContain('Here is your answer after retry.');
+
+      // The retry call should include the nudge message
+      const retryCall = capturedBodies.find(b => {
+        const msgs = b.messages as Array<Record<string, unknown>>;
+        return msgs.some(m => typeof m.content === 'string' && m.content.includes('Your last response was empty'));
+      });
+      expect(retryCall).toBeDefined();
+    });
+
+    it('should rotate to another free model when empty retries are exhausted', async () => {
+      const mockState = createMockState();
+      const { getModel, getFreeToolModels } = await import('../openrouter/models');
+
+      vi.mocked(getModel).mockReturnValue({ id: 'test', alias: 'free1', isFree: true, supportsTools: true, name: 'Free1', specialty: '', score: '', cost: 'FREE' });
+      vi.mocked(getFreeToolModels).mockReturnValue(['free1', 'free2']);
+
+      let apiCallCount = 0;
+      vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('api.telegram.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+            text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+          });
+        }
+
+        apiCallCount++;
+        let responseData;
+        if (apiCallCount === 1) {
+          // Tool call
+          responseData = {
+            choices: [{
+              message: {
+                content: 'Fetching...',
+                tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://example.com"}' } }],
+              },
+              finish_reason: 'tool_calls',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        } else if (apiCallCount <= 4) {
+          // 3 empty responses: original + 2 retries = exhausted, triggers rotation
+          responseData = {
+            choices: [{
+              message: { content: '', tool_calls: undefined },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        } else {
+          // After rotation to free2, succeed
+          responseData = {
+            choices: [{
+              message: { content: 'Answer from free2 model.', tool_calls: undefined },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        }
+
+        const body = JSON.stringify(responseData);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(body),
+          json: () => Promise.resolve(JSON.parse(body)),
+        });
+      }));
+
+      const processor = new TaskProcessorClass(mockState as never, {} as never);
+      await processor.fetch(new Request('https://do/process', {
+        method: 'POST',
+        body: JSON.stringify(createTaskRequest({ modelAlias: 'free1' })),
+      }));
+
+      await vi.waitFor(
+        () => {
+          const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+          if (!task || task.status !== 'completed') throw new Error('not completed yet');
+        },
+        { timeout: 15000, interval: 50 }
+      );
+
+      const task = mockState.storage._store.get('task') as Record<string, unknown>;
+      expect(task.status).toBe('completed');
+      // Model should have rotated from free1 to free2
+      expect(task.modelAlias).toBe('free2');
+      expect(task.result).toContain('Answer from free2 model.');
+    });
+
+    it('should construct fallback response when all recovery fails', async () => {
+      const mockState = createMockState();
+      const { getModel, getFreeToolModels } = await import('../openrouter/models');
+
+      // Only one free model — can't rotate
+      vi.mocked(getModel).mockReturnValue({ id: 'test', alias: 'free1', isFree: true, supportsTools: true, name: 'Free1', specialty: '', score: '', cost: 'FREE' });
+      vi.mocked(getFreeToolModels).mockReturnValue(['free1']);
+
+      let apiCallCount = 0;
+      vi.stubGlobal('fetch', vi.fn((url: string | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('api.telegram.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+            text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+          });
+        }
+
+        apiCallCount++;
+        let responseData;
+        if (apiCallCount === 1) {
+          // Tool call
+          responseData = {
+            choices: [{
+              message: {
+                content: 'Fetching...',
+                tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://example.com"}' } }],
+              },
+              finish_reason: 'tool_calls',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        } else {
+          // All subsequent responses are empty — retries + no rotation possible
+          responseData = {
+            choices: [{
+              message: { content: '', tool_calls: undefined },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        }
+
+        const body = JSON.stringify(responseData);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(body),
+          json: () => Promise.resolve(JSON.parse(body)),
+        });
+      }));
+
+      const processor = new TaskProcessorClass(mockState as never, {} as never);
+      await processor.fetch(new Request('https://do/process', {
+        method: 'POST',
+        body: JSON.stringify(createTaskRequest({ modelAlias: 'free1' })),
+      }));
+
+      await vi.waitFor(
+        () => {
+          const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+          if (!task || task.status !== 'completed') throw new Error('not completed yet');
+        },
+        { timeout: 15000, interval: 50 }
+      );
+
+      const task = mockState.storage._store.get('task') as Record<string, unknown>;
+      expect(task.status).toBe('completed');
+      // Should have a fallback response (not "No response generated.")
+      const result = task.result as string;
+      expect(result).not.toBe('No response generated.');
+      // Fallback includes tool info or recovery message
+      expect(result).toMatch(/tool|model|/i);
+    });
+
+    it('should NOT trigger review phase when response is empty', async () => {
+      const mockState = createMockState();
+      const { getModel, getFreeToolModels } = await import('../openrouter/models');
+
+      vi.mocked(getModel).mockReturnValue({ id: 'test', alias: 'free1', isFree: true, supportsTools: true, name: 'Free1', specialty: '', score: '', cost: 'FREE' });
+      vi.mocked(getFreeToolModels).mockReturnValue(['free1']);
+
+      const capturedBodies: Array<Record<string, unknown>> = [];
+      let apiCallCount = 0;
+      vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('api.telegram.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+            text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+          });
+        }
+
+        if (init?.body) {
+          try {
+            const parsed = JSON.parse(init.body as string);
+            if (parsed.messages) capturedBodies.push(parsed);
+          } catch { /* ignore */ }
+        }
+
+        apiCallCount++;
+        let responseData;
+        if (apiCallCount === 1) {
+          responseData = {
+            choices: [{
+              message: {
+                content: 'Tool usage',
+                tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://example.com"}' } }],
+              },
+              finish_reason: 'tool_calls',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        } else {
+          // All empty
+          responseData = {
+            choices: [{
+              message: { content: '', tool_calls: undefined },
+              finish_reason: 'stop',
+            }],
+            usage: { prompt_tokens: 100, completion_tokens: 50 },
+          };
+        }
+
+        const body = JSON.stringify(responseData);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(body),
+          json: () => Promise.resolve(JSON.parse(body)),
+        });
+      }));
+
+      const processor = new TaskProcessorClass(mockState as never, {} as never);
+      await processor.fetch(new Request('https://do/process', {
+        method: 'POST',
+        body: JSON.stringify(createTaskRequest({ modelAlias: 'free1' })),
+      }));
+
+      await vi.waitFor(
+        () => {
+          const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+          if (!task || task.status !== 'completed') throw new Error('not completed yet');
+        },
+        { timeout: 15000, interval: 50 }
+      );
+
+      // No API call should contain [REVIEW PHASE] — review should not trigger for empty responses
+      const hasReviewCall = capturedBodies.some(b => {
+        const msgs = b.messages as Array<Record<string, unknown>>;
+        return msgs.some(m => typeof m.content === 'string' && m.content.includes('[REVIEW PHASE]'));
+      });
+      expect(hasReviewCall).toBe(false);
+
+      // Phase should NOT be 'review' (stays at work since review was skipped)
+      const task = mockState.storage._store.get('task') as Record<string, unknown>;
+      expect(task.phase).not.toBe('review');
+    });
+  });
 });

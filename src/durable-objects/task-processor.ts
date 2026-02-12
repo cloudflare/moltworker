@@ -79,6 +79,8 @@ export interface TaskRequest {
   reasoningLevel?: ReasoningLevel;
   // Structured output format (from json: prefix)
   responseFormat?: ResponseFormat;
+  // Original user prompt (for checkpoint display)
+  prompt?: string;
 }
 
 // DO environment with R2 binding
@@ -406,6 +408,39 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     }] : [];
 
     return [systemMsg, userMsg, ...compressedMiddle, ...recentMessages];
+  }
+
+  /**
+   * Construct a fallback response from tool results when model returns empty.
+   * Extracts useful data instead of showing "No response generated."
+   */
+  private constructFallbackResponse(messages: ChatMessage[], toolsUsed: string[]): string {
+    // Look for the last meaningful assistant content (might exist from earlier iteration)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'assistant' && msg.content && typeof msg.content === 'string' && msg.content.trim().length > 100) {
+        // Skip compression summaries (they start with "[Previous work:")
+        if (msg.content.startsWith('[Previous work:')) continue;
+        return `${msg.content.trim()}\n\n_(Recovered from partial response)_`;
+      }
+    }
+
+    // Extract key data from the most recent tool results
+    const toolResults: string[] = [];
+    for (let i = messages.length - 1; i >= 0 && toolResults.length < 3; i--) {
+      const msg = messages[i];
+      if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.trim()) {
+        const snippet = msg.content.trim().slice(0, 500);
+        toolResults.unshift(snippet);
+      }
+    }
+
+    if (toolResults.length > 0) {
+      const uniqueTools = [...new Set(toolsUsed)];
+      return `I used ${toolsUsed.length} tools (${uniqueTools.join(', ')}) to research this. Here are the key findings:\n\n${toolResults.join('\n\n---\n\n')}\n\n_(The model couldn't generate a summary. Try a different model with /models)_`;
+    }
+
+    return `Task completed with ${toolsUsed.length} tool calls but the model couldn't generate a final response. Try again or use a different model with /models.`;
   }
 
   /**
@@ -1027,24 +1062,80 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         }
 
         // No more tool calls - check if we have actual content
-        if ((!choice.message.content || choice.message.content.trim() === '') && task.toolsUsed.length > 0 && emptyContentRetries < MAX_EMPTY_RETRIES) {
-          // Model returned empty after tool calls — nudge it to produce a response
-          emptyContentRetries++;
-          console.log(`[TaskProcessor] Empty content after ${task.toolsUsed.length} tools — retry ${emptyContentRetries}/${MAX_EMPTY_RETRIES}`);
-          conversationMessages.push({
-            role: 'assistant',
-            content: choice.message.content || '',
-          });
-          conversationMessages.push({
-            role: 'user',
-            content: '[Your last response was empty. Please provide your answer based on the tool results above.]',
-          });
-          continue; // Retry the iteration
+        const hasContent = choice.message.content && choice.message.content.trim() !== '';
+
+        if (!hasContent && task.toolsUsed.length > 0) {
+          // --- EMPTY RESPONSE RECOVERY ---
+          // Model returned empty after tool calls. This usually means the context
+          // is too large for the model to process. Recovery strategy:
+          // 1. Aggressive compression + nudge retry (2x)
+          // 2. Rotate to another free model
+          // 3. Construct fallback from tool data
+
+          // a. Try empty retries with aggressive compression
+          if (emptyContentRetries < MAX_EMPTY_RETRIES) {
+            emptyContentRetries++;
+            console.log(`[TaskProcessor] Empty content after ${task.toolsUsed.length} tools — retry ${emptyContentRetries}/${MAX_EMPTY_RETRIES}`);
+
+            // Aggressively compress context before retry — keep only 2 recent messages
+            const compressed = this.compressContext(conversationMessages, 2);
+            conversationMessages.length = 0;
+            conversationMessages.push(...compressed);
+            console.log(`[TaskProcessor] Aggressive compression before retry: ${conversationMessages.length} messages`);
+
+            conversationMessages.push({
+              role: 'user',
+              content: '[Your last response was empty. Please provide a concise answer based on the tool results above. Keep it brief and focused.]',
+            });
+            continue;
+          }
+
+          // b. Try model rotation for free models (empty response = model can't handle context)
+          const emptyCurrentIsFree = getModel(task.modelAlias)?.isFree === true;
+          if (emptyCurrentIsFree && freeModels.length > 1 && freeRotationCount < MAX_FREE_ROTATIONS) {
+            const currentIdx = freeModels.indexOf(task.modelAlias);
+            const nextIdx = (currentIdx + 1) % freeModels.length;
+            const nextAlias = freeModels[nextIdx];
+
+            if (nextAlias !== task.modelAlias) {
+              freeRotationCount++;
+              const prevAlias = task.modelAlias;
+              task.modelAlias = nextAlias;
+              task.lastUpdate = Date.now();
+              emptyContentRetries = 0; // Reset retries for new model
+              await this.doState.storage.put('task', task);
+
+              console.log(`[TaskProcessor] Empty response rotation: /${prevAlias} → /${nextAlias} (rotation ${freeRotationCount}/${MAX_FREE_ROTATIONS})`);
+
+              if (statusMessageId) {
+                try {
+                  await this.editTelegramMessage(
+                    request.telegramToken, request.chatId, statusMessageId,
+                    `🔄 /${prevAlias} couldn't summarize results. Trying /${nextAlias}...`
+                  );
+                } catch { /* non-fatal */ }
+              }
+
+              // Compress for the new model
+              const compressed = this.compressContext(conversationMessages, 2);
+              conversationMessages.length = 0;
+              conversationMessages.push(...compressed);
+
+              conversationMessages.push({
+                role: 'user',
+                content: '[Please provide a concise answer based on the tool results summarized above.]',
+              });
+              continue;
+            }
+          }
+
+          // c. All retries and rotations exhausted — will use fallback below
+          console.log(`[TaskProcessor] All empty response recovery exhausted — constructing fallback`);
         }
 
-        // Phase transition: work → review when tools were used but model stopped calling them
-        // Only trigger review once (skip if already in review phase or no tools were used)
-        if (task.phase === 'work' && task.toolsUsed.length > 0) {
+        // Phase transition: work → review when tools were used and model produced content
+        // Skip review if content is empty — nothing to review, adding more prompts won't help
+        if (hasContent && task.phase === 'work' && task.toolsUsed.length > 0) {
           task.phase = 'review';
           task.phaseStartIteration = task.iterations;
           await this.doState.storage.put('task', task);
@@ -1062,9 +1153,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           continue; // One more iteration for the review response
         }
 
-        // Final response (may still be empty after retries, but we tried)
+        // Final response
         task.status = 'completed';
-        task.result = choice.message.content || 'No response generated.';
+        if (!hasContent && task.toolsUsed.length > 0) {
+          // Construct fallback from tool data instead of "No response generated"
+          task.result = this.constructFallbackResponse(conversationMessages, task.toolsUsed);
+        } else {
+          task.result = choice.message.content || 'No response generated.';
+        }
         await this.doState.storage.put('task', task);
 
         // Cancel watchdog alarm - task completed successfully

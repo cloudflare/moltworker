@@ -803,7 +803,7 @@ export class TelegramHandler {
           msg += `${status} \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools (${age})${prompt}\n`;
         }
         msg += '\n✅=completed ⏸️=interrupted\n_Use /delsave <name> to delete, /saveas <name> to backup_';
-        await this.bot.sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+        await this.bot.sendMessage(chatId, msg, { parseMode: 'Markdown' });
         break;
       }
 
@@ -861,15 +861,15 @@ export class TelegramHandler {
         // Delete a checkpoint
         const slotToDelete = args[0];
         if (!slotToDelete) {
-          await this.bot.sendMessage(chatId, '⚠️ Please specify a slot name.\nUsage: `/delsave <name>`\n\nUse `/saves` to see available checkpoints.', { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, '⚠️ Please specify a slot name.\nUsage: `/delsave <name>`\n\nUse `/saves` to see available checkpoints.', { parseMode: 'Markdown' });
           break;
         }
 
         const deleted = await this.storage.deleteCheckpoint(userId, slotToDelete);
         if (deleted) {
-          await this.bot.sendMessage(chatId, `✅ Deleted checkpoint: \`${slotToDelete}\``, { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, `✅ Deleted checkpoint: \`${slotToDelete}\``, { parseMode: 'Markdown' });
         } else {
-          await this.bot.sendMessage(chatId, `❌ Checkpoint not found: \`${slotToDelete}\``, { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, `❌ Checkpoint not found: \`${slotToDelete}\``, { parseMode: 'Markdown' });
         }
         break;
       }
@@ -878,7 +878,7 @@ export class TelegramHandler {
         // Copy current checkpoint to a named slot (backup)
         const newSlotName = args[0];
         if (!newSlotName) {
-          await this.bot.sendMessage(chatId, '⚠️ Please specify a name for the backup.\nUsage: `/saveas <name>`\n\nExample: `/saveas myproject`', { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, '⚠️ Please specify a name for the backup.\nUsage: `/saveas <name>`\n\nExample: `/saveas myproject`', { parseMode: 'Markdown' });
           break;
         }
 
@@ -890,7 +890,7 @@ export class TelegramHandler {
 
         const copied = await this.storage.copyCheckpoint(userId, 'latest', newSlotName);
         if (copied) {
-          await this.bot.sendMessage(chatId, `✅ Current progress backed up to: \`${newSlotName}\`\n\nUse \`/load ${newSlotName}\` to restore later.`, { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, `✅ Current progress backed up to: \`${newSlotName}\`\n\nUse \`/load ${newSlotName}\` to restore later.`, { parseMode: 'Markdown' });
         } else {
           await this.bot.sendMessage(chatId, '❌ No current checkpoint to backup. Start a long-running task first.');
         }
@@ -901,13 +901,13 @@ export class TelegramHandler {
         // Copy a named slot back to latest (restore)
         const slotToLoad = args[0];
         if (!slotToLoad) {
-          await this.bot.sendMessage(chatId, '⚠️ Please specify a slot name to load.\nUsage: `/load <name>`\n\nUse `/saves` to see available checkpoints.', { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, '⚠️ Please specify a slot name to load.\nUsage: `/load <name>`\n\nUse `/saves` to see available checkpoints.', { parseMode: 'Markdown' });
           break;
         }
 
         const info = await this.storage.getCheckpointInfo(userId, slotToLoad);
         if (!info) {
-          await this.bot.sendMessage(chatId, `❌ Checkpoint not found: \`${slotToLoad}\``, { parse_mode: 'Markdown' });
+          await this.bot.sendMessage(chatId, `❌ Checkpoint not found: \`${slotToLoad}\``, { parseMode: 'Markdown' });
           break;
         }
 
@@ -916,7 +916,7 @@ export class TelegramHandler {
           await this.bot.sendMessage(
             chatId,
             `✅ Loaded checkpoint: \`${slotToLoad}\`\n\n📊 ${info.iterations} iterations, ${info.toolsUsed} tools\n\nUse Resume button or start a new task to continue.`,
-            { parse_mode: 'Markdown' }
+            { parseMode: 'Markdown' }
           );
         } else {
           await this.bot.sendMessage(chatId, '❌ Failed to load checkpoint.');
