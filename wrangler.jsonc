@@ -9,11 +9,10 @@
 	"observability": {
 		"enabled": true,
 	},
-	// Static assets for admin UI (built by vite)
 	"assets": {
 		"directory": "./dist/client",
-		"not_found_handling": "single-page-application",
-		"html_handling": "auto-trailing-slash",
+		"not_found_handling": "none",
+		"html_handling": "none",
 		"binding": "ASSETS",
 		"run_worker_first": true,
 	},
@@ -75,10 +74,10 @@
 			"remote": true
 		},
 	],
-	// Cron trigger to sync moltbot data to R2 every 5 minutes
+	// Cron trigger: every minute to keep gateway alive + sync data to R2
 	"triggers": {
 		"crons": [
-			"*/5 * * * *"
+			"* * * * *"
 		],
 	},
 	// Browser Rendering binding for CDP shim

@@ -2,7 +2,7 @@ import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { R2_MOUNT_PATH } from '../config';
 import { mountR2Storage } from './r2';
-import { waitForProcess } from './utils';
+import { runCommandWithCleanup } from './utils';
 
 export interface SyncResult {
   success: boolean;
@@ -46,19 +46,19 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   // where fast-exiting processes have exitCode still undefined in the sandbox SDK
   let configDir = '/root/.openclaw';
   try {
-    const checkNew = await sandbox.startProcess(
+    const checkNew = await runCommandWithCleanup(
+      sandbox,
       'ls /root/.openclaw/openclaw.json 2>/dev/null && echo FOUND || echo NOTFOUND',
+      5000,
     );
-    await waitForProcess(checkNew, 5000);
-    const checkNewLogs = await checkNew.getLogs();
-    const newFound = checkNewLogs.stdout?.includes('FOUND') ?? false;
+    const newFound = checkNew.stdout.trim() === 'FOUND';
     if (!newFound) {
-      const checkLegacy = await sandbox.startProcess(
+      const checkLegacy = await runCommandWithCleanup(
+        sandbox,
         'ls /root/.clawdbot/clawdbot.json 2>/dev/null && echo FOUND || echo NOTFOUND',
+        5000,
       );
-      await waitForProcess(checkLegacy, 5000);
-      const checkLegacyLogs = await checkLegacy.getLogs();
-      if (checkLegacyLogs.stdout?.includes('FOUND')) {
+      if (checkLegacy.stdout.trim() === 'FOUND') {
         configDir = '/root/.clawdbot';
       } else {
         return {
@@ -78,26 +78,22 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
 
   // Sync to the new openclaw/ R2 prefix (even if source is legacy .clawdbot)
   // Also sync workspace directory (excluding skills since they're synced separately)
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete --exclude='skills' --exclude='.git' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete --exclude='.git' /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
 
   try {
-    const proc = await sandbox.startProcess(syncCmd);
-    await waitForProcess(proc, 30000); // 30 second timeout for sync
+    const syncResult = await runCommandWithCleanup(sandbox, syncCmd, 30000); // 30 second timeout for sync
 
     // Check for success by reading the timestamp file
-    const timestampProc = await sandbox.startProcess(`cat ${R2_MOUNT_PATH}/.last-sync`);
-    await waitForProcess(timestampProc, 5000);
-    const timestampLogs = await timestampProc.getLogs();
-    const lastSync = timestampLogs.stdout?.trim();
+    const timestampResult = await runCommandWithCleanup(sandbox, `cat ${R2_MOUNT_PATH}/.last-sync`, 5000);
+    const lastSync = timestampResult.stdout.trim();
 
     if (lastSync && lastSync.match(/^\d{4}-\d{2}-\d{2}/)) {
       return { success: true, lastSync };
     } else {
-      const logs = await proc.getLogs();
       return {
         success: false,
         error: 'Sync failed',
-        details: logs.stderr || logs.stdout || 'No timestamp file created',
+        details: syncResult.stderr || syncResult.stdout || 'No timestamp file created',
       };
     }
   } catch (err) {

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Startup script for OpenClaw in Cloudflare Sandbox
+# Startup script for OpenClaw in Cloudflare Sandbox (polling mode)
 # This script:
 # 1. Restores config from R2 backup if available
 # 2. Runs openclaw onboard --non-interactive to configure from env vars
@@ -7,11 +7,6 @@
 # 4. Starts the gateway
 
 set -e
-
-if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
-    echo "OpenClaw gateway is already running, exiting."
-    exit 0
-fi
 
 CONFIG_DIR="/root/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
@@ -59,10 +54,11 @@ should_restore_from_r2() {
 }
 
 # Check for backup data in new openclaw/ prefix first, then legacy clawdbot/ prefix
+# Use rsync instead of cp -a to handle broken symlinks/git objects in R2 (s3fs)
 if [ -f "$BACKUP_DIR/openclaw/openclaw.json" ]; then
     if should_restore_from_r2; then
         echo "Restoring from R2 backup at $BACKUP_DIR/openclaw..."
-        cp -a "$BACKUP_DIR/openclaw/." "$CONFIG_DIR/"
+        rsync -r --no-times --exclude='.git' "$BACKUP_DIR/openclaw/" "$CONFIG_DIR/" 2>&1 || true
         cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
         echo "Restored config from R2 backup"
     fi
@@ -70,7 +66,7 @@ elif [ -f "$BACKUP_DIR/clawdbot/clawdbot.json" ]; then
     # Legacy backup format — migrate .clawdbot data into .openclaw
     if should_restore_from_r2; then
         echo "Restoring from legacy R2 backup at $BACKUP_DIR/clawdbot..."
-        cp -a "$BACKUP_DIR/clawdbot/." "$CONFIG_DIR/"
+        rsync -r --no-times --exclude='.git' "$BACKUP_DIR/clawdbot/" "$CONFIG_DIR/" 2>&1 || true
         cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
         # Rename the config file if it has the old name
         if [ -f "$CONFIG_DIR/clawdbot.json" ] && [ ! -f "$CONFIG_FILE" ]; then
@@ -82,7 +78,7 @@ elif [ -f "$BACKUP_DIR/clawdbot.json" ]; then
     # Very old legacy backup format (flat structure)
     if should_restore_from_r2; then
         echo "Restoring from flat legacy R2 backup at $BACKUP_DIR..."
-        cp -a "$BACKUP_DIR/." "$CONFIG_DIR/"
+        rsync -r --no-times --exclude='.git' "$BACKUP_DIR/" "$CONFIG_DIR/" 2>&1 || true
         cp -f "$BACKUP_DIR/.last-sync" "$CONFIG_DIR/.last-sync" 2>/dev/null || true
         if [ -f "$CONFIG_DIR/clawdbot.json" ] && [ ! -f "$CONFIG_FILE" ]; then
             mv "$CONFIG_DIR/clawdbot.json" "$CONFIG_FILE"
@@ -102,7 +98,7 @@ if [ -d "$BACKUP_DIR/workspace" ] && [ "$(ls -A $BACKUP_DIR/workspace 2>/dev/nul
     if should_restore_from_r2; then
         echo "Restoring workspace from $BACKUP_DIR/workspace..."
         mkdir -p "$WORKSPACE_DIR"
-        cp -a "$BACKUP_DIR/workspace/." "$WORKSPACE_DIR/"
+        rsync -r --no-times --exclude='.git' "$BACKUP_DIR/workspace/" "$WORKSPACE_DIR/" 2>&1 || true
         echo "Restored workspace from R2 backup"
     fi
 fi
@@ -113,7 +109,7 @@ if [ -d "$BACKUP_DIR/skills" ] && [ "$(ls -A $BACKUP_DIR/skills 2>/dev/null)" ];
     if should_restore_from_r2; then
         echo "Restoring skills from $BACKUP_DIR/skills..."
         mkdir -p "$SKILLS_DIR"
-        cp -a "$BACKUP_DIR/skills/." "$SKILLS_DIR/"
+        rsync -r --no-times --exclude='.git' "$BACKUP_DIR/skills/" "$SKILLS_DIR/" 2>&1 || true
         echo "Restored skills from R2 backup"
     fi
 fi
@@ -297,6 +293,17 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
+// Browser profile configuration (CDP)
+if (process.env.CDP_SECRET && process.env.WORKER_URL) {
+    config.browser = config.browser || {};
+    config.browser.profiles = config.browser.profiles || {};
+    config.browser.profiles.cloudflare = {
+        cdpUrl: process.env.WORKER_URL + '/cdp?secret=' + encodeURIComponent(process.env.CDP_SECRET),
+        color: '#f38020',
+    };
+    console.log('Browser profile configured: cloudflare → ' + process.env.WORKER_URL + '/cdp');
+}
+
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
@@ -333,6 +340,12 @@ else
 fi
 
 # ============================================================
+# VALIDATE & FIX CONFIG
+# ============================================================
+echo "Running openclaw doctor --fix to validate config..."
+openclaw doctor --fix 2>&1 || true
+
+# ============================================================
 # START GATEWAY
 # ============================================================
 echo "Starting OpenClaw Gateway..."
@@ -350,3 +363,4 @@ else
     echo "Starting gateway with device pairing (no token)..."
     exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
 fi
+# build 1770777600

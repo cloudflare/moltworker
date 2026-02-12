@@ -5,7 +5,7 @@
   "private": true,
   "description": "Run Moltbot personal AI assistant in a Cloudflare Sandbox",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && mv dist/client/index.html dist/client/_admin-app.html",
     "deploy": "npm run build && wrangler deploy",
     "dev": "vite dev",
     "start": "wrangler dev",

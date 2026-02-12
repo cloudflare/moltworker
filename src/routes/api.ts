@@ -6,7 +6,7 @@ import {
   findExistingMoltbotProcess,
   mountR2Storage,
   syncToR2,
-  waitForProcess,
+  runCommandWithCleanup,
 } from '../gateway';
 import { R2_MOUNT_PATH } from '../config';
 
@@ -41,14 +41,11 @@ adminApi.get('/devices', async (c) => {
     // Must specify --url and --token (OpenClaw v2026.2.3 requires explicit credentials with --url)
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
     const tokenArg = token ? ` --token ${token}` : '';
-    const proc = await sandbox.startProcess(
+    const result = await runCommandWithCleanup(
+      sandbox,
       `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
+      CLI_TIMEOUT_MS,
     );
-    await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
 
     // Try to parse JSON output
     try {
@@ -63,8 +60,8 @@ adminApi.get('/devices', async (c) => {
       return c.json({
         pending: [],
         paired: [],
-        raw: stdout,
-        stderr,
+        raw: result.stdout,
+        stderr: result.stderr,
       });
     } catch {
       return c.json({
@@ -97,24 +94,21 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     // Run OpenClaw CLI to approve the device
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
     const tokenArg = token ? ` --token ${token}` : '';
-    const proc = await sandbox.startProcess(
+    const result = await runCommandWithCleanup(
+      sandbox,
       `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
+      CLI_TIMEOUT_MS,
     );
-    await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
 
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
-    const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
+    const success = result.stdout.toLowerCase().includes('approved') || result.exitCode === 0;
 
     return c.json({
       success,
       requestId,
       message: success ? 'Device approved' : 'Approval may have failed',
-      stdout,
-      stderr,
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -133,13 +127,11 @@ adminApi.post('/devices/approve-all', async (c) => {
     // First, get the list of pending devices
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
     const tokenArg = token ? ` --token ${token}` : '';
-    const listProc = await sandbox.startProcess(
+    const listResult = await runCommandWithCleanup(
+      sandbox,
       `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
+      CLI_TIMEOUT_MS,
     );
-    await waitForProcess(listProc, CLI_TIMEOUT_MS);
-
-    const listLogs = await listProc.getLogs();
-    const stdout = listLogs.stdout || '';
 
     // Parse pending devices
     let pending: Array<{ requestId: string }> = [];
@@ -150,7 +142,7 @@ adminApi.post('/devices/approve-all', async (c) => {
         pending = data.pending || [];
       }
     } catch {
-      return c.json({ error: 'Failed to parse device list', raw: stdout }, 500);
+      return c.json({ error: 'Failed to parse device list', raw: listResult.stdout }, 500);
     }
 
     if (pending.length === 0) {
@@ -163,16 +155,14 @@ adminApi.post('/devices/approve-all', async (c) => {
     for (const device of pending) {
       try {
         // eslint-disable-next-line no-await-in-loop -- sequential device approval required
-        const approveProc = await sandbox.startProcess(
+        const approveResult = await runCommandWithCleanup(
+          sandbox,
           `openclaw devices approve ${device.requestId} --url ws://localhost:18789${tokenArg}`,
+          CLI_TIMEOUT_MS,
         );
-        // eslint-disable-next-line no-await-in-loop
-        await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
-        // eslint-disable-next-line no-await-in-loop
-        const approveLogs = await approveProc.getLogs();
         const success =
-          approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
+          approveResult.stdout.toLowerCase().includes('approved') || approveResult.exitCode === 0;
 
         results.push({ requestId: device.requestId, success });
       } catch (err) {
@@ -220,12 +210,12 @@ adminApi.get('/storage', async (c) => {
       await mountR2Storage(sandbox, c.env);
 
       // Check for sync marker file
-      const proc = await sandbox.startProcess(
+      const result = await runCommandWithCleanup(
+        sandbox,
         `cat ${R2_MOUNT_PATH}/.last-sync 2>/dev/null || echo ""`,
+        5000,
       );
-      await waitForProcess(proc, 5000);
-      const logs = await proc.getLogs();
-      const timestamp = logs.stdout?.trim();
+      const timestamp = result.stdout.trim();
       if (timestamp && timestamp !== '') {
         lastSync = timestamp;
       }

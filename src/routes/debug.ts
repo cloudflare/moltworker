@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { findExistingMoltbotProcess } from '../gateway';
+import { findExistingMoltbotProcess, runCommandWithCleanup } from '../gateway';
 
 /**
  * Debug routes for inspecting container state
@@ -14,16 +14,12 @@ debug.get('/version', async (c) => {
   const sandbox = c.get('sandbox');
   try {
     // Get OpenClaw version
-    const versionProcess = await sandbox.startProcess('openclaw --version');
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const versionLogs = await versionProcess.getLogs();
-    const moltbotVersion = (versionLogs.stdout || versionLogs.stderr || '').trim();
+    const versionResult = await runCommandWithCleanup(sandbox, 'openclaw --version', 500);
+    const moltbotVersion = (versionResult.stdout || versionResult.stderr).trim();
 
     // Get node version
-    const nodeProcess = await sandbox.startProcess('node --version');
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const nodeLogs = await nodeProcess.getLogs();
-    const nodeVersion = (nodeLogs.stdout || '').trim();
+    const nodeResult = await runCommandWithCleanup(sandbox, 'node --version', 500);
+    const nodeVersion = nodeResult.stdout.trim();
 
     return c.json({
       moltbot_version: moltbotVersion,
@@ -131,25 +127,14 @@ debug.get('/cli', async (c) => {
   const cmd = c.req.query('cmd') || 'openclaw --help';
 
   try {
-    const proc = await sandbox.startProcess(cmd);
+    const result = await runCommandWithCleanup(sandbox, cmd, 15000); // 15s timeout
 
-    // Wait longer for command to complete
-    let attempts = 0;
-    while (attempts < 30) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
-      await new Promise((r) => setTimeout(r, 500));
-      if (proc.status !== 'running') break;
-      attempts++;
-    }
-
-    const logs = await proc.getLogs();
     return c.json({
       command: cmd,
-      status: proc.status,
-      exitCode: proc.exitCode,
-      attempts,
-      stdout: logs.stdout || '',
-      stderr: logs.stderr || '',
+      status: result.process.status,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -367,34 +352,72 @@ debug.get('/container-config', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    const proc = await sandbox.startProcess('cat /root/.openclaw/openclaw.json');
-
-    let attempts = 0;
-    while (attempts < 10) {
-      // eslint-disable-next-line no-await-in-loop -- intentional sequential polling
-      await new Promise((r) => setTimeout(r, 200));
-      if (proc.status !== 'running') break;
-      attempts++;
-    }
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
+    const result = await runCommandWithCleanup(sandbox, 'cat /root/.openclaw/openclaw.json', 2000);
 
     let config = null;
     try {
-      config = JSON.parse(stdout);
+      config = JSON.parse(result.stdout);
     } catch {
       // Not valid JSON
     }
 
     return c.json({
-      status: proc.status,
-      exitCode: proc.exitCode,
+      status: result.process.status,
+      exitCode: result.exitCode,
       config,
-      raw: config ? undefined : stdout,
-      stderr,
+      raw: config ? undefined : result.stdout,
+      stderr: result.stderr,
     });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /debug/net-test - Test outbound internet connectivity from the container
+debug.get('/net-test', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  const targets = [
+    { name: 'Cloudflare DNS', cmd: 'curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://1.1.1.1/' },
+    { name: 'Google DNS', cmd: 'curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://dns.google/' },
+    { name: 'Telegram API', cmd: 'curl -s -o /dev/null -w "%{http_code}" --max-time 5 https://api.telegram.org/' },
+    { name: 'DNS resolve telegram', cmd: 'getent hosts api.telegram.org 2>&1 || echo "DNS_FAILED"' },
+    { name: 'DNS resolve google', cmd: 'getent hosts google.com 2>&1 || echo "DNS_FAILED"' },
+  ];
+
+  const results: Record<string, string> = {};
+
+  for (const target of targets) {
+    try {
+      const result = await runCommandWithCleanup(sandbox, target.cmd, 10000); // 10s timeout
+      results[target.name] = (result.stdout || result.stderr || 'no output').trim();
+    } catch (error) {
+      results[target.name] = `error: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  return c.json({ results });
+});
+
+// GET /debug/cleanup - Clean up completed processes (safe)
+debug.get('/cleanup', async (c) => {
+  const sandbox = c.get('sandbox');
+  try {
+    const cleaned = await sandbox.cleanupCompletedProcesses();
+    return c.json({ action: 'cleanupCompleted', cleaned });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// POST /debug/cleanup - Kill ALL processes (nuclear option for recovery)
+debug.post('/cleanup', async (c) => {
+  const sandbox = c.get('sandbox');
+  try {
+    const killed = await sandbox.killAllProcesses();
+    return c.json({ action: 'killAll', killed });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: errorMessage }, 500);

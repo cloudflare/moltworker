@@ -50,6 +50,8 @@ export interface MockSandbox {
   startProcessMock: ReturnType<typeof vi.fn>;
   listProcessesMock: ReturnType<typeof vi.fn>;
   containerFetchMock: ReturnType<typeof vi.fn>;
+  killAllProcessesMock: ReturnType<typeof vi.fn>;
+  cleanupCompletedProcessesMock: ReturnType<typeof vi.fn>;
 }
 
 /**
@@ -64,6 +66,8 @@ export function createMockSandbox(
   const mountBucketMock = vi.fn().mockResolvedValue(undefined);
   const listProcessesMock = vi.fn().mockResolvedValue(options.processes || []);
   const containerFetchMock = vi.fn();
+  const killAllProcessesMock = vi.fn().mockResolvedValue(0);
+  const cleanupCompletedProcessesMock = vi.fn().mockResolvedValue(0);
 
   // Default: return empty stdout (not mounted), unless mounted: true
   const startProcessMock = vi
@@ -81,10 +85,20 @@ export function createMockSandbox(
     listProcesses: listProcessesMock,
     startProcess: startProcessMock,
     containerFetch: containerFetchMock,
+    killAllProcesses: killAllProcessesMock,
+    cleanupCompletedProcesses: cleanupCompletedProcessesMock,
     wsConnect: vi.fn(),
   } as unknown as Sandbox;
 
-  return { sandbox, mountBucketMock, startProcessMock, listProcessesMock, containerFetchMock };
+  return {
+    sandbox,
+    mountBucketMock,
+    startProcessMock,
+    listProcessesMock,
+    containerFetchMock,
+    killAllProcessesMock,
+    cleanupCompletedProcessesMock,
+  };
 }
 
 /**

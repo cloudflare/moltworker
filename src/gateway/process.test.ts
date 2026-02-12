@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { findExistingMoltbotProcess } from './process';
+import { findExistingMoltbotProcess, killAllGatewayProcesses } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
 import { createMockSandbox } from '../test-utils';
 
@@ -141,5 +141,69 @@ describe('findExistingMoltbotProcess', () => {
 
     const result = await findExistingMoltbotProcess(sandbox);
     expect(result).toBeNull();
+  });
+});
+
+describe('killAllGatewayProcesses', () => {
+  it('returns 0 when no gateway processes exist', async () => {
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue([]);
+
+    const result = await killAllGatewayProcesses(sandbox);
+    expect(result).toBe(0);
+  });
+
+  it('kills all running gateway processes', async () => {
+    const killMock1 = vi.fn().mockResolvedValue(undefined);
+    const killMock2 = vi.fn().mockResolvedValue(undefined);
+    const processes = [
+      createFullMockProcess({ id: 'gw-1', command: 'openclaw gateway --port 18789', status: 'running', kill: killMock1 }),
+      createFullMockProcess({ id: 'gw-2', command: '/usr/local/bin/start-openclaw.sh', status: 'starting', kill: killMock2 }),
+      createFullMockProcess({ id: 'cli-1', command: 'openclaw devices list', status: 'running' }),
+    ];
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue(processes);
+
+    const result = await killAllGatewayProcesses(sandbox);
+    expect(result).toBe(2);
+    expect(killMock1).toHaveBeenCalled();
+    expect(killMock2).toHaveBeenCalled();
+  });
+
+  it('skips completed gateway processes', async () => {
+    const processes = [
+      createFullMockProcess({ id: 'gw-1', command: 'openclaw gateway', status: 'completed' }),
+      createFullMockProcess({ id: 'gw-2', command: 'openclaw gateway', status: 'failed' }),
+    ];
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue(processes);
+
+    const result = await killAllGatewayProcesses(sandbox);
+    expect(result).toBe(0);
+  });
+
+  it('continues killing even if one kill fails', async () => {
+    const killMock1 = vi.fn().mockRejectedValue(new Error('kill failed'));
+    const killMock2 = vi.fn().mockResolvedValue(undefined);
+    const processes = [
+      createFullMockProcess({ id: 'gw-1', command: 'openclaw gateway', status: 'running', kill: killMock1 }),
+      createFullMockProcess({ id: 'gw-2', command: 'openclaw gateway', status: 'running', kill: killMock2 }),
+    ];
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue(processes);
+
+    const result = await killAllGatewayProcesses(sandbox);
+    expect(result).toBe(1);
+    expect(killMock1).toHaveBeenCalled();
+    expect(killMock2).toHaveBeenCalled();
+  });
+
+  it('handles listProcesses errors gracefully', async () => {
+    const sandbox = {
+      listProcesses: vi.fn().mockRejectedValue(new Error('Network error')),
+    } as unknown as Sandbox;
+
+    const result = await killAllGatewayProcesses(sandbox);
+    expect(result).toBe(0);
   });
 });
