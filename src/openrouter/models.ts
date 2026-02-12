@@ -122,14 +122,17 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     maxContext: 262144,
   },
-  llama70free: {
-    id: 'meta-llama/llama-3.3-70b-instruct:free',
-    alias: 'llama70free',
-    name: 'Llama 3.3 70B',
-    specialty: 'Free Multilingual/General',
-    score: '70B, outperforms many closed models',
+  // llama70free removed — replaced by maverick (Llama 4 Maverick, 400B MoE, 1M ctx)
+  maverick: {
+    id: 'meta-llama/llama-4-maverick:free',
+    alias: 'maverick',
+    name: 'Llama 4 Maverick',
+    specialty: 'Free Multimodal/Large Context',
+    score: '400B MoE (17B active), 1M context',
     cost: 'FREE',
+    supportsVision: true,
     isFree: true,
+    maxContext: 1048576,
   },
   trinitymini: {
     id: 'arcee-ai/trinity-mini:free',
@@ -145,9 +148,9 @@ export const MODELS: Record<string, ModelInfo> = {
   pony: {
     id: 'openrouter/pony-alpha',
     alias: 'pony',
-    name: 'Pony Alpha',
+    name: 'GLM-5 (Pony Alpha)',
     specialty: 'Free Coding/Agentic/Reasoning',
-    score: '200K context, strong coding & roleplay',
+    score: '744B MoE (40B active), 77.8% SWE-Bench, MIT license',
     cost: 'FREE',
     supportsTools: true,
     isFree: true,
@@ -189,16 +192,7 @@ export const MODELS: Record<string, ModelInfo> = {
     reasoning: 'fixed',
     maxContext: 32768,
   },
-  hermes405free: {
-    id: 'nousresearch/hermes-3-llama-3.1-405b:free',
-    alias: 'hermes405free',
-    name: 'Hermes 3 405B',
-    specialty: 'Free Largest Instruct/Deep Reasoning',
-    score: '405B dense, rivals paid frontier models',
-    cost: 'FREE',
-    isFree: true,
-    maxContext: 131072,
-  },
+  // hermes405free removed — Hermes 3 is outdated, superseded by Hermes 4
   deepchatfree: {
     id: 'deepseek/deepseek-chat-v3.1:free',
     alias: 'deepchatfree',
@@ -294,22 +288,8 @@ export const MODELS: Record<string, ModelInfo> = {
   },
 
   // === PAID MODELS (by cost) ===
-  nemo: {
-    id: 'mistralai/mistral-nemo',
-    alias: 'nemo',
-    name: 'Mistral Nemo',
-    specialty: 'Cheap Paid General',
-    score: 'High usage equiv. quality',
-    cost: '$0.02/$0.04',
-  },
-  qwencoder7b: {
-    id: 'qwen/qwen2.5-coder-7b-instruct',
-    alias: 'qwencoder7b',
-    name: 'Qwen 2.5 Coder 7B',
-    specialty: 'Ultra-Cheap Coding (Apache 2.0)',
-    score: '7B, 128K context, 92 lang support',
-    cost: '$0.03/$0.09',
-  },
+  // nemo removed — Mistral Nemo 12B (mid-2024), completely superseded
+  // qwencoder7b removed — Qwen 2.5 era, 2 generations behind Qwen3 Coder
   devstral: {
     id: 'mistralai/devstral-small:free',
     alias: 'devstral',
@@ -366,6 +346,18 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     reasoning: 'fixed',
     maxContext: 262144,
+  },
+  minimax: {
+    id: 'minimax/minimax-m2.5',
+    alias: 'minimax',
+    name: 'MiniMax M2.5',
+    specialty: 'Paid Agentic/Office/Coding',
+    score: '80.2% SWE-Bench, 1M context, cross-env agents',
+    cost: '$0.20/$1.10',
+    supportsTools: true,
+    parallelCalls: true,
+    reasoning: 'configurable',
+    maxContext: 1000000,
   },
   grok: {
     id: 'x-ai/grok-4.1-fast',
@@ -427,12 +419,13 @@ export const MODELS: Record<string, ModelInfo> = {
     maxContext: 65536,
   },
   deepreason: {
-    id: 'deepseek/deepseek-r1',
+    id: 'deepseek/deepseek-r1-0528',
     alias: 'deepreason',
-    name: 'DeepSeek R1',
+    name: 'DeepSeek R1 0528',
     specialty: 'Paid Deep Math/Reasoning',
-    score: '74%+ AIME',
+    score: 'Approaches O3/Gemini 2.5 Pro level',
     cost: '$0.40/$1.75',
+    maxContext: 163840,
   },
   mistrallarge: {
     id: 'mistralai/mistral-large-2512',
@@ -523,12 +516,24 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     maxContext: 200000,
   },
-  opus: {
+  opus45: {
     id: 'anthropic/claude-opus-4.5',
-    alias: 'opus',
+    alias: 'opus45',
     name: 'Claude Opus 4.5',
-    specialty: 'Paid Best Quality',
-    score: 'Top overall',
+    specialty: 'Paid Premium (Previous Gen)',
+    score: '80.9% SWE-Bench, 200K context',
+    cost: '$5/$25',
+    supportsVision: true,
+    supportsTools: true,
+    parallelCalls: true,
+    maxContext: 200000,
+  },
+  opus: {
+    id: 'anthropic/claude-opus-4.6',
+    alias: 'opus',
+    name: 'Claude Opus 4.6',
+    specialty: 'Paid Best Quality (Newest)',
+    score: 'AA Index #1 (53), best for professional tasks',
     cost: '$5/$25',
     supportsVision: true,
     supportsTools: true,
@@ -966,6 +971,45 @@ export function categorizeModel(modelId: string, name: string, hasReasoning?: bo
   if (hasReasoning || /\br1\b|reason|think|math|chimera/i.test(lower)) return 'reasoning';
   if (/flash|mini|small|fast|turbo|lite|nano/i.test(lower)) return 'fast';
   return 'general';
+}
+
+/**
+ * Value tier based on performance/cost ratio.
+ * Free models are always 'free'. Paid models ranked by intelligence per dollar.
+ */
+export type ValueTier = 'free' | 'exceptional' | 'great' | 'good' | 'premium' | 'outdated';
+
+/**
+ * Get the value tier for a model.
+ * Uses cost string parsing + known benchmark data to compute a rough tier.
+ *
+ * Tiers:
+ * - free: No cost
+ * - exceptional: Best-in-class value (MiMo, DeepSeek V3.2, Devstral 2, Grok Fast)
+ * - great: Strong value (MiniMax, Qwen3 Coder, Mistral Large)
+ * - good: Reasonable for the capability (Gemini Flash, Haiku, Kimi)
+ * - premium: Expensive but highest quality (Opus, Sonnet, Gemini Pro)
+ * - outdated: Poor value — newer/cheaper alternatives exist (GPT-4o)
+ */
+export function getValueTier(model: ModelInfo): ValueTier {
+  if (model.isFree || model.cost === 'FREE') return 'free';
+  if (model.isImageGen) return 'good'; // Image gen pricing is different
+
+  // Parse output cost from "$/M_in / $/M_out" format
+  const costMatch = model.cost.match(/\$[\d.]+\/\$([\d.]+)/);
+  if (!costMatch) return 'good';
+  const outputCostPerM = parseFloat(costMatch[1]);
+  if (isNaN(outputCostPerM)) return 'good';
+
+  // Known outdated models — poor value regardless of cost
+  const outdatedIds = ['openai/gpt-4o'];
+  if (outdatedIds.includes(model.id)) return 'outdated';
+
+  // Tier by output cost + capability class
+  if (outputCostPerM <= 0.5) return 'exceptional';  // Under $0.50/M output
+  if (outputCostPerM <= 2.0) return 'great';         // $0.50-$2.00/M output
+  if (outputCostPerM <= 5.0) return 'good';           // $2.00-$5.00/M output
+  return 'premium';                                    // $5.00+/M output
 }
 
 /**

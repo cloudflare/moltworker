@@ -119,6 +119,9 @@ interface TaskState {
   // Auto-resume settings
   autoResume?: boolean; // If true, automatically resume on timeout
   autoResumeCount?: number; // Number of auto-resumes so far
+  // Stall detection: track tool count at last resume to detect spinning
+  toolCountAtLastResume?: number; // toolsUsed.length when last resume fired
+  noProgressResumes?: number; // Consecutive resumes with no new tool calls
   // Reasoning level override
   reasoningLevel?: ReasoningLevel;
   // Structured output format
@@ -165,10 +168,14 @@ const STUCK_THRESHOLD_MS = 60000;
 const CHECKPOINT_EVERY_N_TOOLS = 3;
 // Max auto-resume attempts before requiring manual intervention
 const MAX_AUTO_RESUMES_DEFAULT = 10;
-const MAX_AUTO_RESUMES_FREE = 50;
+const MAX_AUTO_RESUMES_FREE = 15; // Was 50 — caused 21+ resume spin loops with no progress
 // Max total elapsed time before stopping (15min for free, 30min for paid)
 const MAX_ELAPSED_FREE_MS = 15 * 60 * 1000;
 const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
+// Max consecutive resumes with no new tool calls before declaring stall
+const MAX_NO_PROGRESS_RESUMES = 3;
+// Max consecutive iterations with no tool calls in main loop before stopping
+const MAX_STALL_ITERATIONS = 5;
 
 /** Get the auto-resume limit based on model cost */
 function getAutoResumeLimit(modelAlias: string): number {
@@ -250,7 +257,43 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
     // Check if auto-resume is enabled and under limit
     if (task.autoResume && resumeCount < maxResumes && task.telegramToken && task.openrouterKey) {
-      console.log(`[TaskProcessor] Auto-resuming (attempt ${resumeCount + 1}/${maxResumes})`);
+      // --- STALL DETECTION ---
+      // Check if the task made any progress (new tool calls) since the last resume.
+      // If no progress for MAX_NO_PROGRESS_RESUMES consecutive resumes, stop — the model is spinning.
+      const toolCountNow = task.toolsUsed.length;
+      const toolCountAtLastResume = task.toolCountAtLastResume ?? 0;
+      const newTools = toolCountNow - toolCountAtLastResume;
+      let noProgressResumes = task.noProgressResumes ?? 0;
+
+      if (newTools === 0 && resumeCount > 0) {
+        noProgressResumes++;
+        console.log(`[TaskProcessor] No new tools since last resume (stall ${noProgressResumes}/${MAX_NO_PROGRESS_RESUMES})`);
+
+        if (noProgressResumes >= MAX_NO_PROGRESS_RESUMES) {
+          console.log(`[TaskProcessor] Task stalled: ${noProgressResumes} consecutive resumes with no progress`);
+          task.status = 'failed';
+          task.error = `Task stalled: no new tool calls across ${noProgressResumes} auto-resumes (${task.iterations} iterations, ${toolCountNow} tools total). The model may not be capable of this task.`;
+          await this.doState.storage.put('task', task);
+
+          if (task.telegramToken) {
+            await this.sendTelegramMessageWithButtons(
+              task.telegramToken,
+              task.chatId,
+              `🛑 Task stalled after ${noProgressResumes} resumes with no progress (${task.iterations} iter, ${toolCountNow} tools).\n\n💡 Try a more capable model: /deep, /grok, or /sonnet\n\nProgress saved.`,
+              [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
+            );
+          }
+          return;
+        }
+      } else {
+        noProgressResumes = 0; // Reset on progress
+      }
+
+      // Update stall tracking
+      task.toolCountAtLastResume = toolCountNow;
+      task.noProgressResumes = noProgressResumes;
+
+      console.log(`[TaskProcessor] Auto-resuming (attempt ${resumeCount + 1}/${maxResumes}, ${newTools} new tools since last resume)`);
 
       // Update resume count
       task.autoResumeCount = resumeCount + 1;
@@ -642,10 +685,15 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     // Initialize structured task phase
     task.phase = 'plan';
     task.phaseStartIteration = 0;
-    // Keep existing autoResumeCount only if resuming the SAME task
+    // Keep existing resume/stall counters only if resuming the SAME task
     const existingTask = await this.doState.storage.get<TaskState>('task');
-    if (existingTask?.taskId === request.taskId && existingTask?.autoResumeCount !== undefined) {
-      task.autoResumeCount = existingTask.autoResumeCount;
+    if (existingTask?.taskId === request.taskId) {
+      if (existingTask.autoResumeCount !== undefined) {
+        task.autoResumeCount = existingTask.autoResumeCount;
+      }
+      // Preserve stall detection state across resumes
+      task.toolCountAtLastResume = existingTask.toolCountAtLastResume;
+      task.noProgressResumes = existingTask.noProgressResumes;
     }
     await this.doState.storage.put('task', task);
 
@@ -676,6 +724,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     console.log(`[TaskProcessor] Task category: ${taskCategory}, rotation order: ${rotationOrder.join(', ')} (${MAX_FREE_ROTATIONS} candidates)`);
     let emptyContentRetries = 0;
     const MAX_EMPTY_RETRIES = 2;
+    // Stall detection: consecutive iterations where model produces no tool calls
+    let consecutiveNoToolIterations = 0;
 
     let conversationMessages: ChatMessage[] = [...request.messages];
     const maxIterations = 100; // Very high limit for complex tasks
@@ -1068,6 +1118,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         // Check if model wants to call tools
         if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+          consecutiveNoToolIterations = 0; // Reset stall counter — model is working
+
           // Add assistant message with tool calls
           conversationMessages.push({
             role: 'assistant',
@@ -1158,6 +1210,46 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
           // Continue loop for next iteration
           continue;
+        }
+
+        // No more tool calls — increment stall counter
+        // This catches models that spin without using tools or producing final answers
+        consecutiveNoToolIterations++;
+        if (consecutiveNoToolIterations >= MAX_STALL_ITERATIONS && task.toolsUsed.length === 0) {
+          // Model has been running for N iterations without ever calling a tool
+          // This means it's generating text endlessly (common with weak models)
+          console.log(`[TaskProcessor] Stall detected: ${consecutiveNoToolIterations} iterations with no tool calls`);
+          const content = choice.message.content || '';
+          if (content.trim()) {
+            // Use whatever content we have as the final response
+            task.status = 'completed';
+            task.result = content.trim() + '\n\n_(Model did not use tools — response may be incomplete)_';
+            await this.doState.storage.put('task', task);
+            await this.doState.storage.deleteAlarm();
+            if (statusMessageId) {
+              await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
+            }
+            const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+            const modelInfo = `🤖 /${task.modelAlias}`;
+            await this.sendLongMessage(request.telegramToken, request.chatId,
+              `${task.result}\n\n${modelInfo} | ⏱️ ${elapsed}s (${task.iterations} iter)`
+            );
+            return;
+          }
+          // No content at all after N iterations — fail
+          task.status = 'failed';
+          task.error = `Model stalled: ${consecutiveNoToolIterations} iterations without tool calls or useful output.`;
+          await this.doState.storage.put('task', task);
+          await this.doState.storage.deleteAlarm();
+          if (statusMessageId) {
+            await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
+          }
+          await this.sendTelegramMessageWithButtons(
+            request.telegramToken, request.chatId,
+            `🛑 Model stalled after ${task.iterations} iterations without using tools.\n\n💡 Try a more capable model: /deep, /grok, or /sonnet`,
+            [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
+          );
+          return;
         }
 
         // No more tool calls - check if we have actual content
