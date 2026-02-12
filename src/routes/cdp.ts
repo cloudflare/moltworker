@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv, MoltbotEnv } from '../types';
 import puppeteer, { type Browser, type Page } from '@cloudflare/puppeteer';
+import { timingSafeEqual } from '../utils/timing';
 
 /**
  * CDP (Chrome DevTools Protocol) WebSocket shim
@@ -67,8 +68,11 @@ interface CDPSession {
  */
 cdp.get('/', async (c) => {
   // Check for WebSocket upgrade
-  const upgradeHeader = c.req.header('Upgrade');
-  if (upgradeHeader?.toLowerCase() !== 'websocket') {
+  // Cloudflare's HTTP/2 edge strips the Upgrade header, so also check Sec-WebSocket-Key
+  const isWebSocket =
+    c.req.header('Upgrade')?.toLowerCase() === 'websocket' ||
+    c.req.header('Sec-WebSocket-Key') !== undefined;
+  if (!isWebSocket) {
     return c.json({
       error: 'WebSocket upgrade required',
       hint: 'Connect via WebSocket: ws://host/cdp?secret=<CDP_SECRET>',
@@ -364,6 +368,35 @@ cdp.get('/json', async (c) => {
  */
 async function initCDPSession(ws: WebSocket, env: MoltbotEnv): Promise<void> {
   let session: CDPSession | null = null;
+  // Queue messages received before the browser is ready
+  const pendingMessages: MessageEvent[] = [];
+
+  // Register event handlers IMMEDIATELY to avoid losing messages
+  // during the async browser launch
+  ws.addEventListener('message', async (event) => {
+    if (!session) {
+      // Browser not ready yet — queue the message
+      pendingMessages.push(event);
+      return;
+    }
+
+    await processMessage(session, event, ws);
+  });
+
+  ws.addEventListener('close', async () => {
+    console.log('[CDP] WebSocket closed, cleaning up');
+    if (session) {
+      try {
+        await session.browser.close();
+      } catch (err) {
+        console.error('[CDP] Error closing browser:', err);
+      }
+    }
+  });
+
+  ws.addEventListener('error', (event) => {
+    console.error('[CDP] WebSocket error:', event);
+  });
 
   try {
     // Launch browser
@@ -398,50 +431,37 @@ async function initCDPSession(ws: WebSocket, env: MoltbotEnv): Promise<void> {
     });
 
     console.log('[CDP] Session initialized, targetId:', targetId);
+
+    // Process any messages that arrived while the browser was launching
+    for (const msg of pendingMessages) {
+      await processMessage(session, msg, ws);
+    }
+    pendingMessages.length = 0;
   } catch (err) {
     console.error('[CDP] Browser launch failed:', err);
     ws.close(1011, 'Browser launch failed');
     return;
   }
+}
 
-  // Handle incoming messages
-  ws.addEventListener('message', async (event) => {
-    if (!session) return;
+async function processMessage(session: CDPSession, event: MessageEvent, ws: WebSocket): Promise<void> {
+  let request: CDPRequest;
+  try {
+    request = JSON.parse(event.data as string);
+  } catch {
+    console.error('[CDP] Invalid JSON received');
+    return;
+  }
 
-    let request: CDPRequest;
-    try {
-      request = JSON.parse(event.data as string);
-    } catch {
-      console.error('[CDP] Invalid JSON received');
-      return;
-    }
+  console.log('[CDP] Request:', request.method, request.params);
 
-    console.log('[CDP] Request:', request.method, request.params);
-
-    try {
-      const result = await handleCDPMethod(session, request.method, request.params || {}, ws);
-      sendResponse(ws, request.id, result);
-    } catch (err) {
-      console.error('[CDP] Method error:', request.method, err);
-      sendError(ws, request.id, -32000, err instanceof Error ? err.message : 'Unknown error');
-    }
-  });
-
-  // Handle close
-  ws.addEventListener('close', async () => {
-    console.log('[CDP] WebSocket closed, cleaning up');
-    if (session) {
-      try {
-        await session.browser.close();
-      } catch (err) {
-        console.error('[CDP] Error closing browser:', err);
-      }
-    }
-  });
-
-  ws.addEventListener('error', (event) => {
-    console.error('[CDP] WebSocket error:', event);
-  });
+  try {
+    const result = await handleCDPMethod(session, request.method, request.params || {}, ws);
+    sendResponse(ws, request.id, result);
+  } catch (err) {
+    console.error('[CDP] Method error:', request.method, err);
+    sendError(ws, request.id, -32000, err instanceof Error ? err.message : 'Unknown error');
+  }
 }
 
 /**
@@ -1899,21 +1919,6 @@ function sendError(ws: WebSocket, id: number, code: number, message: string): vo
 function sendEvent(ws: WebSocket, method: string, params?: Record<string, unknown>): void {
   const event: CDPEvent = { method, params };
   ws.send(JSON.stringify(event));
-}
-
-/**
- * Constant-time string comparison to prevent timing attacks
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-
-  let result = 0;
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return result === 0;
 }
 
 export { cdp };
