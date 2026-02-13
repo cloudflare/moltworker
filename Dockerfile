@@ -19,6 +19,12 @@ RUN npm install -g pnpm
 RUN npm install -g openclaw@latest \
     && openclaw --version
 
+# Install ws module globally for CDP browser automation scripts
+RUN npm install -g ws
+
+# Ensure globally installed modules are findable by scripts
+ENV NODE_PATH=/usr/local/lib/node_modules
+
 # Create openclaw directories
 # Note: openclaw still uses ~/.clawdbot for config compatibility
 RUN mkdir -p /root/.clawdbot \
