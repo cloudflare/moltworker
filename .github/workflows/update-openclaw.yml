@@ -72,9 +72,12 @@ jobs:
         run: |
           WORKER_NAME="openclaw-${{ inputs.username }}"
 
+          # --- Cloudflare Account ID (shared: AI Gateway + R2 + wrangler) ---
+          echo "${{ secrets.CF_ACCOUNT_ID }}" | npx wrangler secret put CF_ACCOUNT_ID              --name "$WORKER_NAME"
+          echo "${{ secrets.CF_ACCOUNT_ID }}" | npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID   --name "$WORKER_NAME"
+
           # --- AI Gateway configuration ---
           echo "${{ secrets.CLOUDFLARE_AI_GATEWAY_API_KEY }}" | npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY --name "$WORKER_NAME"
-          echo "${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}"      | npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID      --name "$WORKER_NAME"
           echo "${{ secrets.CF_AI_GATEWAY_GATEWAY_ID }}"       | npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID       --name "$WORKER_NAME"
           echo "${{ inputs.model }}"                           | npx wrangler secret put CF_AI_GATEWAY_MODEL             --name "$WORKER_NAME"
 
@@ -87,7 +90,6 @@ jobs:
           # --- R2 persistence (re-apply shared credentials) ---
           echo "${{ secrets.R2_ACCESS_KEY_ID }}"     | npx wrangler secret put R2_ACCESS_KEY_ID     --name "$WORKER_NAME"
           echo "${{ secrets.R2_SECRET_ACCESS_KEY }}"  | npx wrangler secret put R2_SECRET_ACCESS_KEY  --name "$WORKER_NAME"
-          echo "${{ secrets.CF_ACCOUNT_ID }}"         | npx wrangler secret put CF_ACCOUNT_ID         --name "$WORKER_NAME"
           echo "openclaw-${{ inputs.username }}-data" | npx wrangler secret put R2_BUCKET_NAME        --name "$WORKER_NAME"
 
           # --- Cloudflare Access (optional) ---
