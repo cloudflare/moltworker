@@ -1,0 +1,114 @@
+name: Update OpenClaw
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Username of the existing OpenClaw instance to update"
+        required: true
+        type: string
+      model:
+        description: "AI model for Cloudflare AI Gateway (e.g. workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast, openai/gpt-4o, bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0)"
+        required: true
+        type: string
+      telegram_bot_token:
+        description: "Telegram Bot Token (leave empty to keep existing)"
+        required: false
+        type: string
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          USERNAME="${{ inputs.username }}"
+          MODEL="${{ inputs.model }}"
+
+          if ! echo "$USERNAME" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+            echo "::error::Invalid username '${USERNAME}'. Must be lowercase alphanumeric with optional hyphens."
+            exit 1
+          fi
+
+          if ! echo "$MODEL" | grep -qE '^(workers-ai|openai|bedrock)/'; then
+            echo "::error::Invalid model format '${MODEL}'. Must start with workers-ai/, openai/, or bedrock/"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure wrangler for user namespace
+        run: |
+          WORKER_NAME="openclaw-${{ inputs.username }}"
+          R2_BUCKET="openclaw-${{ inputs.username }}-data"
+
+          echo "Worker name: ${WORKER_NAME}"
+          echo "R2 bucket:   ${R2_BUCKET}"
+
+          sed -i "s|\"name\": \"moltbot-sandbox\"|\"name\": \"${WORKER_NAME}\"|" wrangler.jsonc
+          sed -i "s|\"bucket_name\": \"moltbot-data\"|\"bucket_name\": \"${R2_BUCKET}\"|" wrangler.jsonc
+
+      - name: Deploy moltworker update
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      - name: Update worker secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+        run: |
+          WORKER_NAME="openclaw-${{ inputs.username }}"
+
+          # --- AI Gateway configuration ---
+          echo "${{ secrets.CLOUDFLARE_AI_GATEWAY_API_KEY }}" | npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY --name "$WORKER_NAME"
+          echo "${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}"      | npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID      --name "$WORKER_NAME"
+          echo "${{ secrets.CF_AI_GATEWAY_GATEWAY_ID }}"       | npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID       --name "$WORKER_NAME"
+          echo "${{ inputs.model }}"                           | npx wrangler secret put CF_AI_GATEWAY_MODEL             --name "$WORKER_NAME"
+
+          # --- Telegram (only update if provided) ---
+          TELEGRAM_TOKEN="${{ inputs.telegram_bot_token }}"
+          if [ -n "$TELEGRAM_TOKEN" ]; then
+            echo "$TELEGRAM_TOKEN" | npx wrangler secret put TELEGRAM_BOT_TOKEN --name "$WORKER_NAME"
+          fi
+
+          # --- R2 persistence (re-apply shared credentials) ---
+          echo "${{ secrets.R2_ACCESS_KEY_ID }}"     | npx wrangler secret put R2_ACCESS_KEY_ID     --name "$WORKER_NAME"
+          echo "${{ secrets.R2_SECRET_ACCESS_KEY }}"  | npx wrangler secret put R2_SECRET_ACCESS_KEY  --name "$WORKER_NAME"
+          echo "${{ secrets.CF_ACCOUNT_ID }}"         | npx wrangler secret put CF_ACCOUNT_ID         --name "$WORKER_NAME"
+          echo "openclaw-${{ inputs.username }}-data" | npx wrangler secret put R2_BUCKET_NAME        --name "$WORKER_NAME"
+
+          # --- Cloudflare Access (optional) ---
+          CF_ACCESS_TEAM_DOMAIN="${{ secrets.CF_ACCESS_TEAM_DOMAIN }}"
+          CF_ACCESS_AUD="${{ secrets.CF_ACCESS_AUD }}"
+          if [ -n "$CF_ACCESS_TEAM_DOMAIN" ]; then
+            echo "$CF_ACCESS_TEAM_DOMAIN" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --name "$WORKER_NAME"
+          fi
+          if [ -n "$CF_ACCESS_AUD" ]; then
+            echo "$CF_ACCESS_AUD" | npx wrangler secret put CF_ACCESS_AUD --name "$WORKER_NAME"
+          fi
+
+      - name: Deployment summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## OpenClaw Updated
+
+          | Item | Value |
+          |------|-------|
+          | **Worker** | \`openclaw-${{ inputs.username }}\` |
+          | **Model** | \`${{ inputs.model }}\` |
+          | **Telegram** | ${{ inputs.telegram_bot_token && 'Updated' || 'Unchanged (no token provided)' }} |
+          | **Gateway Token** | Unchanged (not rotated) |
+          EOF
