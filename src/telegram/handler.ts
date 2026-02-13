@@ -1132,11 +1132,16 @@ export class TelegramHandler {
   }
 
   /**
-   * Handle /orchestra command
-   * Usage: /orchestra init owner/repo <project description>
-   * Usage: /orchestra run owner/repo [specific task]
-   * Usage: /orchestra history
-   * Usage: /orchestra owner/repo <task> (legacy, same as run)
+   * Handle /orchestra (/orch) command
+   *
+   * Subcommands:
+   *   /orch set owner/repo  — Lock default repo
+   *   /orch unset           — Clear locked repo
+   *   /orch init [repo] <description> — Create roadmap
+   *   /orch run [repo] [task]         — Execute specific task
+   *   /orch next [task]               — Execute next task (uses locked repo)
+   *   /orch history                   — Show past tasks
+   *   /orch                           — Show help
    */
   private async handleOrchestraCommand(
     message: TelegramMessage,
@@ -1144,39 +1149,149 @@ export class TelegramHandler {
     userId: string,
     args: string[]
   ): Promise<void> {
-    // /orchestra history — show past tasks
-    if (args.length > 0 && args[0] === 'history') {
+    const sub = args.length > 0 ? args[0].toLowerCase() : '';
+
+    // /orch history
+    if (sub === 'history') {
       const history = await loadOrchestraHistory(this.r2Bucket, userId);
       await this.bot.sendMessage(chatId, formatOrchestraHistory(history));
       return;
     }
 
-    // Parse command arguments
-    const parsed = parseOrchestraCommand(args);
-    if (!parsed) {
-      await this.bot.sendMessage(
-        chatId,
-        '🎼 Orchestra Mode\n\n' +
-        '━━━ INIT — Create a roadmap ━━━\n' +
-        '/orchestra init owner/repo <project description>\n' +
-        '  Reads the repo, breaks down the project into phases,\n' +
-        '  creates ROADMAP.md + WORK_LOG.md as a PR.\n\n' +
-        '━━━ RUN — Execute next task ━━━\n' +
-        '/orchestra run owner/repo\n' +
-        '  Reads ROADMAP.md, picks the next task, implements it,\n' +
-        '  updates the roadmap + work log in the same PR.\n\n' +
-        '/orchestra run owner/repo <specific task>\n' +
-        '  Execute a specific task instead of the next one.\n\n' +
-        '━━━ History ━━━\n' +
-        '/orchestra history — View past orchestra tasks\n\n' +
-        'Example workflow:\n' +
-        '  1. /orchestra init PetrAnto/myapp Build a user auth system\n' +
-        '  2. /orchestra run PetrAnto/myapp\n' +
-        '  3. /orchestra run PetrAnto/myapp  (repeat until done)'
-      );
+    // /orch set owner/repo — lock the default repo
+    if (sub === 'set') {
+      const repo = args[1];
+      if (!repo || !/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repo)) {
+        await this.bot.sendMessage(chatId, '❌ Usage: /orch set owner/repo\nExample: /orch set PetrAnto/moltworker');
+        return;
+      }
+      await this.storage.setOrchestraRepo(userId, repo);
+      await this.bot.sendMessage(chatId, `✅ Default orchestra repo set to: ${repo}\n\nNow you can use:\n  /orch next — execute next roadmap task\n  /orch init <description> — create roadmap`);
       return;
     }
 
+    // /orch unset — clear locked repo
+    if (sub === 'unset') {
+      await this.storage.setOrchestraRepo(userId, undefined);
+      await this.bot.sendMessage(chatId, '✅ Default orchestra repo cleared.');
+      return;
+    }
+
+    // /orch next [specific task] — shorthand for run with locked repo
+    if (sub === 'next') {
+      const lockedRepo = await this.storage.getOrchestraRepo(userId);
+      if (!lockedRepo) {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ No default repo set.\n\nFirst run: /orch set owner/repo\nThen: /orch next'
+        );
+        return;
+      }
+      // Treat remaining args as optional specific task
+      const specificTask = args.slice(1).join(' ').trim();
+      return this.executeOrchestra(chatId, userId, 'run', lockedRepo, specificTask);
+    }
+
+    // /orch init ... — try parsing with init/run/legacy syntax
+    // Allow init and run to use locked repo when repo arg is omitted
+    if (sub === 'init') {
+      const maybeRepo = args[1];
+      const hasExplicitRepo = maybeRepo && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(maybeRepo);
+      if (hasExplicitRepo) {
+        // /orch init owner/repo <description>
+        const prompt = args.slice(2).join(' ').trim();
+        if (!prompt) {
+          await this.bot.sendMessage(chatId, '❌ Usage: /orch init owner/repo <project description>');
+          return;
+        }
+        // Auto-lock the repo on init
+        await this.storage.setOrchestraRepo(userId, maybeRepo);
+        return this.executeOrchestra(chatId, userId, 'init', maybeRepo, prompt);
+      } else {
+        // /orch init <description> — use locked repo
+        const lockedRepo = await this.storage.getOrchestraRepo(userId);
+        if (!lockedRepo) {
+          await this.bot.sendMessage(
+            chatId,
+            '❌ No default repo set.\n\nEither: /orch init owner/repo <description>\nOr: /orch set owner/repo first'
+          );
+          return;
+        }
+        const prompt = args.slice(1).join(' ').trim();
+        if (!prompt) {
+          await this.bot.sendMessage(chatId, '❌ Usage: /orch init <project description>');
+          return;
+        }
+        return this.executeOrchestra(chatId, userId, 'init', lockedRepo, prompt);
+      }
+    }
+
+    if (sub === 'run') {
+      const maybeRepo = args[1];
+      const hasExplicitRepo = maybeRepo && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(maybeRepo);
+      if (hasExplicitRepo) {
+        const specificTask = args.slice(2).join(' ').trim();
+        return this.executeOrchestra(chatId, userId, 'run', maybeRepo, specificTask);
+      } else {
+        // /orch run [task] — use locked repo
+        const lockedRepo = await this.storage.getOrchestraRepo(userId);
+        if (!lockedRepo) {
+          await this.bot.sendMessage(
+            chatId,
+            '❌ No default repo set.\n\nEither: /orch run owner/repo\nOr: /orch set owner/repo first'
+          );
+          return;
+        }
+        const specificTask = args.slice(1).join(' ').trim();
+        return this.executeOrchestra(chatId, userId, 'run', lockedRepo, specificTask);
+      }
+    }
+
+    // Legacy: /orch owner/repo <prompt> — treated as run
+    const parsed = parseOrchestraCommand(args);
+    if (parsed) {
+      return this.executeOrchestra(chatId, userId, parsed.mode, parsed.repo, parsed.prompt);
+    }
+
+    // No valid subcommand — show help
+    const lockedRepo = await this.storage.getOrchestraRepo(userId);
+    const repoLine = lockedRepo
+      ? `📦 Current repo: ${lockedRepo}\n\n`
+      : '📦 No repo set — use /orch set owner/repo first\n\n';
+
+    await this.bot.sendMessage(
+      chatId,
+      '🎼 Orchestra Mode — AI-Driven Project Execution\n\n' +
+      repoLine +
+      '━━━ Quick Start ━━━\n' +
+      '/orch set owner/repo — Lock your repo\n' +
+      '/orch init <description> — Create roadmap + work log\n' +
+      '/orch next — Execute next roadmap task\n\n' +
+      '━━━ Full Commands ━━━\n' +
+      '/orch init owner/repo <desc> — Create roadmap (explicit repo)\n' +
+      '/orch run owner/repo [task] — Run task (explicit repo)\n' +
+      '/orch next [task] — Run next task (locked repo)\n' +
+      '/orch set owner/repo — Lock default repo\n' +
+      '/orch unset — Clear locked repo\n' +
+      '/orch history — View past tasks\n\n' +
+      '━━━ Workflow ━━━\n' +
+      '1. /orch set PetrAnto/myapp\n' +
+      '2. /orch init Build a user auth system\n' +
+      '3. /orch next  (repeat until done)'
+    );
+  }
+
+  /**
+   * Execute an orchestra init or run task.
+   * Extracted from handleOrchestraCommand to share between subcommands.
+   */
+  private async executeOrchestra(
+    chatId: number,
+    userId: string,
+    mode: 'init' | 'run',
+    repo: string,
+    prompt: string
+  ): Promise<void> {
     // Verify prerequisites
     if (!this.githubToken) {
       await this.bot.sendMessage(chatId, '❌ GitHub token not configured. Orchestra mode requires GITHUB_TOKEN.');
@@ -1187,7 +1302,6 @@ export class TelegramHandler {
       return;
     }
 
-    const { mode, repo, prompt } = parsed;
     const modelAlias = await this.storage.getUserModel(userId);
     const modelInfo = getModel(modelAlias);
 
@@ -1215,7 +1329,7 @@ export class TelegramHandler {
         repo,
         modelAlias,
         previousTasks,
-        specificTask: prompt || undefined, // empty string = auto-pick next
+        specificTask: prompt || undefined,
       });
     }
 
@@ -1242,7 +1356,7 @@ export class TelegramHandler {
 
     // Determine branch name
     const taskSlug = mode === 'init'
-      ? `roadmap-init`
+      ? 'roadmap-init'
       : generateTaskSlug(prompt || 'next-task');
     const branchName = `bot/${taskSlug}-${modelAlias}`;
 
@@ -2561,6 +2675,7 @@ Just type a message to chat, or tap a button below to explore:`;
         { text: '🧠 Reasoning', callback_data: 'start:reasoning' },
       ],
       [
+        { text: '🎼 Orchestra', callback_data: 'start:orchestra' },
         { text: '🤖 Pick a Model', callback_data: 'start:pick' },
         { text: '📖 All Commands', callback_data: 'start:help' },
       ],
@@ -2687,6 +2802,43 @@ Best reasoning models:
 /flash — Strong reasoning + 1M context
 /opus — Maximum quality`;
 
+      case 'orchestra':
+        return `🎼 Orchestra Mode — AI Project Execution
+
+Give the bot a complex project. It will break it into phases, create a roadmap, then execute tasks one by one — each as a separate PR.
+
+━━━ How it works ━━━
+
+Step 1: Lock your repo
+  /orch set PetrAnto/myapp
+
+Step 2: Create a roadmap
+  /orch init Build a user auth system with JWT and OAuth
+  → Creates ROADMAP.md + WORK_LOG.md as a PR
+
+Step 3: Execute tasks
+  /orch next
+  → Reads the roadmap, picks the next task, implements it
+  → Updates ROADMAP.md (✅) + WORK_LOG.md in the same PR
+
+Step 4: Repeat
+  /orch next  (keep going until done)
+
+━━━ Commands ━━━
+/orch set owner/repo — Lock default repo
+/orch init <description> — Create roadmap
+/orch next — Execute next task
+/orch next <specific task> — Execute specific task
+/orch run owner/repo — Run with explicit repo
+/orch history — View past tasks
+/orch unset — Clear locked repo
+
+━━━ What gets created ━━━
+📋 ROADMAP.md — Phased task list with - [ ] / - [x] checkboxes
+📝 WORK_LOG.md — Table: Date | Task | Model | Branch | PR | Status
+
+Each /orch next picks up where the last one left off.`;
+
       default:
         return '';
     }
@@ -2749,10 +2901,11 @@ The bot calls these automatically when relevant:
  • sandbox_exec — Run commands in sandbox container
 
 ━━━ Orchestra Mode ━━━
-/orchestra init owner/repo <desc> — Create ROADMAP.md + WORK_LOG.md
-/orchestra run owner/repo — Execute next roadmap task
-/orchestra run owner/repo <task> — Execute specific task
-/orchestra history — View past orchestra tasks
+/orch set owner/repo — Lock default repo
+/orch init <desc> — Create ROADMAP.md + WORK_LOG.md
+/orch next — Execute next roadmap task
+/orch next <task> — Execute specific task
+/orch history — View past tasks
 
 ━━━ Special Prefixes ━━━
 think:high <msg> — Deep reasoning (also: low, medium, off)
