@@ -1,4 +1,4 @@
-name: Delete Moltworker
+name: Delete OpenClaw
 
 on:
   workflow_dispatch:
@@ -38,7 +38,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Delete moltworker
+      - name: Delete openclaw worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -60,7 +60,7 @@ jobs:
       - name: Deletion summary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## Moltworker Deleted
+          ## OpenClaw Deleted
 
           | Item | Status |
           |------|--------|

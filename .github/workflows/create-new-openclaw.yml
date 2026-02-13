@@ -15,6 +15,11 @@ on:
         description: "Telegram Bot Token for this instance"
         required: true
         type: string
+      sandbox_sleep_after:
+        description: "Container sleep timeout in minutes, or 'never' (default: 30)"
+        required: false
+        type: string
+        default: "30"
 
 jobs:
   create:
@@ -108,15 +113,17 @@ jobs:
           # R2 bucket name override (per-user isolation)
           echo "openclaw-${{ inputs.username }}-data" | npx wrangler secret put R2_BUCKET_NAME --name "$WORKER_NAME"
 
-          # --- Cloudflare Access (optional) ---
-          CF_ACCESS_TEAM_DOMAIN="${{ secrets.CF_ACCESS_TEAM_DOMAIN }}"
-          CF_ACCESS_AUD="${{ secrets.CF_ACCESS_AUD }}"
-          if [ -n "$CF_ACCESS_TEAM_DOMAIN" ]; then
-            echo "$CF_ACCESS_TEAM_DOMAIN" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --name "$WORKER_NAME"
+          # --- Container sleep timeout ---
+          SLEEP_AFTER="${{ inputs.sandbox_sleep_after }}"
+          if [ "$SLEEP_AFTER" = "never" ]; then
+            echo "never" | npx wrangler secret put SANDBOX_SLEEP_AFTER --name "$WORKER_NAME"
+          else
+            echo "${SLEEP_AFTER}m" | npx wrangler secret put SANDBOX_SLEEP_AFTER --name "$WORKER_NAME"
           fi
-          if [ -n "$CF_ACCESS_AUD" ]; then
-            echo "$CF_ACCESS_AUD" | npx wrangler secret put CF_ACCESS_AUD --name "$WORKER_NAME"
-          fi
+
+          # --- Cloudflare Access ---
+          echo "${{ secrets.CF_ACCESS_TEAM_DOMAIN }}" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --name "$WORKER_NAME"
+          echo "${{ secrets.CF_ACCESS_AUD }}"          | npx wrangler secret put CF_ACCESS_AUD          --name "$WORKER_NAME"
 
       - name: Deployment summary
         run: |
@@ -129,5 +136,6 @@ jobs:
           | **R2 Bucket** | \`openclaw-${{ inputs.username }}-data\` |
           | **Model** | \`${{ inputs.model }}\` |
           | **Telegram** | Configured |
+          | **Sleep After** | \`${{ inputs.sandbox_sleep_after }}m\` |
           | **Gateway Token** | Auto-generated (stored as worker secret) |
           EOF

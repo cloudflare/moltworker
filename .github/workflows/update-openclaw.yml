@@ -15,6 +15,10 @@ on:
         description: "Telegram Bot Token (leave empty to keep existing)"
         required: false
         type: string
+      sandbox_sleep_after:
+        description: "Container sleep timeout in minutes or 'never' (leave empty to keep existing)"
+        required: false
+        type: string
 
 jobs:
   update:
@@ -92,15 +96,19 @@ jobs:
           echo "${{ secrets.R2_SECRET_ACCESS_KEY }}"  | npx wrangler secret put R2_SECRET_ACCESS_KEY  --name "$WORKER_NAME"
           echo "openclaw-${{ inputs.username }}-data" | npx wrangler secret put R2_BUCKET_NAME        --name "$WORKER_NAME"
 
-          # --- Cloudflare Access (optional) ---
-          CF_ACCESS_TEAM_DOMAIN="${{ secrets.CF_ACCESS_TEAM_DOMAIN }}"
-          CF_ACCESS_AUD="${{ secrets.CF_ACCESS_AUD }}"
-          if [ -n "$CF_ACCESS_TEAM_DOMAIN" ]; then
-            echo "$CF_ACCESS_TEAM_DOMAIN" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --name "$WORKER_NAME"
+          # --- Container sleep timeout (only update if provided) ---
+          SLEEP_AFTER="${{ inputs.sandbox_sleep_after }}"
+          if [ -n "$SLEEP_AFTER" ]; then
+            if [ "$SLEEP_AFTER" = "never" ]; then
+              echo "never" | npx wrangler secret put SANDBOX_SLEEP_AFTER --name "$WORKER_NAME"
+            else
+              echo "${SLEEP_AFTER}m" | npx wrangler secret put SANDBOX_SLEEP_AFTER --name "$WORKER_NAME"
+            fi
           fi
-          if [ -n "$CF_ACCESS_AUD" ]; then
-            echo "$CF_ACCESS_AUD" | npx wrangler secret put CF_ACCESS_AUD --name "$WORKER_NAME"
-          fi
+
+          # --- Cloudflare Access ---
+          echo "${{ secrets.CF_ACCESS_TEAM_DOMAIN }}" | npx wrangler secret put CF_ACCESS_TEAM_DOMAIN --name "$WORKER_NAME"
+          echo "${{ secrets.CF_ACCESS_AUD }}"          | npx wrangler secret put CF_ACCESS_AUD          --name "$WORKER_NAME"
 
       - name: Deployment summary
         run: |
@@ -112,5 +120,6 @@ jobs:
           | **Worker** | \`openclaw-${{ inputs.username }}\` |
           | **Model** | \`${{ inputs.model }}\` |
           | **Telegram** | ${{ inputs.telegram_bot_token && 'Updated' || 'Unchanged (no token provided)' }} |
+          | **Sleep After** | ${{ inputs.sandbox_sleep_after && format('{0}m', inputs.sandbox_sleep_after) || 'Unchanged' }} |
           | **Gateway Token** | Unchanged (not rotated) |
           EOF

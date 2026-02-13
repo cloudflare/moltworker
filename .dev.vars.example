@@ -1,10 +1,6 @@
 # Copy this to .dev.vars and fill in your values
 # .dev.vars is gitignored and used by wrangler dev
 
-# =============================================================================
-# LOCAL DEVELOPMENT
-# =============================================================================
-
 # AI Provider (at least one required)
 ANTHROPIC_API_KEY=sk-ant-...
 # OPENAI_API_KEY=sk-...
@@ -32,10 +28,6 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Optional - set a fixed token instead of auto-generated
 MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
-# Cloudflare Account ID
-# Found at: https://dash.cloudflare.com > any domain > Overview (right sidebar)
-# CF_ACCOUNT_ID=your-cloudflare-account-id
-
 # Cloudflare Access configuration for /_admin and /api routes
 # Required for admin UI and device pairing API in production
 # CF_ACCESS_TEAM_DOMAIN=myteam.cloudflareaccess.com
@@ -48,42 +40,3 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth
 # WORKER_URL=https://your-worker.example.com
-
-# R2 persistent storage (optional, for data persistence across sessions)
-# R2_ACCESS_KEY_ID=your-r2-access-key-id
-# R2_SECRET_ACCESS_KEY=your-r2-secret-access-key
-
-# =============================================================================
-# GITHUB ACTIONS WORKFLOW SECRETS
-# =============================================================================
-# The workflows (create-new-openclaw, update-openclaw, delete-moltworker)
-# require the following values uploaded as GitHub Repository Secrets:
-#   Settings > Secrets and variables > Actions > New repository secret
-#
-# Required (6):
-#   CLOUDFLARE_API_TOKEN          Wrangler CLI auth token
-#                                 Permissions: Workers Scripts Edit,
-#                                 Workers R2 Storage Edit, Account Settings Read
-#                                 https://dash.cloudflare.com/profile/api-tokens
-#   CF_ACCOUNT_ID                 Cloudflare Account ID
-#                                 (shared for wrangler CLI, AI Gateway, R2)
-#   CLOUDFLARE_AI_GATEWAY_API_KEY Provider API key routed through AI Gateway
-#   CF_AI_GATEWAY_GATEWAY_ID      AI Gateway ID
-#                                 https://dash.cloudflare.com > AI > AI Gateway
-#   R2_ACCESS_KEY_ID              R2 API token access key
-#                                 https://dash.cloudflare.com > R2 > Manage R2 API Tokens
-#   R2_SECRET_ACCESS_KEY          R2 API token secret key
-#
-# Optional (2):
-#   CF_ACCESS_TEAM_DOMAIN         Cloudflare Zero Trust team domain
-#   CF_ACCESS_AUD                 Access application audience tag
-#
-# Auto-managed by workflows (no repo secret needed):
-#   MOLTBOT_GATEWAY_TOKEN    auto-generated per user by create workflow
-#   TELEGRAM_BOT_TOKEN       provided as workflow input at dispatch time
-#   CF_AI_GATEWAY_MODEL      derived from "model" workflow input
-#   CF_AI_GATEWAY_ACCOUNT_ID reuses CF_ACCOUNT_ID (same Cloudflare account)
-#   R2_BUCKET_NAME           auto-set to "openclaw-<username>-data"
-#
-# Each moltworker is named "openclaw-<username>" with its own R2 bucket
-# "openclaw-<username>-data" for data isolation.
