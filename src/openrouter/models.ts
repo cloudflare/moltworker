@@ -736,68 +736,110 @@ export function isCuratedModel(alias: string): boolean {
   return alias.toLowerCase() in MODELS;
 }
 
+/** Value tier emoji labels */
+const VALUE_TIER_LABELS: Record<ValueTier, string> = {
+  free: '🆓',
+  exceptional: '🏆',
+  great: '⭐',
+  good: '✅',
+  premium: '💎',
+  outdated: '⚠️',
+};
+
+/** Format a single model line with features and value tier */
+function formatModelLine(m: ModelInfo): string {
+  const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
+  const tier = getValueTier(m);
+  const tierIcon = VALUE_TIER_LABELS[tier];
+  if (m.isFree) {
+    return `  /${m.alias} — ${m.name} ${features}\n    ${m.score || m.specialty}`;
+  }
+  return `  ${tierIcon} /${m.alias} — ${m.name} ${features}\n    ${m.cost} | ${m.score || m.specialty}`;
+}
+
 /**
- * Format models list for /models command
- * Sorted by cost efficiency within each category
+ * Format models list for /models command.
+ * Groups paid models by value tier, free models by curated/synced.
  */
 export function formatModelsList(): string {
-  const lines: string[] = ['📋 Available Models (sorted by cost):\n'];
+  const lines: string[] = ['📋 Model Catalog — sorted by value\n'];
 
-  // Group by category (includes dynamic models)
   const all = Object.values(getAllModels());
   const free = all.filter(m => m.isFree && !m.isImageGen && !m.provider);
   const imageGen = all.filter(m => m.isImageGen);
   const paid = all.filter(m => !m.isFree && !m.isImageGen && !m.provider);
   const direct = all.filter(m => m.provider && m.provider !== 'openrouter');
 
-  // Split free into curated and synced
   const freeCurated = free.filter(m => isCuratedModel(m.alias));
   const freeSynced = free.filter(m => !isCuratedModel(m.alias));
 
-  // Sort by cost (cheapest first)
   const sortByCost = (a: ModelInfo, b: ModelInfo) => parseCostForSort(a.cost) - parseCostForSort(b.cost);
   paid.sort(sortByCost);
   direct.sort(sortByCost);
-  imageGen.sort(sortByCost);
 
-  lines.push('🆓 FREE (curated):');
-  for (const m of freeCurated) {
-    const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
-    lines.push(`  /${m.alias} - ${m.name} ${features}`);
-    lines.push(`    ${m.specialty} | ${m.score}`);
+  // --- Paid models grouped by value tier ---
+  const paidAndDirect = [...direct, ...paid];
+  const exceptional = paidAndDirect.filter(m => getValueTier(m) === 'exceptional');
+  const great = paidAndDirect.filter(m => getValueTier(m) === 'great');
+  const good = paidAndDirect.filter(m => getValueTier(m) === 'good');
+  const premium = paidAndDirect.filter(m => getValueTier(m) === 'premium');
+  const outdated = paidAndDirect.filter(m => getValueTier(m) === 'outdated');
+
+  if (exceptional.length > 0) {
+    lines.push('🏆 EXCEPTIONAL VALUE (< $0.50/M output):');
+    for (const m of exceptional) lines.push(formatModelLine(m));
+    lines.push('');
   }
 
+  if (great.length > 0) {
+    lines.push('⭐ GREAT VALUE ($0.50–$2/M output):');
+    for (const m of great) lines.push(formatModelLine(m));
+    lines.push('');
+  }
+
+  if (good.length > 0) {
+    lines.push('✅ GOOD VALUE ($2–$5/M output):');
+    for (const m of good) lines.push(formatModelLine(m));
+    lines.push('');
+  }
+
+  if (premium.length > 0) {
+    lines.push('💎 PREMIUM — highest quality ($5+/M output):');
+    for (const m of premium) lines.push(formatModelLine(m));
+    lines.push('');
+  }
+
+  if (outdated.length > 0) {
+    lines.push('⚠️ OUTDATED — cheaper alternatives exist:');
+    for (const m of outdated) lines.push(formatModelLine(m));
+    lines.push('');
+  }
+
+  // --- Image gen ---
+  if (imageGen.length > 0) {
+    lines.push('🎨 IMAGE GEN:');
+    for (const m of imageGen) {
+      lines.push(`  /${m.alias} — ${m.name}\n    ${m.cost} | ${m.specialty}`);
+    }
+    lines.push('');
+  }
+
+  // --- Free models ---
+  lines.push('🆓 FREE (curated):');
+  for (const m of freeCurated) lines.push(formatModelLine(m));
+
   if (freeSynced.length > 0) {
-    lines.push('\n🔄 FREE (synced):');
+    lines.push('\n🔄 FREE (synced via /syncmodels):');
     for (const m of freeSynced) {
       const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
-      lines.push(`  /${m.alias} - ${m.name} ${features}`);
-      lines.push(`    ${m.specialty}`);
+      lines.push(`  /${m.alias} — ${m.name} ${features}`);
     }
   }
 
-  lines.push('\n⚡ DIRECT API (cheapest, no OpenRouter):');
-  for (const m of direct) {
-    const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
-    lines.push(`  /${m.alias} - ${m.name} ${features}`);
-    lines.push(`    ${m.specialty} | ${m.score} | ${m.cost}`);
-  }
-
-  lines.push('\n🎨 IMAGE GEN:');
-  for (const m of imageGen) {
-    lines.push(`  /${m.alias} - ${m.name}`);
-    lines.push(`    ${m.specialty} | ${m.cost}`);
-  }
-
-  lines.push('\n💰 PAID (OpenRouter, $/M in/out):');
-  for (const m of paid) {
-    const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
-    lines.push(`  /${m.alias} - ${m.name} ${features}`);
-    lines.push(`    ${m.specialty} | ${m.score} | ${m.cost}`);
-  }
-
-  lines.push('\n👁️=vision 🔧=tools | Cost: $input/$output per million tokens');
-  lines.push('Usage: /use <alias> or /<alias> to set model');
+  lines.push('\n━━━ Legend ━━━');
+  lines.push('🏆=best $/perf  ⭐=strong value  ✅=solid  💎=flagship  ⚠️=outdated');
+  lines.push('👁️=vision  🔧=tools  Cost: $input/$output per M tokens');
+  lines.push('Usage: /use <alias> or /<alias>');
 
   return lines.join('\n');
 }
