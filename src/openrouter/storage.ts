@@ -10,6 +10,7 @@ export interface UserPreferences {
   username?: string;
   model: string;
   autoResume?: boolean; // Auto-resume tasks on timeout
+  orchestraRepo?: string; // Locked repo for /orch next (owner/repo)
   locationLat?: string; // Saved briefing latitude
   locationLon?: string; // Saved briefing longitude
   locationName?: string; // Human-readable location name
@@ -134,6 +135,23 @@ export class UserStorage {
   async setUserAutoResume(userId: string, autoResume: boolean): Promise<void> {
     const prefs = await this.getPreferences(userId);
     prefs.autoResume = autoResume;
+    await this.setPreferences(prefs);
+  }
+
+  /**
+   * Get user's locked orchestra repo
+   */
+  async getOrchestraRepo(userId: string): Promise<string | undefined> {
+    const prefs = await this.getPreferences(userId);
+    return prefs.orchestraRepo;
+  }
+
+  /**
+   * Set user's locked orchestra repo
+   */
+  async setOrchestraRepo(userId: string, repo: string | undefined): Promise<void> {
+    const prefs = await this.getPreferences(userId);
+    prefs.orchestraRepo = repo;
     await this.setPreferences(prefs);
   }
 
