@@ -174,48 +174,119 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
 // so we don't need to patch the provider config. Writing a provider
 // entry without a models array breaks OpenClaw's config validation.
 
-// AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
-// Adds a provider entry for any AI Gateway provider and sets it as default model.
+// AI Gateway model override (CF_AI_GATEWAY_MODELS=provider/model-id[,provider/model-id,...])
+// Comma-separated list of models. First model is the primary/default.
+// Each provider gets its own config entry with the appropriate endpoint.
+// CF_AI_GATEWAY_MODEL (singular) is supported for backward compatibility.
 // Examples:
+//   google-ai-studio/gemini-3-flash-preview,anthropic/claude-sonnet-4-5,openai/gpt-4o
 //   workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
-//   openai/gpt-4o
-//   anthropic/claude-sonnet-4-5
-if (process.env.CF_AI_GATEWAY_MODEL) {
-    const raw = process.env.CF_AI_GATEWAY_MODEL;
-    const slashIdx = raw.indexOf('/');
-    const gwProvider = raw.substring(0, slashIdx);
-    const modelId = raw.substring(slashIdx + 1);
-
+const cfAiGatewayModels = process.env.CF_AI_GATEWAY_MODELS || process.env.CF_AI_GATEWAY_MODEL;
+if (cfAiGatewayModels) {
     const accountId = process.env.CF_AI_GATEWAY_ACCOUNT_ID;
     const gatewayId = process.env.CF_AI_GATEWAY_GATEWAY_ID;
     const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
+    const gwBase = (accountId && gatewayId)
+        ? 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId
+        : null;
 
-    let baseUrl;
-    if (accountId && gatewayId) {
-        baseUrl = 'https://gateway.ai.cloudflare.com/v1/' + accountId + '/' + gatewayId + '/' + gwProvider;
-        if (gwProvider === 'workers-ai') baseUrl += '/v1';
-    } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
-        baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
-    }
+    const entries = cfAiGatewayModels.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
 
-    if (baseUrl && apiKey) {
-        const api = gwProvider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
-        const providerName = 'cf-ai-gw-' + gwProvider;
+    // Group models by provider
+    const providerGroups = {};
+    entries.forEach(function(raw) {
+        const slashIdx = raw.indexOf('/');
+        const gwProvider = raw.substring(0, slashIdx);
+        const modelId = raw.substring(slashIdx + 1);
+        if (!providerGroups[gwProvider]) providerGroups[gwProvider] = [];
+        providerGroups[gwProvider].push({ raw: raw, modelId: modelId });
+    });
 
-        config.models = config.models || {};
-        config.models.providers = config.models.providers || {};
-        config.models.providers[providerName] = {
-            baseUrl: baseUrl,
-            apiKey: apiKey,
-            api: api,
-            models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
-        };
-        config.agents = config.agents || {};
-        config.agents.defaults = config.agents.defaults || {};
-        config.agents.defaults.model = { primary: providerName + '/' + modelId };
-        console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
-    } else {
-        console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
+    // Compat options for non-native providers (strips OpenAI-specific params)
+    const compatOptions = {
+        supportsStore: false,
+        supportsDeveloperRole: false,
+        supportsReasoningEffort: false,
+    };
+
+    let primarySet = false;
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+
+    Object.keys(providerGroups).forEach(function(gwProvider) {
+        const models = providerGroups[gwProvider];
+        let baseUrl, api, providerName, useCompat;
+
+        if (gwBase) {
+            if (gwProvider === 'anthropic') {
+                // Anthropic: native endpoint with full feature support
+                baseUrl = gwBase + '/anthropic';
+                api = 'anthropic-messages';
+                providerName = 'cf-ai-gw-anthropic';
+                useCompat = false;
+            } else if (gwProvider === 'openai') {
+                // OpenAI: native endpoint
+                baseUrl = gwBase + '/openai';
+                api = 'openai-completions';
+                providerName = 'cf-ai-gw-openai';
+                useCompat = false;
+            } else {
+                // All other providers: unified OpenAI-compatible (compat) endpoint
+                // Docs: https://developers.cloudflare.com/ai-gateway/usage/chat-completion/
+                baseUrl = gwBase + '/compat';
+                api = 'openai-completions';
+                providerName = 'cf-ai-gw-compat';
+                useCompat = true;
+            }
+        } else if (gwProvider === 'workers-ai' && process.env.CF_ACCOUNT_ID) {
+            // Fallback: direct Workers AI API without AI Gateway
+            baseUrl = 'https://api.cloudflare.com/client/v4/accounts/' + process.env.CF_ACCOUNT_ID + '/ai/v1';
+            api = 'openai-completions';
+            providerName = 'cf-ai-gw-workers-ai';
+            useCompat = false;
+        }
+
+        if (!baseUrl || !apiKey) {
+            console.warn('Skipping ' + gwProvider + ': missing base URL or API key');
+            return;
+        }
+
+        // Build model entries for this provider
+        const modelEntries = models.map(function(m) {
+            const effectiveId = useCompat ? m.raw : m.modelId;
+            const entry = { id: effectiveId, name: m.modelId, contextWindow: 131072, maxTokens: 8192 };
+            if (useCompat) entry.compat = compatOptions;
+            return entry;
+        });
+
+        // Merge models if provider already exists (e.g. multiple compat providers)
+        if (config.models.providers[providerName]) {
+            config.models.providers[providerName].models = config.models.providers[providerName].models.concat(modelEntries);
+        } else {
+            config.models.providers[providerName] = {
+                baseUrl: baseUrl,
+                apiKey: apiKey,
+                api: api,
+                models: modelEntries,
+            };
+        }
+
+        // First model in the list becomes the primary default
+        if (!primarySet) {
+            const firstId = useCompat ? models[0].raw : models[0].modelId;
+            config.agents = config.agents || {};
+            config.agents.defaults = config.agents.defaults || {};
+            config.agents.defaults.model = { primary: providerName + '/' + firstId };
+            primarySet = true;
+        }
+
+        modelEntries.forEach(function(e) {
+            console.log('AI Gateway model: ' + providerName + '/' + e.id + ' via ' + baseUrl);
+        });
+    });
+
+    if (!primarySet) {
+        console.warn('CF_AI_GATEWAY_MODELS set but no models configured (missing account ID, gateway ID, or API key)');
     }
 }
 

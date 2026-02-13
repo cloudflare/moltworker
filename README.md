@@ -382,23 +382,26 @@ When Cloudflare AI Gateway is configured, it takes precedence over direct `ANTHR
 
 ### Choosing a Model
 
-By default, AI Gateway uses Anthropic's Claude Sonnet 4.5. To use a different model or provider, set `CF_AI_GATEWAY_MODEL` with the format `provider/model-id`:
+By default, AI Gateway uses Anthropic's Claude Sonnet 4.5. To use a different model or provider, set `CF_AI_GATEWAY_MODELS` with a comma-separated list of `provider/model-id` values. The first model becomes the primary default:
 
 ```bash
-npx wrangler secret put CF_AI_GATEWAY_MODEL
-# Enter: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+npx wrangler secret put CF_AI_GATEWAY_MODELS
+# Enter: google-ai-studio/gemini-3-flash-preview,anthropic/claude-sonnet-4-5,openai/gpt-4o
 ```
 
 This works with any [AI Gateway provider](https://developers.cloudflare.com/ai-gateway/usage/providers/):
 
-| Provider | Example `CF_AI_GATEWAY_MODEL` value | API key is... |
-|----------|-------------------------------------|---------------|
+| Provider | Example value | API key is... |
+|----------|---------------|---------------|
 | Workers AI | `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Cloudflare API token |
 | OpenAI | `openai/gpt-4o` | OpenAI API key |
 | Anthropic | `anthropic/claude-sonnet-4-5` | Anthropic API key |
+| Google AI Studio | `google-ai-studio/gemini-3-flash-preview` | Google AI API key |
 | Groq | `groq/llama-3.3-70b` | Groq API key |
 
-**Note:** `CLOUDFLARE_AI_GATEWAY_API_KEY` must match the provider you're using — it's your provider's API key, forwarded through the gateway. You can only use one provider at a time through the gateway. For multiple providers, use direct keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) alongside the gateway config.
+Anthropic and OpenAI use their native AI Gateway endpoints with full feature support. All other providers use the [unified OpenAI-compatible (compat) endpoint](https://developers.cloudflare.com/ai-gateway/usage/chat-completion/).
+
+**Note:** `CF_AI_GATEWAY_MODEL` (singular) is still supported for backward compatibility.
 
 #### Workers AI with Unified Billing
 
@@ -415,7 +418,7 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | Yes* | Your AI provider's API key, passed through the gateway (e.g., your Anthropic API key). Requires `CF_AI_GATEWAY_ACCOUNT_ID` and `CF_AI_GATEWAY_GATEWAY_ID` |
 | `CF_AI_GATEWAY_ACCOUNT_ID` | Yes* | Your Cloudflare account ID (used to construct the gateway URL) |
 | `CF_AI_GATEWAY_GATEWAY_ID` | Yes* | Your AI Gateway ID (used to construct the gateway URL) |
-| `CF_AI_GATEWAY_MODEL` | No | Override default model: `provider/model-id` (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`). See [Choosing a Model](#choosing-a-model) |
+| `CF_AI_GATEWAY_MODELS` | No | Comma-separated `provider/model-id` list. First is primary. (e.g. `google-ai-studio/gemini-3-flash-preview,anthropic/claude-sonnet-4-5`). See [Choosing a Model](#choosing-a-model) |
 | `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (alternative to AI Gateway) |
 | `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
