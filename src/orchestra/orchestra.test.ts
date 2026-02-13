@@ -1,9 +1,11 @@
 /**
- * Tests for Orchestra Mode
+ * Tests for Orchestra Mode (init/run two-mode design)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
+  buildInitPrompt,
+  buildRunPrompt,
   buildOrchestraPrompt,
   parseOrchestraCommand,
   parseOrchestraResult,
@@ -41,7 +43,6 @@ describe('generateTaskSlug', () => {
   });
 
   it('removes trailing dashes', () => {
-    // If truncation cuts mid-word, trailing dash is removed
     const slug = generateTaskSlug('a'.repeat(39) + ' b');
     expect(slug.endsWith('-')).toBe(false);
   });
@@ -54,36 +55,73 @@ describe('generateTaskSlug', () => {
 // --- parseOrchestraCommand ---
 
 describe('parseOrchestraCommand', () => {
-  it('parses valid command', () => {
-    const result = parseOrchestraCommand(['owner/repo', 'Add', 'health', 'check']);
-    expect(result).not.toBeNull();
-    expect(result!.repo).toBe('owner/repo');
-    expect(result!.prompt).toBe('Add health check');
+  describe('init mode', () => {
+    it('parses /orchestra init owner/repo description', () => {
+      const result = parseOrchestraCommand(['init', 'owner/repo', 'Build', 'a', 'user', 'auth', 'system']);
+      expect(result).not.toBeNull();
+      expect(result!.mode).toBe('init');
+      expect(result!.repo).toBe('owner/repo');
+      expect(result!.prompt).toBe('Build a user auth system');
+    });
+
+    it('returns null when init has no repo', () => {
+      expect(parseOrchestraCommand(['init'])).toBeNull();
+    });
+
+    it('returns null when init has no description', () => {
+      expect(parseOrchestraCommand(['init', 'owner/repo'])).toBeNull();
+    });
+
+    it('returns null for invalid repo format in init', () => {
+      expect(parseOrchestraCommand(['init', 'notarepo', 'do stuff'])).toBeNull();
+    });
   });
 
-  it('returns null for missing args', () => {
-    expect(parseOrchestraCommand([])).toBeNull();
-    expect(parseOrchestraCommand(['owner/repo'])).toBeNull();
+  describe('run mode', () => {
+    it('parses /orchestra run owner/repo (no specific task)', () => {
+      const result = parseOrchestraCommand(['run', 'owner/repo']);
+      expect(result).not.toBeNull();
+      expect(result!.mode).toBe('run');
+      expect(result!.repo).toBe('owner/repo');
+      expect(result!.prompt).toBe('');
+    });
+
+    it('parses /orchestra run owner/repo with specific task', () => {
+      const result = parseOrchestraCommand(['run', 'owner/repo', 'Add', 'JWT', 'auth']);
+      expect(result).not.toBeNull();
+      expect(result!.mode).toBe('run');
+      expect(result!.repo).toBe('owner/repo');
+      expect(result!.prompt).toBe('Add JWT auth');
+    });
+
+    it('returns null for invalid repo in run', () => {
+      expect(parseOrchestraCommand(['run', 'bad'])).toBeNull();
+    });
   });
 
-  it('returns null for invalid repo format', () => {
-    expect(parseOrchestraCommand(['notarepo', 'do something'])).toBeNull();
-    expect(parseOrchestraCommand(['', 'do something'])).toBeNull();
-  });
+  describe('legacy mode', () => {
+    it('parses /orchestra owner/repo <prompt> as run', () => {
+      const result = parseOrchestraCommand(['owner/repo', 'Add', 'health', 'check']);
+      expect(result).not.toBeNull();
+      expect(result!.mode).toBe('run');
+      expect(result!.repo).toBe('owner/repo');
+      expect(result!.prompt).toBe('Add health check');
+    });
 
-  it('accepts repo with dots and hyphens', () => {
-    const result = parseOrchestraCommand(['my-org/my.repo', 'fix it']);
-    expect(result).not.toBeNull();
-    expect(result!.repo).toBe('my-org/my.repo');
-  });
+    it('returns null for missing args', () => {
+      expect(parseOrchestraCommand([])).toBeNull();
+      expect(parseOrchestraCommand(['owner/repo'])).toBeNull();
+    });
 
-  it('returns null for empty prompt after repo', () => {
-    expect(parseOrchestraCommand(['owner/repo', '  '])).toBeNull();
-  });
+    it('returns null for invalid repo format', () => {
+      expect(parseOrchestraCommand(['notarepo', 'do something'])).toBeNull();
+    });
 
-  it('preserves full prompt text', () => {
-    const result = parseOrchestraCommand(['o/r', 'Add a new feature with multiple words']);
-    expect(result!.prompt).toBe('Add a new feature with multiple words');
+    it('accepts repo with dots and hyphens', () => {
+      const result = parseOrchestraCommand(['my-org/my.repo', 'fix it']);
+      expect(result).not.toBeNull();
+      expect(result!.repo).toBe('my-org/my.repo');
+    });
   });
 });
 
@@ -149,44 +187,110 @@ summary: Added feature`;
   });
 });
 
-// --- buildOrchestraPrompt ---
+// --- buildInitPrompt ---
 
-describe('buildOrchestraPrompt', () => {
+describe('buildInitPrompt', () => {
   it('includes repo info', () => {
-    const prompt = buildOrchestraPrompt({
-      repo: 'owner/repo',
-      modelAlias: 'deep',
-      previousTasks: [],
-    });
-
+    const prompt = buildInitPrompt({ repo: 'owner/repo', modelAlias: 'deep' });
     expect(prompt).toContain('Owner: owner');
     expect(prompt).toContain('Repo: repo');
     expect(prompt).toContain('Full: owner/repo');
   });
 
-  it('includes model alias in branch naming instruction', () => {
-    const prompt = buildOrchestraPrompt({
-      repo: 'o/r',
-      modelAlias: 'grok',
-      previousTasks: [],
-    });
-
-    expect(prompt).toContain('{task-slug}-grok');
+  it('indicates INIT mode', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('Orchestra INIT Mode');
+    expect(prompt).toContain('Roadmap Creation');
   });
 
-  it('includes workflow steps', () => {
-    const prompt = buildOrchestraPrompt({
+  it('includes ROADMAP.md format template', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('ROADMAP.md');
+    expect(prompt).toContain('- [ ]');
+    expect(prompt).toContain('- [x]');
+    expect(prompt).toContain('Phase 1');
+    expect(prompt).toContain('Phase 2');
+  });
+
+  it('includes WORK_LOG.md creation instructions', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('WORK_LOG.md');
+    expect(prompt).toContain('Date');
+    expect(prompt).toContain('Model');
+  });
+
+  it('includes model alias in branch naming', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'grok' });
+    expect(prompt).toContain('roadmap-init-grok');
+  });
+
+  it('includes roadmap file candidates to check', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('ROADMAP.md');
+    expect(prompt).toContain('TODO.md');
+    expect(prompt).toContain('docs/ROADMAP.md');
+  });
+
+  it('includes ORCHESTRA_RESULT report format', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('ORCHESTRA_RESULT:');
+    expect(prompt).toContain('branch:');
+    expect(prompt).toContain('pr:');
+    expect(prompt).toContain('files:');
+    expect(prompt).toContain('summary:');
+  });
+});
+
+// --- buildRunPrompt ---
+
+describe('buildRunPrompt', () => {
+  it('includes repo info', () => {
+    const prompt = buildRunPrompt({ repo: 'owner/repo', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('Owner: owner');
+    expect(prompt).toContain('Repo: repo');
+    expect(prompt).toContain('Full: owner/repo');
+  });
+
+  it('indicates RUN mode', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('Orchestra RUN Mode');
+    expect(prompt).toContain('Execute Next Roadmap Task');
+  });
+
+  it('includes roadmap reading instructions', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('READ THE ROADMAP');
+    expect(prompt).toContain('ROADMAP.md');
+    expect(prompt).toContain('WORK_LOG.md');
+  });
+
+  it('includes auto-pick next task when no specific task', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('NEXT uncompleted task');
+    expect(prompt).toContain('- [ ]');
+  });
+
+  it('includes specific task instructions when provided', () => {
+    const prompt = buildRunPrompt({
       repo: 'o/r',
       modelAlias: 'deep',
       previousTasks: [],
+      specificTask: 'Add JWT auth middleware',
     });
+    expect(prompt).toContain('SPECIFIC task');
+    expect(prompt).toContain('Add JWT auth middleware');
+  });
 
-    expect(prompt).toContain('UNDERSTAND');
-    expect(prompt).toContain('PLAN');
-    expect(prompt).toContain('EXECUTE');
-    expect(prompt).toContain('CREATE PR');
-    expect(prompt).toContain('REPORT');
-    expect(prompt).toContain('ORCHESTRA_RESULT');
+  it('includes roadmap update instructions', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('UPDATE ROADMAP');
+    expect(prompt).toContain('- [ ]` to `- [x]');
+    expect(prompt).toContain('Append a new row');
+  });
+
+  it('includes model alias in branch naming', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'grok', previousTasks: [] });
+    expect(prompt).toContain('{task-slug}-grok');
   });
 
   it('includes previous task history when available', () => {
@@ -196,6 +300,7 @@ describe('buildOrchestraPrompt', () => {
         timestamp: Date.now() - 3600000,
         modelAlias: 'deep',
         repo: 'o/r',
+        mode: 'run',
         prompt: 'Add login page',
         branchName: 'bot/add-login-page-deep',
         prUrl: 'https://github.com/o/r/pull/1',
@@ -205,26 +310,29 @@ describe('buildOrchestraPrompt', () => {
       },
     ];
 
-    const prompt = buildOrchestraPrompt({
-      repo: 'o/r',
-      modelAlias: 'deep',
-      previousTasks,
-    });
-
-    expect(prompt).toContain('Previous Orchestra Tasks');
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks });
+    expect(prompt).toContain('Recent Orchestra History');
     expect(prompt).toContain('Add login page');
-    expect(prompt).toContain('bot/add-login-page-deep');
     expect(prompt).toContain('pull/1');
   });
 
   it('omits history section when no previous tasks', () => {
-    const prompt = buildOrchestraPrompt({
-      repo: 'o/r',
-      modelAlias: 'deep',
-      previousTasks: [],
-    });
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).not.toContain('Recent Orchestra History');
+  });
 
-    expect(prompt).not.toContain('Previous Orchestra Tasks');
+  it('includes ORCHESTRA_RESULT report format', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('ORCHESTRA_RESULT:');
+  });
+});
+
+// --- buildOrchestraPrompt (backward compat) ---
+
+describe('buildOrchestraPrompt', () => {
+  it('delegates to buildRunPrompt', () => {
+    const params = { repo: 'o/r', modelAlias: 'deep', previousTasks: [] as OrchestraTask[] };
+    expect(buildOrchestraPrompt(params)).toBe(buildRunPrompt(params));
   });
 });
 
@@ -243,11 +351,12 @@ describe('storeOrchestraTask', () => {
     };
   });
 
-  const makeTask = (taskId: string, status: 'started' | 'completed' | 'failed' = 'completed'): OrchestraTask => ({
+  const makeTask = (taskId: string, mode: 'init' | 'run' = 'run', status: 'started' | 'completed' | 'failed' = 'completed'): OrchestraTask => ({
     taskId,
     timestamp: Date.now(),
     modelAlias: 'deep',
     repo: 'owner/repo',
+    mode,
     prompt: `Task ${taskId}`,
     branchName: `bot/${taskId}-deep`,
     status,
@@ -306,7 +415,7 @@ describe('storeOrchestraTask', () => {
     const parsed = JSON.parse(data as string);
     expect(parsed.tasks).toHaveLength(30);
     expect(parsed.tasks[29].taskId).toBe('t30');
-    expect(parsed.tasks[0].taskId).toBe('t1'); // t0 was dropped
+    expect(parsed.tasks[0].taskId).toBe('t1');
   });
 
   it('handles R2 read error gracefully', async () => {
@@ -315,6 +424,16 @@ describe('storeOrchestraTask', () => {
     await storeOrchestraTask(mockBucket as unknown as R2Bucket, 'user1', makeTask('t1'));
 
     expect(mockBucket.put).toHaveBeenCalledOnce();
+  });
+
+  it('preserves mode field', async () => {
+    mockBucket.get.mockResolvedValue(null);
+
+    await storeOrchestraTask(mockBucket as unknown as R2Bucket, 'user1', makeTask('t1', 'init'));
+
+    const [, data] = mockBucket.put.mock.calls[0];
+    const parsed = JSON.parse(data as string);
+    expect(parsed.tasks[0].mode).toBe('init');
   });
 });
 
@@ -334,6 +453,7 @@ describe('loadOrchestraHistory', () => {
         timestamp: Date.now(),
         modelAlias: 'deep',
         repo: 'o/r',
+        mode: 'run',
         prompt: 'Add feature',
         branchName: 'bot/add-feature-deep',
         status: 'completed',
@@ -377,7 +497,8 @@ describe('formatOrchestraHistory', () => {
   it('shows usage hint for null history', () => {
     const result = formatOrchestraHistory(null);
     expect(result).toContain('No orchestra tasks');
-    expect(result).toContain('/orchestra');
+    expect(result).toContain('/orchestra init');
+    expect(result).toContain('/orchestra run');
   });
 
   it('shows usage hint for empty history', () => {
@@ -389,7 +510,7 @@ describe('formatOrchestraHistory', () => {
     expect(result).toContain('No orchestra tasks');
   });
 
-  it('formats completed task', () => {
+  it('formats completed run task', () => {
     const history: OrchestraHistory = {
       userId: 'user1',
       tasks: [{
@@ -397,6 +518,7 @@ describe('formatOrchestraHistory', () => {
         timestamp: Date.now(),
         modelAlias: 'deep',
         repo: 'owner/repo',
+        mode: 'run',
         prompt: 'Add health check endpoint',
         branchName: 'bot/add-health-check-deep',
         prUrl: 'https://github.com/o/r/pull/1',
@@ -415,6 +537,27 @@ describe('formatOrchestraHistory', () => {
     expect(result).toContain('pull/1');
   });
 
+  it('tags init tasks with [INIT]', () => {
+    const history: OrchestraHistory = {
+      userId: 'user1',
+      tasks: [{
+        taskId: 'orch-1',
+        timestamp: Date.now(),
+        modelAlias: 'deep',
+        repo: 'o/r',
+        mode: 'init',
+        prompt: 'Build user auth system',
+        branchName: 'bot/roadmap-init-deep',
+        status: 'completed',
+        filesChanged: ['ROADMAP.md', 'WORK_LOG.md'],
+      }],
+      updatedAt: Date.now(),
+    };
+
+    const result = formatOrchestraHistory(history);
+    expect(result).toContain('[INIT]');
+  });
+
   it('formats failed task with error icon', () => {
     const history: OrchestraHistory = {
       userId: 'user1',
@@ -423,6 +566,7 @@ describe('formatOrchestraHistory', () => {
         timestamp: Date.now(),
         modelAlias: 'grok',
         repo: 'o/r',
+        mode: 'run',
         prompt: 'Broken task',
         branchName: 'bot/broken-grok',
         status: 'failed',
@@ -441,6 +585,7 @@ describe('formatOrchestraHistory', () => {
       timestamp: Date.now() - (15 - i) * 60000,
       modelAlias: 'deep',
       repo: 'o/r',
+      mode: 'run' as const,
       prompt: `Task ${i}`,
       branchName: `bot/task-${i}-deep`,
       status: 'completed' as const,
@@ -453,7 +598,6 @@ describe('formatOrchestraHistory', () => {
       updatedAt: Date.now(),
     });
 
-    // Should only show last 10
     expect(result).not.toContain('Task 0');
     expect(result).not.toContain('Task 4');
     expect(result).toContain('Task 5');

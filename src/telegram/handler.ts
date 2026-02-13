@@ -9,7 +9,8 @@ import { modelSupportsTools, generateDailyBriefing, geocodeCity, type SandboxLik
 import { getUsage, getUsageRange, formatUsageSummary, formatWeekSummary } from '../openrouter/costs';
 import { loadLearnings, getRelevantLearnings, formatLearningsForPrompt, loadLastTaskSummary, formatLastTaskForPrompt } from '../openrouter/learnings';
 import {
-  buildOrchestraPrompt,
+  buildInitPrompt,
+  buildRunPrompt,
   parseOrchestraCommand,
   parseOrchestraResult,
   generateTaskSlug,
@@ -1132,8 +1133,10 @@ export class TelegramHandler {
 
   /**
    * Handle /orchestra command
-   * Usage: /orchestra owner/repo <task description>
-   * Usage: /orchestra history — show past orchestra tasks
+   * Usage: /orchestra init owner/repo <project description>
+   * Usage: /orchestra run owner/repo [specific task]
+   * Usage: /orchestra history
+   * Usage: /orchestra owner/repo <task> (legacy, same as run)
    */
   private async handleOrchestraCommand(
     message: TelegramMessage,
@@ -1153,18 +1156,23 @@ export class TelegramHandler {
     if (!parsed) {
       await this.bot.sendMessage(
         chatId,
-        '🎼 Orchestra Mode — Structured Task Workflow\n\n' +
-        'Usage:\n' +
-        '  /orchestra owner/repo <task description>\n' +
-        '  /orchestra history — view past tasks\n\n' +
-        'Example:\n' +
-        '  /orchestra PetrAnto/moltworker Add health check endpoint\n\n' +
-        'The bot will:\n' +
-        '1. Read the repo structure\n' +
-        '2. Plan the approach\n' +
-        '3. Implement the changes\n' +
-        '4. Create a PR (branch: bot/{task}-{model})\n' +
-        '5. Log the task for next-task context'
+        '🎼 Orchestra Mode\n\n' +
+        '━━━ INIT — Create a roadmap ━━━\n' +
+        '/orchestra init owner/repo <project description>\n' +
+        '  Reads the repo, breaks down the project into phases,\n' +
+        '  creates ROADMAP.md + WORK_LOG.md as a PR.\n\n' +
+        '━━━ RUN — Execute next task ━━━\n' +
+        '/orchestra run owner/repo\n' +
+        '  Reads ROADMAP.md, picks the next task, implements it,\n' +
+        '  updates the roadmap + work log in the same PR.\n\n' +
+        '/orchestra run owner/repo <specific task>\n' +
+        '  Execute a specific task instead of the next one.\n\n' +
+        '━━━ History ━━━\n' +
+        '/orchestra history — View past orchestra tasks\n\n' +
+        'Example workflow:\n' +
+        '  1. /orchestra init PetrAnto/myapp Build a user auth system\n' +
+        '  2. /orchestra run PetrAnto/myapp\n' +
+        '  3. /orchestra run PetrAnto/myapp  (repeat until done)'
       );
       return;
     }
@@ -1179,7 +1187,7 @@ export class TelegramHandler {
       return;
     }
 
-    const { repo, prompt } = parsed;
+    const { mode, repo, prompt } = parsed;
     const modelAlias = await this.storage.getUserModel(userId);
     const modelInfo = getModel(modelAlias);
 
@@ -1198,15 +1206,22 @@ export class TelegramHandler {
     const history = await loadOrchestraHistory(this.r2Bucket, userId);
     const previousTasks = history?.tasks.filter(t => t.repo === repo) || [];
 
-    // Build the orchestra system prompt
-    const orchestraSystemPrompt = buildOrchestraPrompt({
-      repo,
-      modelAlias,
-      previousTasks,
-    });
+    // Build mode-specific system prompt
+    let orchestraSystemPrompt: string;
+    if (mode === 'init') {
+      orchestraSystemPrompt = buildInitPrompt({ repo, modelAlias });
+    } else {
+      orchestraSystemPrompt = buildRunPrompt({
+        repo,
+        modelAlias,
+        previousTasks,
+        specificTask: prompt || undefined, // empty string = auto-pick next
+      });
+    }
 
     // Inject learnings and last task context
-    const learningsHint = await this.getLearningsHint(userId, prompt);
+    const contextPrompt = prompt || (mode === 'init' ? 'Create roadmap' : 'Execute next roadmap task');
+    const learningsHint = await this.getLearningsHint(userId, contextPrompt);
     const lastTaskHint = await this.getLastTaskHint(userId);
 
     const toolHint = modelInfo.parallelCalls
@@ -1214,23 +1229,31 @@ export class TelegramHandler {
       : '';
 
     // Build messages for the task
+    const userMessage = mode === 'init'
+      ? prompt
+      : (prompt || 'Execute the next uncompleted task from the roadmap.');
     const messages: ChatMessage[] = [
       {
         role: 'system',
         content: orchestraSystemPrompt + toolHint + learningsHint + lastTaskHint,
       },
-      { role: 'user', content: prompt },
+      { role: 'user', content: userMessage },
     ];
 
-    // Store the orchestra task entry as "started"
-    const taskSlug = generateTaskSlug(prompt);
+    // Determine branch name
+    const taskSlug = mode === 'init'
+      ? `roadmap-init`
+      : generateTaskSlug(prompt || 'next-task');
     const branchName = `bot/${taskSlug}-${modelAlias}`;
+
+    // Store the orchestra task entry as "started"
     const orchestraTask: OrchestraTask = {
       taskId: `orch-${userId}-${Date.now()}`,
       timestamp: Date.now(),
       modelAlias,
       repo,
-      prompt: prompt.substring(0, 200),
+      mode,
+      prompt: (prompt || (mode === 'init' ? 'Roadmap creation' : 'Next roadmap task')).substring(0, 200),
       branchName,
       status: 'started',
       filesChanged: [],
@@ -1240,6 +1263,7 @@ export class TelegramHandler {
     // Dispatch to TaskProcessor DO
     const taskId = `${userId}-${Date.now()}`;
     const autoResume = await this.storage.getUserAutoResume(userId);
+    const modeLabel = mode === 'init' ? 'Init' : 'Run';
     const taskRequest: TaskRequest = {
       taskId,
       chatId,
@@ -1253,7 +1277,7 @@ export class TelegramHandler {
       moonshotKey: this.moonshotKey,
       deepseekKey: this.deepseekKey,
       autoResume,
-      prompt: `[Orchestra] ${repo}: ${prompt.substring(0, 150)}`,
+      prompt: `[Orchestra ${modeLabel}] ${repo}: ${(prompt || 'next task').substring(0, 150)}`,
     };
 
     const doId = this.taskProcessor.idFromName(userId);
@@ -1263,18 +1287,34 @@ export class TelegramHandler {
       body: JSON.stringify(taskRequest),
     }));
 
-    await this.storage.addMessage(userId, 'user', `[Orchestra: ${repo}] ${prompt}`);
+    await this.storage.addMessage(userId, 'user', `[Orchestra ${modeLabel}: ${repo}] ${prompt || 'next task'}`);
 
-    await this.bot.sendMessage(
-      chatId,
-      `🎼 Orchestra task started!\n\n` +
-      `📦 Repo: ${repo}\n` +
-      `🤖 Model: /${modelAlias}\n` +
-      `🌿 Branch: ${branchName}\n` +
-      `📝 Task: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}\n\n` +
-      `The bot will read the repo, implement changes, and create a PR.\n` +
-      `Use /cancel to stop.`
-    );
+    // Mode-specific confirmation message
+    if (mode === 'init') {
+      await this.bot.sendMessage(
+        chatId,
+        `🎼 Orchestra INIT started!\n\n` +
+        `📦 Repo: ${repo}\n` +
+        `🤖 Model: /${modelAlias}\n` +
+        `🌿 Branch: ${branchName}\n\n` +
+        `The bot will analyze the repo, create ROADMAP.md + WORK_LOG.md, and open a PR.\n` +
+        `Use /cancel to stop.`
+      );
+    } else {
+      const taskDesc = prompt
+        ? `📝 Task: ${prompt.substring(0, 100)}${prompt.length > 100 ? '...' : ''}`
+        : '📝 Task: next uncompleted from roadmap';
+      await this.bot.sendMessage(
+        chatId,
+        `🎼 Orchestra RUN started!\n\n` +
+        `📦 Repo: ${repo}\n` +
+        `🤖 Model: /${modelAlias}\n` +
+        `🌿 Branch: ${branchName}\n` +
+        `${taskDesc}\n\n` +
+        `The bot will read the roadmap, implement the task, update ROADMAP.md + WORK_LOG.md, and create a PR.\n` +
+        `Use /cancel to stop.`
+      );
+    }
   }
 
   /**
@@ -2709,7 +2749,9 @@ The bot calls these automatically when relevant:
  • sandbox_exec — Run commands in sandbox container
 
 ━━━ Orchestra Mode ━━━
-/orchestra owner/repo <task> — Structured workflow: read repo → implement → create PR
+/orchestra init owner/repo <desc> — Create ROADMAP.md + WORK_LOG.md
+/orchestra run owner/repo — Execute next roadmap task
+/orchestra run owner/repo <task> — Execute specific task
 /orchestra history — View past orchestra tasks
 
 ━━━ Special Prefixes ━━━

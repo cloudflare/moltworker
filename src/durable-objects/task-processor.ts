@@ -10,7 +10,7 @@ import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WI
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { extractLearning, storeLearning, storeLastTaskSummary } from '../openrouter/learnings';
-import { parseOrchestraResult, storeOrchestraTask, loadOrchestraHistory, type OrchestraTask } from '../orchestra/orchestra';
+import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -1402,12 +1402,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             if (orchestraResult) {
               // Find the orchestra task entry to update (or create a new completed entry)
               const systemMsg = request.messages.find(m => m.role === 'system');
-              const isOrchestra = typeof systemMsg?.content === 'string' && systemMsg.content.includes('Orchestra Mode');
+              const systemContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
+              const isOrchestra = systemContent.includes('Orchestra INIT Mode') || systemContent.includes('Orchestra RUN Mode');
               if (isOrchestra) {
+                // Detect init vs run from system prompt
+                const orchestraMode = systemContent.includes('Orchestra INIT Mode') ? 'init' as const : 'run' as const;
                 // Extract repo from system prompt
-                const repoMatch = typeof systemMsg?.content === 'string'
-                  ? systemMsg.content.match(/Full:\s*([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/)
-                  : null;
+                const repoMatch = systemContent.match(/Full:\s*([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/);
                 const repo = repoMatch ? repoMatch[1] : 'unknown/unknown';
                 const userMsg = request.messages.find(m => m.role === 'user');
                 const prompt = typeof userMsg?.content === 'string' ? userMsg.content : '';
@@ -1417,6 +1418,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   timestamp: Date.now(),
                   modelAlias: task.modelAlias,
                   repo,
+                  mode: orchestraMode,
                   prompt: prompt.substring(0, 200),
                   branchName: orchestraResult.branch,
                   prUrl: orchestraResult.prUrl,
