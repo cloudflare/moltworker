@@ -118,6 +118,34 @@ else
   echo "No GITHUB_REPO_URL set, skipping repo clone"
 fi
 
+# Symlink skills-level bootstrap files into workspace root
+for bootstrap in HOT-MEMORY.md CLAUDE.md; do
+  if [ -f "/root/clawd/skills/$bootstrap" ] && [ ! -f "/root/clawd/$bootstrap" ]; then
+    ln -sf "/root/clawd/skills/$bootstrap" "/root/clawd/$bootstrap"
+    echo "Symlinked $bootstrap -> skills/$bootstrap"
+  fi
+done
+
+# Inject Google Calendar instructions into TOOLS.md (auto-injected by OpenClaw)
+# Break symlink, copy content, append calendar tool instructions
+if [ -f "/root/clawd/TOOLS.md" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'CALEOF'
+
+## Google Calendar (구글 캘린더)
+- 일정 확인할 때: `read` tool로 `/root/clawd/warm-memory/calendar.md` 파일을 읽어라. 이 파일은 자동 동기화됨.
+- 일정 생성: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js create --title "제목" --start "YYYY-MM-DDTHH:MM" --end "YYYY-MM-DDTHH:MM" --attendees "email1,email2"` 실행
+- 다른 사람 일정 확인: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js freebusy --start "YYYY-MM-DDTHH:MM" --end "YYYY-MM-DDTHH:MM" --emails "email1,email2"` 실행
+- 미팅 잡기: 먼저 freebusy로 참석자 가능 시간 확인 → 빈 시간에 create로 미팅 생성 (--attendees 포함)
+- 일정 검색: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js search --query "검색어"` 실행
+- 일정 수정: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js update --id EVENT_ID` 실행
+- 일정 삭제: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js delete --id EVENT_ID` 실행
+- 캘린더 관련 요청에 memory_search 사용하지 마라. 위 방법만 사용.
+CALEOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Calendar instructions appended to TOOLS.md"
+fi
+
 # Write config AFTER restore (overwrite any restored config with correct format)
 # Build gateway.remote block only if token is set (enables CLI commands like cron add)
 GATEWAY_REMOTE=""
@@ -235,7 +263,7 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
         # Register autonomous study cron if Serper API is available
         if [ -n "$SERPER_API_KEY" ] && [ -f "$STUDY_SCRIPT" ]; then
           # Check if auto-study cron already exists
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "auto-study"; then
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "auto-study "; then
             echo "[STUDY] Registering autonomous study cron job..."
             openclaw cron add \
               --name "auto-study" \
@@ -256,7 +284,7 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
         BRAIN_SCRIPT="/root/clawd/skills/brain-memory/scripts/brain-memory-system.js"
         if [ -f "$BRAIN_SCRIPT" ]; then
           # Daily memory consolidation (Haiku)
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "brain-memory"; then
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "brain-memory "; then
             echo "[BRAIN] Registering daily brain-memory cron..."
             openclaw cron add \
               --name "brain-memory" \
@@ -273,7 +301,7 @@ if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
           fi
 
           # Weekly self-reflect (Sonnet) — combines cross-memory insights + self-optimization
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -q "self-reflect"; then
+          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "self-reflect "; then
             echo "[REFLECT] Registering weekly self-reflect cron..."
             openclaw cron add \
               --name "self-reflect" \
@@ -305,6 +333,18 @@ RETRY_COUNT=0
 BACKOFF=5
 MAX_BACKOFF=120
 SUCCESS_THRESHOLD=60  # seconds - if gateway ran longer than this, reset retry counter
+
+## Calendar sync: fetch today's events and write to warm-memory (background, repeats every 6h)
+if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
+  (
+    while true; do
+      echo "[CALENDAR-SYNC] Syncing today's calendar events..."
+      node /root/clawd/skills/google-calendar/scripts/sync-today.js --days 1 2>&1 || echo "[CALENDAR-SYNC] sync failed"
+      sleep 21600  # 6 hours
+    done
+  ) &
+  echo "[CALENDAR-SYNC] Background sync started (every 6h)"
+fi
 
 while true; do
   GATEWAY_START=$(date +%s)

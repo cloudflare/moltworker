@@ -76,5 +76,11 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   // Telegram owner auto-allowlist on startup
   if (env.TELEGRAM_OWNER_ID) envVars.TELEGRAM_OWNER_ID = env.TELEGRAM_OWNER_ID;
 
+  // Google Calendar OAuth 2.0 credentials
+  if (env.GOOGLE_CLIENT_ID) envVars.GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID;
+  if (env.GOOGLE_CLIENT_SECRET) envVars.GOOGLE_CLIENT_SECRET = env.GOOGLE_CLIENT_SECRET;
+  if (env.GOOGLE_REFRESH_TOKEN) envVars.GOOGLE_REFRESH_TOKEN = env.GOOGLE_REFRESH_TOKEN;
+  if (env.GOOGLE_CALENDAR_ID) envVars.GOOGLE_CALENDAR_ID = env.GOOGLE_CALENDAR_ID;
+
   return envVars;
 }

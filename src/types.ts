@@ -45,6 +45,11 @@ export interface MoltbotEnv {
   GITHUB_TOKEN?: string; // GitHub personal access token for private repos
   GITHUB_PAT?: string; // GitHub personal access token (fallback for GITHUB_TOKEN)
   TELEGRAM_OWNER_ID?: string; // Telegram user ID to auto-allowlist on startup
+  // Google Calendar OAuth 2.0 credentials
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REFRESH_TOKEN?: string;
+  GOOGLE_CALENDAR_ID?: string; // Calendar ID (defaults to 'primary' in skill script)
 }
 
 /**
