@@ -96,6 +96,9 @@ jobs:
           echo "${{ secrets.R2_SECRET_ACCESS_KEY }}"  | npx wrangler secret put R2_SECRET_ACCESS_KEY  --name "$WORKER_NAME"
           echo "openclaw-${{ inputs.username }}-data" | npx wrangler secret put R2_BUCKET_NAME        --name "$WORKER_NAME"
 
+          # --- CDP (browser automation, re-apply WORKER_URL) ---
+          echo "https://openclaw-${{ inputs.username }}.notifly.workers.dev" | npx wrangler secret put WORKER_URL --name "$WORKER_NAME"
+
           # --- Container sleep timeout (only update if provided) ---
           SLEEP_AFTER="${{ inputs.sandbox_sleep_after }}"
           if [ -n "$SLEEP_AFTER" ]; then

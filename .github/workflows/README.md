@@ -37,6 +37,8 @@ These are set automatically per worker by the workflows:
 | `CF_AI_GATEWAY_ACCOUNT_ID` | Reuses `CF_ACCOUNT_ID` |
 | `R2_BUCKET_NAME` | Auto-set to `openclaw-<username>-data` |
 | `SANDBOX_SLEEP_AFTER` | Workflow input (default: `30m`) |
+| `CDP_SECRET` | Auto-generated (32-byte hex) by create workflow |
+| `WORKER_URL` | Auto-set to `https://openclaw-<username>.notifly.workers.dev` |
 
 ## Usage
 

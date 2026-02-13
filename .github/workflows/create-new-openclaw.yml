@@ -71,12 +71,16 @@ jobs:
         run: |
           npx wrangler r2 bucket create "openclaw-${{ inputs.username }}-data" 2>&1 || echo "::warning::Bucket may already exist, continuing..."
 
-      - name: Generate gateway token
+      - name: Generate tokens
         id: token
         run: |
-          TOKEN=$(openssl rand -hex 32)
-          echo "::add-mask::${TOKEN}"
-          echo "gateway_token=${TOKEN}" >> "$GITHUB_OUTPUT"
+          GATEWAY_TOKEN=$(openssl rand -hex 32)
+          echo "::add-mask::${GATEWAY_TOKEN}"
+          echo "gateway_token=${GATEWAY_TOKEN}" >> "$GITHUB_OUTPUT"
+
+          CDP_SECRET=$(openssl rand -hex 32)
+          echo "::add-mask::${CDP_SECRET}"
+          echo "cdp_secret=${CDP_SECRET}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy moltworker
         env:
@@ -113,6 +117,10 @@ jobs:
           # R2 bucket name override (per-user isolation)
           echo "openclaw-${{ inputs.username }}-data" | npx wrangler secret put R2_BUCKET_NAME --name "$WORKER_NAME"
 
+          # --- CDP (browser automation) ---
+          echo "${{ steps.token.outputs.cdp_secret }}" | npx wrangler secret put CDP_SECRET  --name "$WORKER_NAME"
+          echo "https://openclaw-${{ inputs.username }}.notifly.workers.dev" | npx wrangler secret put WORKER_URL --name "$WORKER_NAME"
+
           # --- Container sleep timeout ---
           SLEEP_AFTER="${{ inputs.sandbox_sleep_after }}"
           if [ "$SLEEP_AFTER" = "never" ]; then
@@ -137,5 +145,6 @@ jobs:
           | **Model** | \`${{ inputs.model }}\` |
           | **Telegram** | Configured |
           | **Sleep After** | \`${{ inputs.sandbox_sleep_after }}m\` |
+          | **CDP** | Enabled (secret auto-generated) |
           | **Gateway Token** | Auto-generated (stored as worker secret) |
           EOF
