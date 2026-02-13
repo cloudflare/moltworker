@@ -18,6 +18,14 @@ const RECOVERY_COOLDOWN_MS = 30_000; // 30s minimum between recovery cycles
 let recoveryAttempts = 0;
 let lastRecoveryTime = 0;
 
+// Track when a gateway process was last started (for cron grace period)
+let lastGatewayStartTime = 0;
+
+/** Get the timestamp of when the last gateway process was started */
+export function getLastGatewayStartTime(): number {
+  return lastGatewayStartTime;
+}
+
 /**
  * Find an existing Moltbot gateway process
  * 
@@ -87,6 +95,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
 
   // Start a new Moltbot gateway
   console.log('Starting new Moltbot gateway...');
+  lastGatewayStartTime = Date.now();
   const envVars = buildEnvVars(env);
   const command = '/usr/local/bin/start-moltbot.sh';
 

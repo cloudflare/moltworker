@@ -24,9 +24,9 @@ import { Hono } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
 import type { AppEnv, MoltbotEnv } from './types';
-import { MOLTBOT_PORT } from './config';
+import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, ensureCronJobs, cleanupExitedProcesses } from './gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, ensureCronJobs, cleanupExitedProcesses, getLastGatewayStartTime } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -263,71 +263,150 @@ app.all('*', async (c) => {
   if (isWebSocketRequest) {
     console.log('[WS] Proxying WebSocket connection');
 
-    // Get WebSocket connection to the container
-    const containerResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+    // Create a WebSocket pair for the client — accept immediately so client isn't left hanging
+    const [clientWs, serverWs] = Object.values(new WebSocketPair());
+    serverWs.accept();
 
-    // Get the container-side WebSocket
-    const containerWs = containerResponse.webSocket;
-    if (!containerWs) {
-      console.error('[WS] No WebSocket in container response');
-      return containerResponse;
+    // Mutable reference to the active container WebSocket (updated on reconnect)
+    let activeContainerWs: WebSocket | null = null;
+    let reconnectCount = 0;
+    const MAX_WS_RECONNECTS = 3;
+
+    // Client → container: always sends to activeContainerWs
+    serverWs.addEventListener('message', (event) => {
+      if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
+        activeContainerWs.send(event.data);
+      }
+    });
+
+    // Client close → close container
+    serverWs.addEventListener('close', (event) => {
+      if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
+        activeContainerWs.close(event.code, event.reason);
+      }
+    });
+
+    serverWs.addEventListener('error', () => {
+      if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
+        activeContainerWs.close(1011, 'Client error');
+      }
+    });
+
+    /**
+     * Attach event handlers to a container WebSocket for relaying messages
+     * and handling disconnections with reconnection attempts.
+     */
+    function attachContainerHandlers(cws: WebSocket) {
+      // Container → client with error message transformation
+      cws.addEventListener('message', (event) => {
+        let data = event.data;
+        if (typeof data === 'string') {
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.error?.message) {
+              parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
+              data = JSON.stringify(parsed);
+            }
+          } catch {
+            // Not JSON, pass through
+          }
+        }
+        if (serverWs.readyState === WebSocket.OPEN) {
+          serverWs.send(data);
+        }
+      });
+
+      // Container close — try to reconnect if unexpected
+      cws.addEventListener('close', async (event) => {
+        // Clean close (normal or no status) — propagate to client
+        if (event.code === 1000 || event.code === 1005) {
+          let reason = transformErrorMessage(event.reason || '', url.host);
+          if (reason.length > 123) reason = reason.slice(0, 120) + '...';
+          serverWs.close(event.code, reason);
+          return;
+        }
+
+        // Unexpected close — attempt reconnection
+        if (reconnectCount < MAX_WS_RECONNECTS && serverWs.readyState === WebSocket.OPEN) {
+          reconnectCount++;
+          console.log(`[WS] Container closed unexpectedly (code: ${event.code}), reconnect attempt ${reconnectCount}/${MAX_WS_RECONNECTS}`);
+
+          try {
+            serverWs.send(JSON.stringify({ type: 'system', message: 'Gateway reconnecting...' }));
+            await new Promise(r => setTimeout(r, 2000 * reconnectCount));
+
+            // Ensure gateway is running before reconnecting
+            await ensureMoltbotGateway(sandbox, c.env);
+            const newResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+            const newCws = newResponse.webSocket;
+            if (newCws && serverWs.readyState === WebSocket.OPEN) {
+              newCws.accept();
+              activeContainerWs = newCws;
+              attachContainerHandlers(newCws);
+              serverWs.send(JSON.stringify({ type: 'system', message: 'Reconnected' }));
+              console.log('[WS] Reconnected to container successfully');
+              return;
+            }
+          } catch (e) {
+            console.error('[WS] Reconnection attempt failed:', e);
+          }
+        }
+
+        // All reconnection attempts exhausted — close client
+        let reason = transformErrorMessage(event.reason || '', url.host);
+        if (reason.length > 123) reason = reason.slice(0, 120) + '...';
+        if (serverWs.readyState === WebSocket.OPEN) {
+          serverWs.close(event.code || 1011, reason || 'Gateway connection lost');
+        }
+      });
+
+      cws.addEventListener('error', () => {
+        console.log('[WS] Container WebSocket error');
+        // Error will trigger the close event, which handles reconnection
+      });
     }
 
-    // Create a WebSocket pair for the client
-    const [clientWs, serverWs] = Object.values(new WebSocketPair());
+    // If gateway is not ready, send status messages while it starts
+    if (!isGatewayReady) {
+      console.log('[WS] Gateway not ready, sending status while starting...');
+      serverWs.send(JSON.stringify({ type: 'system', message: 'Gateway starting, please wait...' }));
 
-    // Accept both WebSockets
-    serverWs.accept();
-    containerWs.accept();
-    
-    // Relay messages from client to container
-    serverWs.addEventListener('message', (event) => {
-      if (containerWs.readyState === WebSocket.OPEN) {
-        containerWs.send(event.data);
-      }
-    });
-
-    // Relay messages from container to client, with error transformation
-    containerWs.addEventListener('message', (event) => {
-      let data = event.data;
-
-      // Transform error messages for better UX
-      if (typeof data === 'string') {
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.error?.message) {
-            parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
-            data = JSON.stringify(parsed);
-          }
-        } catch {
-          // Not JSON, pass through
+      try {
+        await ensureMoltbotGateway(sandbox, c.env);
+        serverWs.send(JSON.stringify({ type: 'system', message: 'Gateway ready, connecting...' }));
+      } catch (error) {
+        console.error('[WS] Gateway startup failed:', error);
+        if (serverWs.readyState === WebSocket.OPEN) {
+          serverWs.send(JSON.stringify({ type: 'error', message: 'Gateway failed to start' }));
+          serverWs.close(1011, 'Gateway failed to start');
         }
+        return new Response(null, { status: 101, webSocket: clientWs });
+      }
+    }
+
+    // Connect to the container gateway
+    try {
+      const containerResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+      const containerWs = containerResponse.webSocket;
+      if (!containerWs) {
+        console.error('[WS] No WebSocket in container response');
+        if (serverWs.readyState === WebSocket.OPEN) {
+          serverWs.close(1011, 'Failed to connect to gateway');
+        }
+        return new Response(null, { status: 101, webSocket: clientWs });
       }
 
+      containerWs.accept();
+      activeContainerWs = containerWs;
+      attachContainerHandlers(containerWs);
+    } catch (error) {
+      console.error('[WS] Failed to connect to container:', error);
       if (serverWs.readyState === WebSocket.OPEN) {
-        serverWs.send(data);
+        serverWs.send(JSON.stringify({ type: 'error', message: 'Failed to connect to gateway' }));
+        serverWs.close(1011, 'Connection failed');
       }
-    });
-    
-    // Handle close events
-    serverWs.addEventListener('close', (event) => {
-      containerWs.close(event.code, event.reason);
-    });
+    }
 
-    containerWs.addEventListener('close', (event) => {
-      let reason = transformErrorMessage(event.reason, url.host);
-      if (reason.length > 123) reason = reason.slice(0, 120) + '...';
-      serverWs.close(event.code, reason);
-    });
-
-    // Handle errors
-    serverWs.addEventListener('error', () => {
-      containerWs.close(1011, 'Client error');
-    });
-
-    containerWs.addEventListener('error', () => {
-      serverWs.close(1011, 'Container error');
-    });
     return new Response(null, {
       status: 101,
       webSocket: clientWs,
@@ -380,21 +459,29 @@ async function scheduled(
       gatewayHealthy = true;
     } else {
       console.log('[cron] Gateway process found:', process.id, 'status:', process.status);
-      // Try to ensure it's actually responding
-      try {
-        await process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: 10000 });
-        console.log('[cron] Gateway is healthy and responding');
-        gatewayHealthy = true;
-      } catch (e) {
-        console.log('[cron] Gateway not responding, restarting...');
+
+      // Grace period: don't kill a gateway that was recently started (still initializing)
+      const timeSinceStart = Date.now() - getLastGatewayStartTime();
+      if (process.status === 'starting' || timeSinceStart < STARTUP_TIMEOUT_MS) {
+        console.log(`[cron] Gateway recently started (${Math.round(timeSinceStart / 1000)}s ago) or still starting, skipping health check`);
+        // Don't mark as healthy yet — it's still booting
+      } else {
+        // Try to ensure it's actually responding (use 30s timeout instead of 10s)
         try {
-          await process.kill();
-        } catch (killError) {
-          console.log('[cron] Could not kill process:', killError);
+          await process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: 30000 });
+          console.log('[cron] Gateway is healthy and responding');
+          gatewayHealthy = true;
+        } catch (e) {
+          console.log('[cron] Gateway not responding after 30s, restarting...');
+          try {
+            await process.kill();
+          } catch (killError) {
+            console.log('[cron] Could not kill process:', killError);
+          }
+          await ensureMoltbotGateway(sandbox, env);
+          console.log('[cron] Gateway restarted successfully');
+          gatewayHealthy = true;
         }
-        await ensureMoltbotGateway(sandbox, env);
-        console.log('[cron] Gateway restarted successfully');
-        gatewayHealthy = true;
       }
     }
   } catch (e) {

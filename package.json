@@ -7,6 +7,7 @@
   "scripts": {
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
+    "postdeploy": "bash scripts/postdeploy.sh",
     "dev": "vite dev",
     "start": "wrangler dev",
     "types": "wrangler types",

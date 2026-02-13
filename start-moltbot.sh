@@ -51,71 +51,83 @@ log_timing "Initialization started"
 # Create config directory
 mkdir -p "$CONFIG_DIR"
 
-# Restore from R2 first (restore credentials and sessions)
-restore_from_r2
+# === PARALLEL INIT: R2 restore and GitHub clone run concurrently ===
 
-# Restore warm-memory and modification-history from R2
-if [ -d "/data/moltbot/warm-memory" ]; then
-  mkdir -p /root/clawd/warm-memory
-  timeout 15 cp -rf /data/moltbot/warm-memory/* /root/clawd/warm-memory/ 2>/dev/null || true
-  echo "Restored warm-memory from R2"
-fi
-if [ -d "/data/moltbot/modification-history" ]; then
-  mkdir -p /root/clawd/.modification-history
-  timeout 15 cp -rf /data/moltbot/modification-history/* /root/clawd/.modification-history/ 2>/dev/null || true
-  echo "Restored modification-history from R2"
-fi
-log_timing "R2 restore completed"
+# Background: R2 restore (credentials, warm-memory, modification-history)
+(
+  restore_from_r2
+  if [ -d "/data/moltbot/warm-memory" ]; then
+    mkdir -p /root/clawd/warm-memory
+    timeout 15 cp -rf /data/moltbot/warm-memory/* /root/clawd/warm-memory/ 2>/dev/null || true
+    echo "Restored warm-memory from R2"
+  fi
+  if [ -d "/data/moltbot/modification-history" ]; then
+    mkdir -p /root/clawd/.modification-history
+    timeout 15 cp -rf /data/moltbot/modification-history/* /root/clawd/.modification-history/ 2>/dev/null || true
+    echo "Restored modification-history from R2"
+  fi
+  log_timing "R2 restore completed"
+) &
+R2_PID=$!
 
-# Clone GitHub repository if configured
+# Background: GitHub clone (if configured)
+CLONE_DIR=""
 if [ -n "$GITHUB_REPO_URL" ]; then
   REPO_NAME=$(basename "$GITHUB_REPO_URL" .git)
   CLONE_DIR="/root/clawd/$REPO_NAME"
 
-  # Support private repos via GITHUB_TOKEN (fallback to GITHUB_PAT)
-  EFFECTIVE_GITHUB_TOKEN=""
-  if [ -n "$GITHUB_TOKEN" ]; then
-    EFFECTIVE_GITHUB_TOKEN="$GITHUB_TOKEN"
-  elif [ -n "$GITHUB_PAT" ]; then
-    echo "Using GITHUB_PAT as fallback (GITHUB_TOKEN not set)"
-    EFFECTIVE_GITHUB_TOKEN="$GITHUB_PAT"
-  fi
+  (
+    # Support private repos via GITHUB_TOKEN (fallback to GITHUB_PAT)
+    EFFECTIVE_GITHUB_TOKEN=""
+    if [ -n "$GITHUB_TOKEN" ]; then
+      EFFECTIVE_GITHUB_TOKEN="$GITHUB_TOKEN"
+    elif [ -n "$GITHUB_PAT" ]; then
+      echo "Using GITHUB_PAT as fallback (GITHUB_TOKEN not set)"
+      EFFECTIVE_GITHUB_TOKEN="$GITHUB_PAT"
+    fi
 
-  if [ -n "$EFFECTIVE_GITHUB_TOKEN" ]; then
-    CLONE_URL=$(echo "$GITHUB_REPO_URL" | sed "s|https://github.com/|https://${EFFECTIVE_GITHUB_TOKEN}@github.com/|")
-  else
-    echo "[WARN] Neither GITHUB_TOKEN nor GITHUB_PAT is set. Private repos will fail to clone."
-    CLONE_URL="$GITHUB_REPO_URL"
-  fi
+    if [ -n "$EFFECTIVE_GITHUB_TOKEN" ]; then
+      CLONE_URL=$(echo "$GITHUB_REPO_URL" | sed "s|https://github.com/|https://${EFFECTIVE_GITHUB_TOKEN}@github.com/|")
+    else
+      echo "[WARN] Neither GITHUB_TOKEN nor GITHUB_PAT is set. Private repos will fail to clone."
+      CLONE_URL="$GITHUB_REPO_URL"
+    fi
 
-  if [ -d "$CLONE_DIR/.git" ]; then
-    echo "Repository already exists at $CLONE_DIR, updating remote and pulling latest..."
-    git -C "$CLONE_DIR" remote set-url origin "$CLONE_URL"
-    git -C "$CLONE_DIR" pull --ff-only || echo "[WARN] git pull failed, continuing with existing version"
-  else
-    echo "Cloning $GITHUB_REPO_URL into $CLONE_DIR..."
-    git clone "$CLONE_URL" "$CLONE_DIR" || echo "[WARN] git clone failed, continuing without repo"
-  fi
-  log_timing "GitHub repo clone completed"
-
-  # Symlink all repo contents into workspace (files + directories)
-  if [ -d "$CLONE_DIR" ]; then
-    for item in "$CLONE_DIR"/*; do
-      name=$(basename "$item")
-      # Skip .git, README, and the clone dir itself
-      [ "$name" = ".git" ] && continue
-      [ "$name" = "README.md" ] && continue
-      if [ -d "$item" ]; then
-        ln -sfn "$item" "/root/clawd/$name"
-      else
-        ln -sf "$item" "/root/clawd/$name"
-      fi
-      echo "Symlinked $name -> $item"
-    done
-    echo "All repo contents symlinked to workspace"
-  fi
+    if [ -d "$CLONE_DIR/.git" ]; then
+      echo "Repository already exists at $CLONE_DIR, updating remote and pulling latest..."
+      git -C "$CLONE_DIR" remote set-url origin "$CLONE_URL"
+      git -C "$CLONE_DIR" pull --ff-only || echo "[WARN] git pull failed, continuing with existing version"
+    else
+      echo "Cloning $GITHUB_REPO_URL into $CLONE_DIR..."
+      git clone "$CLONE_URL" "$CLONE_DIR" || echo "[WARN] git clone failed, continuing without repo"
+    fi
+    log_timing "GitHub repo clone completed"
+  ) &
+  GIT_PID=$!
 else
   echo "No GITHUB_REPO_URL set, skipping repo clone"
+  GIT_PID=""
+fi
+
+# Wait for both parallel tasks to complete
+wait $R2_PID || true
+[ -n "$GIT_PID" ] && wait $GIT_PID || true
+log_timing "Parallel init completed (R2 + GitHub)"
+
+# Symlink repo contents into workspace (after clone is done)
+if [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
+  for item in "$CLONE_DIR"/*; do
+    name=$(basename "$item")
+    [ "$name" = ".git" ] && continue
+    [ "$name" = "README.md" ] && continue
+    if [ -d "$item" ]; then
+      ln -sfn "$item" "/root/clawd/$name"
+    else
+      ln -sf "$item" "/root/clawd/$name"
+    fi
+    echo "Symlinked $name -> $item"
+  done
+  echo "All repo contents symlinked to workspace"
 fi
 
 # Symlink skills-level bootstrap files into workspace root
@@ -210,22 +222,23 @@ else
   echo "No channel tokens set, skipping doctor"
 fi
 
-# Explicitly enable channel plugins and add accounts (doctor --fix no longer auto-enables)
+# Explicitly enable channel plugins and add accounts (in parallel)
 if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
-  openclaw plugins enable telegram 2>/dev/null || true
-  openclaw channels add --channel telegram --use-env 2>/dev/null || true
-  echo "Telegram channel configured"
+  ( openclaw plugins enable telegram 2>/dev/null || true
+    openclaw channels add --channel telegram --use-env 2>/dev/null || true
+    echo "Telegram channel configured" ) &
 fi
 if [ -n "$DISCORD_BOT_TOKEN" ]; then
-  openclaw plugins enable discord 2>/dev/null || true
-  openclaw channels add --channel discord --use-env 2>/dev/null || true
-  echo "Discord channel configured"
+  ( openclaw plugins enable discord 2>/dev/null || true
+    openclaw channels add --channel discord --use-env 2>/dev/null || true
+    echo "Discord channel configured" ) &
 fi
 if [ -n "$SLACK_BOT_TOKEN" ]; then
-  openclaw plugins enable slack 2>/dev/null || true
-  openclaw channels add --channel slack --use-env 2>/dev/null || true
-  echo "Slack channel configured"
+  ( openclaw plugins enable slack 2>/dev/null || true
+    openclaw channels add --channel slack --use-env 2>/dev/null || true
+    echo "Slack channel configured" ) &
 fi
+wait
 log_timing "Channels configured"
 
 # Set models AFTER doctor (doctor wipes model config)

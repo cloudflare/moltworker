@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { MOLTBOT_PORT, R2_MOUNT_PATH } from '../config';
 import { findExistingMoltbotProcess } from '../gateway';
-import { waitForProcess } from '../gateway/utils';
+import { waitForProcess, runCommand } from '../gateway/utils';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
@@ -67,6 +67,9 @@ publicRoutes.get('/api/liveness', async (c) => {
       gateway: { status: string; latency: number };
       r2: { status: string; latency: number };
       memory?: { usage: string; latency: number };
+      crons?: { status: string; registered: string[]; missing: string[]; latency: number };
+      uptime?: { seconds: number; latency: number };
+      lastSync?: { timestamp: string | null; latency: number };
     };
   } = {
     timestamp: new Date().toISOString(),
@@ -117,6 +120,49 @@ publicRoutes.get('/api/liveness', async (c) => {
     };
   } catch {
     health.checks.memory = { usage: 'error', latency: Date.now() - memStart };
+  }
+
+  // Check cron jobs
+  const cronStart = Date.now();
+  try {
+    const tokenFlag = c.env.MOLTBOT_GATEWAY_TOKEN ? `--token ${c.env.MOLTBOT_GATEWAY_TOKEN}` : '';
+    const result = await runCommand(sandbox, `openclaw cron list ${tokenFlag} 2>/dev/null || echo ""`, 10000);
+    const output = result.stdout;
+    const expected = ['auto-study', 'brain-memory', 'self-reflect'];
+    const registered = expected.filter(name => output.includes(name));
+    const missing = expected.filter(name => !output.includes(name));
+    health.checks.crons = {
+      status: missing.length === 0 ? 'all_registered' : 'partial',
+      registered,
+      missing,
+      latency: Date.now() - cronStart,
+    };
+  } catch {
+    health.checks.crons = { status: 'error', registered: [], missing: [], latency: Date.now() - cronStart };
+  }
+
+  // Check container uptime
+  const uptimeStart = Date.now();
+  try {
+    const result = await runCommand(sandbox, 'cat /proc/uptime 2>/dev/null | cut -d" " -f1', 5000);
+    health.checks.uptime = {
+      seconds: parseFloat(result.stdout.trim()) || 0,
+      latency: Date.now() - uptimeStart,
+    };
+  } catch {
+    health.checks.uptime = { seconds: 0, latency: Date.now() - uptimeStart };
+  }
+
+  // Check last R2 sync time
+  const syncStart = Date.now();
+  try {
+    const result = await runCommand(sandbox, `cat ${R2_MOUNT_PATH}/.last-sync 2>/dev/null || echo ""`, 5000);
+    health.checks.lastSync = {
+      timestamp: result.stdout.trim() || null,
+      latency: Date.now() - syncStart,
+    };
+  } catch {
+    health.checks.lastSync = { timestamp: null, latency: Date.now() - syncStart };
   }
 
   health.totalLatency = Date.now() - startTime;

@@ -14,9 +14,10 @@ describe('syncToR2', () => {
   });
 
   describe('configuration checks', () => {
-    it('returns error when R2 is not configured', async () => {
+    it('returns error when R2 is not configured and no bucket binding', async () => {
       const { sandbox } = createMockSandbox();
-      const env = createMockEnv();
+      // No R2 credentials AND no bucket binding
+      const env = createMockEnv({ MOLTBOT_BUCKET: undefined as any });
 
       const result = await syncToR2(sandbox, env);
 
@@ -24,12 +25,37 @@ describe('syncToR2', () => {
       expect(result.error).toBe('R2 storage is not configured');
     });
 
-    it('returns error when mount fails', async () => {
+    it('falls back to R2 binding when S3FS mount fails', async () => {
+      const { sandbox, startProcessMock, mountBucketMock } = createMockSandbox();
+      mountBucketMock.mockRejectedValue(new Error('Mount failed'));
+
+      const mockBucket = { put: vi.fn().mockResolvedValue(undefined) };
+      const env = createMockEnvWithR2({ MOLTBOT_BUCKET: mockBucket as any });
+
+      // mountR2Storage calls isR2Mounted twice (before mount + after mount error),
+      // then syncViaR2Binding reads files from container via runCommand
+      startProcessMock
+        .mockResolvedValueOnce(createMockProcess('')) // isR2Mounted check (not mounted)
+        .mockResolvedValueOnce(createMockProcess('')) // isR2Mounted re-check after error (still not mounted)
+        .mockResolvedValueOnce(createMockProcess('{"config": true}')) // cat openclaw.json
+        .mockResolvedValueOnce(createMockProcess('')) // cat telegram-allowFrom.json (empty)
+        .mockResolvedValueOnce(createMockProcess('')) // cat device-pairings.json (empty)
+        .mockResolvedValueOnce(createMockProcess('')) // cat memory-index.json (empty)
+        .mockResolvedValueOnce(createMockProcess('')); // ls warm-memory
+
+      const result = await syncToR2(sandbox, env);
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe('r2-binding');
+      expect(mockBucket.put).toHaveBeenCalled();
+    });
+
+    it('returns S3FS mount error when no bucket binding available', async () => {
       const { sandbox, startProcessMock, mountBucketMock } = createMockSandbox();
       startProcessMock.mockResolvedValue(createMockProcess(''));
       mountBucketMock.mockRejectedValue(new Error('Mount failed'));
 
-      const env = createMockEnvWithR2();
+      const env = createMockEnvWithR2({ MOLTBOT_BUCKET: undefined as any });
 
       const result = await syncToR2(sandbox, env);
 
@@ -46,7 +72,8 @@ describe('syncToR2', () => {
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
         .mockResolvedValueOnce(createMockProcess('MISSING_CONFIG'));
 
-      const env = createMockEnvWithR2();
+      // No bucket binding so fallback doesn't trigger
+      const env = createMockEnvWithR2({ MOLTBOT_BUCKET: undefined as any });
 
       const result = await syncToR2(sandbox, env);
 
@@ -56,7 +83,7 @@ describe('syncToR2', () => {
   });
 
   describe('sync execution', () => {
-    it('returns success when sync completes', async () => {
+    it('returns success with s3fs method when sync completes', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
       const timestamp = '2026-01-27T12:00:00+00:00';
 
@@ -71,9 +98,10 @@ describe('syncToR2', () => {
 
       expect(result.success).toBe(true);
       expect(result.lastSync).toBe(timestamp);
+      expect(result.method).toBe('s3fs');
     });
 
-    it('returns error when rsync fails (no timestamp created)', async () => {
+    it('returns error when rsync fails and no bucket binding', async () => {
       const { sandbox, startProcessMock } = createMockSandbox();
 
       // Calls: mount check, batched command (empty output = no timestamp)
@@ -81,7 +109,7 @@ describe('syncToR2', () => {
         .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
         .mockResolvedValueOnce(createMockProcess(''));
 
-      const env = createMockEnvWithR2();
+      const env = createMockEnvWithR2({ MOLTBOT_BUCKET: undefined as any });
 
       const result = await syncToR2(sandbox, env);
 
