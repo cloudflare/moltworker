@@ -169,10 +169,25 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
-// Legacy AI Gateway base URL override:
-// ANTHROPIC_BASE_URL is picked up natively by the Anthropic SDK,
-// so we don't need to patch the provider config. Writing a provider
-// entry without a models array breaks OpenClaw's config validation.
+// Anthropic provider config:
+// OpenClaw requires models.providers.anthropic with a baseUrl — it does NOT
+// pick up ANTHROPIC_BASE_URL from the environment automatically.
+if (process.env.ANTHROPIC_API_KEY) {
+    const baseUrl = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+    const defaultModel = 'claude-haiku-4-5';
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers.anthropic = {
+        baseUrl: baseUrl,
+        apiKey: process.env.ANTHROPIC_API_KEY,
+        api: 'anthropic-messages',
+        models: [{ id: defaultModel, name: defaultModel, contextWindow: 200000, maxTokens: 8192 }],
+    };
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: 'anthropic/' + defaultModel };
+    console.log('Anthropic provider configured: baseUrl=' + baseUrl + ' model=' + defaultModel);
+}
 
 // AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
 // Adds a provider entry for any AI Gateway provider and sets it as default model.
