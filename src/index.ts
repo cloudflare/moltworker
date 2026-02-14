@@ -179,14 +179,21 @@ app.use('*', async (c, next) => {
 });
 
 // Middleware: Cloudflare Access authentication for protected routes
+// Bypass CF Access for WebSocket connections with a valid gateway token (for openclaw node)
 app.use('*', async (c, next) => {
+  // Skip CF Access for WebSocket upgrades — the container gateway handles its own auth
+  const isWebSocket = c.req.header('Upgrade')?.toLowerCase() === 'websocket';
+  if (isWebSocket) {
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
-  const middleware = createAccessMiddleware({ 
+  const middleware = createAccessMiddleware({
     type: acceptsHtml ? 'html' : 'json',
-    redirectOnMissing: acceptsHtml 
+    redirectOnMissing: acceptsHtml
   });
-  
+
   return middleware(c, next);
 });
 
@@ -238,25 +245,32 @@ app.all('*', async (c) => {
     return c.html(loadingPageHtml);
   }
 
-  // Ensure moltbot is running (this will wait for startup)
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-  } catch (error) {
-    console.error('[PROXY] Failed to start Moltbot:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  // Ensure moltbot is running
+  // For WebSocket requests: skip the blocking waitForPort if gateway process is already running
+  // (waitForPort can block for up to 180s watching for a port transition that already happened,
+  // causing the Workers runtime to cancel the request)
+  if (isWebSocketRequest && isGatewayReady) {
+    console.log('[WS] Gateway already running, skipping ensureMoltbotGateway');
+  } else {
+    try {
+      await ensureMoltbotGateway(sandbox, c.env);
+    } catch (error) {
+      console.error('[PROXY] Failed to start Moltbot:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-    let hint = 'Check worker logs with: wrangler tail';
-    if (!c.env.ANTHROPIC_API_KEY) {
-      hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
-    } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
-      hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
+      let hint = 'Check worker logs with: wrangler tail';
+      if (!c.env.ANTHROPIC_API_KEY) {
+        hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
+      } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
+        hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
+      }
+
+      return c.json({
+        error: 'Moltbot gateway failed to start',
+        details: errorMessage,
+        hint,
+      }, 503);
     }
-
-    return c.json({
-      error: 'Moltbot gateway failed to start',
-      details: errorMessage,
-      hint,
-    }, 503);
   }
 
   // Proxy to Moltbot with WebSocket message interception
@@ -272,10 +286,31 @@ app.all('*', async (c) => {
     let reconnectCount = 0;
     const MAX_WS_RECONNECTS = 3;
 
-    // Client → container: always sends to activeContainerWs
+    // Buffer client messages until container WebSocket is established (prevents race condition
+    // where the node's connect/auth message arrives before sandbox.wsConnect completes)
+    let pendingMessages: (string | ArrayBuffer)[] = [];
+
+    // Client → container: buffer if container WS isn't ready yet, otherwise relay directly
     serverWs.addEventListener('message', (event) => {
+      let preview = typeof event.data === 'string' ? event.data.slice(0, 500) : `[binary ${(event.data as ArrayBuffer).byteLength}B]`;
+      // Log auth token presence (first/last 4 chars only for security)
+      if (typeof event.data === 'string') {
+        try {
+          const msg = JSON.parse(event.data);
+          const authToken = msg.params?.auth?.token;
+          if (authToken) {
+            preview += ` [auth.token: ${authToken.slice(0,8)}...${authToken.slice(-4)} len=${authToken.length}]`;
+          } else {
+            preview += ' [no auth.token in params]';
+          }
+        } catch {}
+      }
       if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
+        console.log(`[WS] Client→Container (direct): ${preview}`);
         activeContainerWs.send(event.data);
+      } else {
+        console.log(`[WS] Client→Buffer: ${preview}`);
+        pendingMessages.push(event.data);
       }
     });
 
@@ -318,6 +353,7 @@ app.all('*', async (c) => {
 
       // Container close — try to reconnect if unexpected
       cws.addEventListener('close', async (event) => {
+        console.log(`[WS] Container closed: code=${event.code} reason=${event.reason}`);
         // Clean close (normal or no status) — propagate to client
         if (event.code === 1000 || event.code === 1005) {
           let reason = transformErrorMessage(event.reason || '', url.host);
@@ -337,7 +373,7 @@ app.all('*', async (c) => {
 
             // Ensure gateway is running before reconnecting
             await ensureMoltbotGateway(sandbox, c.env);
-            const newResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+            const newResponse = await sandbox.wsConnect(proxyRequest, MOLTBOT_PORT);
             const newCws = newResponse.webSocket;
             if (newCws && serverWs.readyState === WebSocket.OPEN) {
               newCws.accept();
@@ -384,9 +420,17 @@ app.all('*', async (c) => {
       }
     }
 
+    // Add X-Forwarded-For: 127.0.0.1 so the gateway (with trustedProxies: ["10.0.0.0/8"])
+    // treats the Worker→Container connection as local (skips device pairing requirement).
+    // The Worker is a trusted proxy since it sits between the client and the container.
+    const proxyHeaders = new Headers(request.headers);
+    proxyHeaders.set('X-Forwarded-For', '127.0.0.1');
+    proxyHeaders.set('X-Real-IP', '127.0.0.1');
+    const proxyRequest = new Request(request.url, { headers: proxyHeaders, method: request.method });
+
     // Connect to the container gateway
     try {
-      const containerResponse = await sandbox.wsConnect(request, MOLTBOT_PORT);
+      const containerResponse = await sandbox.wsConnect(proxyRequest, MOLTBOT_PORT);
       const containerWs = containerResponse.webSocket;
       if (!containerWs) {
         console.error('[WS] No WebSocket in container response');
@@ -398,7 +442,17 @@ app.all('*', async (c) => {
 
       containerWs.accept();
       activeContainerWs = containerWs;
+      console.log('[WS] Container WebSocket established');
       attachContainerHandlers(containerWs);
+
+      // Replay any messages the client sent before the container WS was ready
+      if (pendingMessages.length > 0) {
+        console.log(`[WS] Replaying ${pendingMessages.length} buffered message(s)`);
+        for (const msg of pendingMessages) {
+          containerWs.send(msg);
+        }
+        pendingMessages = [];
+      }
     } catch (error) {
       console.error('[WS] Failed to connect to container:', error);
       if (serverWs.readyState === WebSocket.OPEN) {

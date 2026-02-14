@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenClaw Startup Script v65 - Self-modify & self-reflect
-# Cache bust: 2026-02-13-v65-self-modify
+# Cache bust: 2026-02-14-v71-auto-approve-pairing
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -24,12 +24,23 @@ log_timing() {
   echo "[TIMING] $1 (${elapsed}s elapsed)"
 }
 
+# Port check using Node.js (nc/netcat not installed, bash /dev/tcp not available in Debian)
+port_open() {
+  node -e "require('net').createConnection({port:$2,host:'$1',timeout:2000}).on('connect',function(){process.exit(0)}).on('error',function(){process.exit(1)})" 2>/dev/null
+}
+
 echo "============================================"
 echo "Starting OpenClaw v61 (process guard)"
 echo "============================================"
 
 CONFIG_DIR="/root/.openclaw"
 R2_BACKUP_DIR="/data/moltbot/openclaw-backup"
+
+# Export OPENCLAW_GATEWAY_TOKEN so the openclaw gateway and CLI tools can use it.
+# Value must match the node's device auth token (from ~/.openclaw/identity/device-auth.json)
+if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
+  export OPENCLAW_GATEWAY_TOKEN="$CLAWDBOT_GATEWAY_TOKEN"
+fi
 
 # Function to restore OpenClaw data from R2
 restore_from_r2() {
@@ -159,11 +170,8 @@ CALEOF
 fi
 
 # Write config AFTER restore (overwrite any restored config with correct format)
-# Build gateway.remote block only if token is set (enables CLI commands like cron add)
-GATEWAY_REMOTE=""
-if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
-  GATEWAY_REMOTE=", \"remote\": { \"token\": \"$CLAWDBOT_GATEWAY_TOKEN\" }"
-fi
+# gateway.bind=lan + trustedProxies enables sandbox.wsConnect() from 10.x.x.x network.
+# No gateway.remote.token — auth uses device pairing, not shared tokens.
 
 cat > "$CONFIG_DIR/openclaw.json" << EOFCONFIG
 {
@@ -179,7 +187,16 @@ cat > "$CONFIG_DIR/openclaw.json" << EOFCONFIG
   },
   "gateway": {
     "port": 18789,
-    "mode": "local"$GATEWAY_REMOTE
+    "mode": "local",
+    "bind": "lan",
+    "trustedProxies": ["10.0.0.0/8"],
+    "auth": {
+      "mode": "token",
+      "token": "${CLAWDBOT_GATEWAY_TOKEN:-}"
+    },
+    "nodes": {
+      "browser": { "mode": "auto" }
+    }
   },
   "channels": {
     "telegram": {
@@ -253,89 +270,145 @@ echo "Stale lock files cleaned"
 log_timing "Starting gateway"
 
 # Restore cron jobs after gateway is ready (runs in background)
-CRON_SCRIPT="/root/clawd/clawd-memory/scripts/restore-crons.js"
-STUDY_SCRIPT="/root/clawd/skills/web-researcher/scripts/study-session.js"
-if [ -f "$CRON_SCRIPT" ] || [ -n "$SERPER_API_KEY" ]; then
-  (
-    # Wait for gateway to be ready
-    for i in $(seq 1 30); do
-      sleep 2
-      if nc -z 127.0.0.1 18789 2>/dev/null; then
-        # Restore existing cron jobs
-        if [ -f "$CRON_SCRIPT" ]; then
-          echo "[CRON] Gateway ready, restoring cron jobs..."
-          node "$CRON_SCRIPT" 2>&1 || echo "[WARN] Cron restore failed"
-        fi
+# Each cron checks its own prerequisites independently — no outer gate
+(
+  CRON_SCRIPT="/root/clawd/clawd-memory/scripts/restore-crons.js"
+  STUDY_SCRIPT="/root/clawd/skills/web-researcher/scripts/study-session.js"
+  BRAIN_SCRIPT="/root/clawd/skills/brain-memory/scripts/brain-memory-system.js"
+  REFLECT_SCRIPT="/root/clawd/skills/self-modify/scripts/reflect.js"
 
-        # Build token flag for CLI commands (gateway requires auth)
-        TOKEN_FLAG=""
-        if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
-          TOKEN_FLAG="--token $CLAWDBOT_GATEWAY_TOKEN"
-        fi
-
-        # Register autonomous study cron if Serper API is available
-        if [ -n "$SERPER_API_KEY" ] && [ -f "$STUDY_SCRIPT" ]; then
-          # Check if auto-study cron already exists
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "auto-study "; then
-            echo "[STUDY] Registering autonomous study cron job..."
-            openclaw cron add \
-              --name "auto-study" \
-              --every "24h" \
-              --session isolated \
-              --model "anthropic/claude-3-5-haiku-20241022" \
-              --thinking off \
-              $TOKEN_FLAG \
-              --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study" \
-              2>&1 || echo "[WARN] Study cron registration failed"
-            echo "[STUDY] Study cron registered (every 24h, haiku-3, thinking off)"
-          else
-            echo "[STUDY] auto-study cron already exists, skipping"
-          fi
-        fi
-
-        # Register brain memory consolidation crons
-        BRAIN_SCRIPT="/root/clawd/skills/brain-memory/scripts/brain-memory-system.js"
-        if [ -f "$BRAIN_SCRIPT" ]; then
-          # Daily memory consolidation (Haiku)
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "brain-memory "; then
-            echo "[BRAIN] Registering daily brain-memory cron..."
-            openclaw cron add \
-              --name "brain-memory" \
-              --every "24h" \
-              --session isolated \
-              --model "anthropic/claude-3-5-haiku-20241022" \
-              --thinking off \
-              $TOKEN_FLAG \
-              --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update" \
-              2>&1 || echo "[WARN] brain-memory cron registration failed"
-            echo "[BRAIN] brain-memory cron registered (every 24h, haiku, thinking off)"
-          else
-            echo "[BRAIN] brain-memory cron already exists, skipping"
-          fi
-
-          # Weekly self-reflect (Sonnet) — combines cross-memory insights + self-optimization
-          if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "self-reflect "; then
-            echo "[REFLECT] Registering weekly self-reflect cron..."
-            openclaw cron add \
-              --name "self-reflect" \
-              --every "168h" \
-              --session isolated \
-              --model "anthropic/claude-sonnet-4-5-20250929" \
-              --thinking off \
-              $TOKEN_FLAG \
-              --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md" \
-              2>&1 || echo "[WARN] self-reflect cron registration failed"
-            echo "[REFLECT] self-reflect cron registered (every 168h, sonnet, thinking off)"
-          else
-            echo "[REFLECT] self-reflect cron already exists, skipping"
-          fi
-        fi
-        break
+  # Helper: register a cron with retry (2 attempts)
+  register_cron() {
+    local label="$1"; shift
+    for attempt in 1 2; do
+      if openclaw cron add "$@" 2>&1; then
+        echo "[$label] Cron registered successfully"
+        return 0
       fi
+      echo "[$label] Attempt $attempt failed, retrying in 5s..."
+      sleep 5
     done
-  ) &
-  echo "Cron restore scheduled in background"
-fi
+    echo "[WARN] $label cron registration failed after 2 attempts"
+    return 1
+  }
+
+  # Wait for gateway to be ready
+  for i in $(seq 1 30); do
+    sleep 2
+    if port_open 127.0.0.1 18789; then
+      sleep 3  # extra delay for gateway to fully initialize
+      echo "[CRON] Gateway ready, starting cron restoration..."
+
+      TOKEN_FLAG=""
+      if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+        TOKEN_FLAG="--token $CLAWDBOT_GATEWAY_TOKEN"
+      fi
+
+      # 1. Restore base crons from clawd-memory repo (if available)
+      if [ -f "$CRON_SCRIPT" ]; then
+        echo "[CRON] Running restore-crons.js..."
+        node "$CRON_SCRIPT" 2>&1 || echo "[WARN] Cron restore script failed"
+      fi
+
+      # 2. auto-study (requires SERPER_API_KEY + study script)
+      if [ -n "$SERPER_API_KEY" ] && [ -f "$STUDY_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "auto-study "; then
+          echo "[STUDY] Registering autonomous study cron job..."
+          register_cron "STUDY" \
+            --name "auto-study" \
+            --every "24h" \
+            --session isolated \
+            --model "anthropic/claude-3-5-haiku-20241022" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study"
+        else
+          echo "[STUDY] auto-study cron already exists, skipping"
+        fi
+      fi
+
+      # 3. brain-memory (requires brain script)
+      if [ -f "$BRAIN_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "brain-memory "; then
+          echo "[BRAIN] Registering daily brain-memory cron..."
+          register_cron "BRAIN" \
+            --name "brain-memory" \
+            --every "24h" \
+            --session isolated \
+            --model "anthropic/claude-3-5-haiku-20241022" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update"
+        else
+          echo "[BRAIN] brain-memory cron already exists, skipping"
+        fi
+      fi
+
+      # 4. self-reflect (requires reflect script)
+      if [ -f "$REFLECT_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "self-reflect "; then
+          echo "[REFLECT] Registering weekly self-reflect cron..."
+          register_cron "REFLECT" \
+            --name "self-reflect" \
+            --every "168h" \
+            --session isolated \
+            --model "anthropic/claude-sonnet-4-5-20250929" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md"
+        else
+          echo "[REFLECT] self-reflect cron already exists, skipping"
+        fi
+      fi
+
+      echo "[CRON] Cron restoration complete"
+      break
+    fi
+  done
+) &
+echo "Cron restore scheduled in background"
+
+# Background: auto-approve pending node pairing requests (for remote nodes like browser relay)
+# Device pairing is only auto-approved for loopback connections. Since the Worker's
+# sandbox.wsConnect() connects from 10.x.x.x, pairing is required. This loop detects
+# and auto-approves pending device pairing requests from inside the container (loopback).
+(
+  # Wait for gateway to be ready
+  for i in $(seq 1 60); do
+    sleep 3
+    if port_open 127.0.0.1 18789; then
+      echo "[PAIRING] Gateway ready, starting auto-approve loop"
+      break
+    fi
+  done
+
+  while true; do
+    # List devices in JSON format
+    devices_json=$(openclaw devices list --json --token "$CLAWDBOT_GATEWAY_TOKEN" --url ws://127.0.0.1:18789 --timeout 5000 2>/dev/null || true)
+
+    if [ -n "$devices_json" ]; then
+      # Extract pending request IDs using node (guaranteed available in container)
+      pending_ids=$(echo "$devices_json" | node -e "
+        let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+          try{const j=JSON.parse(d);const p=j.pending||j.pendingRequests||j.requests||[];
+          if(Array.isArray(p)){p.forEach(r=>{const id=r.requestId||r.id||'';if(id)console.log(id);})}
+          }catch(e){}
+        });" 2>/dev/null)
+
+      if [ -n "$pending_ids" ]; then
+        echo "$pending_ids" | while IFS= read -r reqId; do
+          if [ -n "$reqId" ]; then
+            echo "[PAIRING] Auto-approving device pairing request: $reqId"
+            openclaw devices approve "$reqId" --token "$CLAWDBOT_GATEWAY_TOKEN" --url ws://127.0.0.1:18789 2>&1 || echo "[PAIRING] Approve failed for $reqId"
+          fi
+        done
+      fi
+    fi
+
+    sleep 10
+  done
+) &
+echo "[PAIRING] Auto-approve loop started in background"
 
 # Disable exit-on-error for the restart loop (we handle exit codes explicitly)
 set +e
@@ -363,6 +436,8 @@ while true; do
   GATEWAY_START=$(date +%s)
   echo "[GATEWAY] Starting openclaw gateway (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
 
+  # OPENCLAW_GATEWAY_TOKEN env var is set at top of script (from CLAWDBOT_GATEWAY_TOKEN)
+  # The gateway reads it automatically for auth — no --token flag needed
   openclaw gateway --port 18789 --allow-unconfigured --bind lan
   EXIT_CODE=$?
 

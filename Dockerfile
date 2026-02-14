@@ -1,6 +1,6 @@
 FROM docker.io/cloudflare/sandbox:0.7.0
 
-# Build cache bust: 2026-02-13-v40-self-modify
+# Build cache bust: 2026-02-14-v44-auto-approve-pairing
 # Install Node.js 22 (required by openclaw) and rsync (for R2 backup sync)
 # The base image has Node 20, we need to replace it with Node 22
 # Using direct binary download for reliability
@@ -37,7 +37,7 @@ RUN mkdir -p /root/.clawdbot \
 
 # Copy startup script (version: 2026-02-04-v3)
 COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
-RUN chmod +x /usr/local/bin/start-moltbot.sh && echo "start-moltbot.sh version: 2026-02-13-v65-self-modify"
+RUN chmod +x /usr/local/bin/start-moltbot.sh && echo "start-moltbot.sh version: 2026-02-14-v71-auto-approve-pairing"
 
 # Copy default configuration template
 COPY moltbot.json.template /root/.clawdbot-templates/moltbot.json.template

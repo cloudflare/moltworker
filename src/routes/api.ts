@@ -402,6 +402,33 @@ adminApi.post('/gateway/restart', async (c) => {
   }
 });
 
+// POST /api/admin/container/reset - Kill ALL processes to force container recreation
+adminApi.post('/container/reset', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    const processes = await sandbox.listProcesses();
+    let killed = 0;
+
+    for (const p of processes) {
+      if (p.status === 'running' || p.status === 'starting') {
+        try {
+          await p.kill();
+          killed++;
+        } catch {}
+      }
+    }
+
+    return c.json({
+      success: true,
+      message: `Killed ${killed} processes out of ${processes.length} total. Container will reset on next request.`,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 // Mount admin API routes under /admin
 api.route('/admin', adminApi);
 
