@@ -709,6 +709,59 @@ interface GitPullResponse {
 }
 
 /**
+ * Extract meaningful code identifiers from source code.
+ * Returns unique names of exported functions, classes, constants, and top-level declarations.
+ * Used by rewrite detection to verify that key symbols survive across file updates.
+ */
+export function extractCodeIdentifiers(source: string): string[] {
+  const identifiers = new Set<string>();
+  const lines = source.split('\n');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Skip comments and empty lines
+    if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue;
+
+    // export default function/class Name
+    const expDefault = trimmed.match(/^export\s+default\s+(?:function|class)\s+(\w+)/);
+    if (expDefault) { identifiers.add(expDefault[1]); continue; }
+
+    // export function/class/const/let/var Name
+    const expNamed = trimmed.match(/^export\s+(?:async\s+)?(?:function|class|const|let|var)\s+(\w+)/);
+    if (expNamed) { identifiers.add(expNamed[1]); continue; }
+
+    // function Name( — top-level function declarations
+    const funcDecl = trimmed.match(/^(?:async\s+)?function\s+(\w+)\s*\(/);
+    if (funcDecl) { identifiers.add(funcDecl[1]); continue; }
+
+    // const/let/var Name = — top-level variable declarations (only at start of line)
+    const varDecl = trimmed.match(/^(?:const|let|var)\s+(\w+)\s*=/);
+    if (varDecl && varDecl[1].length > 2) { identifiers.add(varDecl[1]); continue; }
+
+    // class Name
+    const classDecl = trimmed.match(/^class\s+(\w+)/);
+    if (classDecl) { identifiers.add(classDecl[1]); continue; }
+
+    // Python: def name(
+    const pyDef = trimmed.match(/^def\s+(\w+)\s*\(/);
+    if (pyDef) { identifiers.add(pyDef[1]); continue; }
+
+    // Python: class Name:
+    const pyClass = trimmed.match(/^class\s+(\w+)\s*[:(]/);
+    if (pyClass) { identifiers.add(pyClass[1]); continue; }
+  }
+
+  // Filter out very common/generic names that would cause false positives
+  const GENERIC_NAMES = new Set([
+    'App', 'app', 'main', 'index', 'default', 'module', 'exports',
+    'render', 'init', 'setup', 'config', 'options', 'props', 'state',
+    'React', 'useState', 'useEffect', 'Component',
+  ]);
+
+  return Array.from(identifiers).filter(id => !GENERIC_NAMES.has(id));
+}
+
+/**
  * Create a GitHub PR with file changes using the Git Data API.
  *
  * Steps:
@@ -837,18 +890,18 @@ async function githubCreatePr(
     }
   }
 
-  // 4. For "update" actions, fetch original file sizes and detect destructive shrinkage
+  // 4. For "update" actions, fetch original file sizes AND content to detect destructive rewrites
   for (const change of changes) {
     if (change.action !== 'update' || !change.content) continue;
 
     try {
       const fileResponse = await fetch(`${apiBase}/contents/${encodeURIComponent(change.path)}?ref=${baseBranch}`, { headers });
       if (fileResponse.ok) {
-        const fileData = await fileResponse.json() as { size: number };
+        const fileData = await fileResponse.json() as { size: number; content?: string; encoding?: string };
         const originalSize = fileData.size;
         const newSize = change.content.length;
 
-        // If new content is <20% of original, block as destructive
+        // 4a. If new content is <20% of original, block as destructive
         if (originalSize > 100 && newSize < originalSize * 0.2) {
           throw new Error(
             `Destructive update blocked for "${change.path}": ` +
@@ -857,16 +910,59 @@ async function githubCreatePr(
           );
         }
 
-        // Warn on significant shrinkage (20-50% of original)
+        // 4b. Full-rewrite detection: check identifier survival for code files >50 lines
+        //     This catches the pattern where a bot regenerates a file from scratch at similar
+        //     size but loses all the original business logic (functions, exports, variables).
+        const isCodePath = /\.(js|jsx|ts|tsx|mjs|cjs|vue|svelte|py|rb|go|rs|java|c|cpp|h|cs|php|swift|kt|scala|css|scss|less|html|json)$/i.test(change.path);
+        if (isCodePath && fileData.content && fileData.encoding === 'base64') {
+          const originalContent = atob(fileData.content.replace(/\n/g, ''));
+          const originalLines = originalContent.split('\n');
+
+          // Only run rewrite detection on non-trivial files (>50 lines)
+          if (originalLines.length > 50) {
+            const originalIdentifiers = extractCodeIdentifiers(originalContent);
+            if (originalIdentifiers.length >= 5) {
+              const newContent = change.content;
+              const surviving = originalIdentifiers.filter(id => newContent.includes(id));
+              const survivalRate = surviving.length / originalIdentifiers.length;
+
+              // If fewer than 40% of original identifiers survive, this is a full rewrite
+              if (survivalRate < 0.4) {
+                const missing = originalIdentifiers.filter(id => !newContent.includes(id));
+                const missingPreview = missing.slice(0, 10).join(', ');
+                throw new Error(
+                  `Full-rewrite blocked for "${change.path}": ` +
+                  `only ${surviving.length}/${originalIdentifiers.length} original identifiers survive (${Math.round(survivalRate * 100)}%). ` +
+                  `Missing identifiers: ${missingPreview}${missing.length > 10 ? ` ... and ${missing.length - 10} more` : ''}. ` +
+                  `The file appears to have been regenerated from scratch, destroying existing business logic. ` +
+                  `Make SURGICAL edits that preserve existing functions, exports, and variables. ` +
+                  `If the file is too large to edit safely, split it into smaller modules first.`
+                );
+              }
+
+              // Warn if 40-60% survive (borderline rewrite)
+              if (survivalRate < 0.6) {
+                const missing = originalIdentifiers.filter(id => !newContent.includes(id));
+                warnings.push(
+                  `⚠️ "${change.path}": only ${Math.round(survivalRate * 100)}% of original identifiers survive. ` +
+                  `Missing: ${missing.slice(0, 5).join(', ')}. Verify no features were accidentally removed.`
+                );
+              }
+            }
+          }
+        }
+
+        // 4c. Warn on significant shrinkage (20-50% of original)
         if (originalSize > 200 && newSize < originalSize * 0.5) {
           warnings.push(`⚠️ "${change.path}": shrinks from ${originalSize}→${newSize} bytes (${Math.round(newSize / originalSize * 100)}% of original)`);
         }
       }
     } catch (fetchErr) {
-      if (fetchErr instanceof Error && fetchErr.message.startsWith('Destructive update blocked')) {
-        throw fetchErr;
-      }
-      if (fetchErr instanceof Error && fetchErr.message.startsWith('Rejecting update')) {
+      if (fetchErr instanceof Error && (
+        fetchErr.message.startsWith('Destructive update blocked') ||
+        fetchErr.message.startsWith('Full-rewrite blocked') ||
+        fetchErr.message.startsWith('Rejecting update')
+      )) {
         throw fetchErr;
       }
       console.log(`[github_create_pr] Could not fetch original "${change.path}" for size check: ${fetchErr}`);
