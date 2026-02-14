@@ -18,6 +18,8 @@ import {
   formatRoadmapStatus,
   findMatchingTasks,
   resetRoadmapTasks,
+  LARGE_FILE_THRESHOLD_LINES,
+  LARGE_FILE_THRESHOLD_KB,
   type OrchestraTask,
   type OrchestraHistory,
 } from './orchestra';
@@ -329,6 +331,126 @@ describe('buildRunPrompt', () => {
   it('includes ORCHESTRA_RESULT report format', () => {
     const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
     expect(prompt).toContain('ORCHESTRA_RESULT:');
+  });
+});
+
+// --- Large file health check constants ---
+
+describe('LARGE_FILE_THRESHOLD constants', () => {
+  it('exports line threshold', () => {
+    expect(LARGE_FILE_THRESHOLD_LINES).toBe(300);
+  });
+
+  it('exports KB threshold', () => {
+    expect(LARGE_FILE_THRESHOLD_KB).toBe(15);
+  });
+});
+
+// --- Repo health check in prompts ---
+
+describe('repo health check in buildRunPrompt', () => {
+  it('includes health check step', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('REPO HEALTH CHECK');
+    expect(prompt).toContain('Large File Detection');
+  });
+
+  it('references the line threshold', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_LINES} lines`);
+  });
+
+  it('references the KB threshold', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_KB}KB`);
+  });
+
+  it('instructs to STOP and split large files', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('STOP');
+    expect(prompt).toContain('FILE SPLITTING task');
+    expect(prompt).toContain('pure refactor');
+  });
+
+  it('instructs to defer original task when splitting', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('Original task deferred to next run');
+  });
+
+  it('exempts config and generated files', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('Config files, generated files, and lock files are exempt');
+  });
+
+  it('health check comes between Step 3 and Step 4', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    const step3Idx = prompt.indexOf('## Step 3: UNDERSTAND THE CODEBASE');
+    const healthIdx = prompt.indexOf('## Step 3.5: REPO HEALTH CHECK');
+    const step4Idx = prompt.indexOf('## Step 4: IMPLEMENT');
+    expect(step3Idx).toBeLessThan(healthIdx);
+    expect(healthIdx).toBeLessThan(step4Idx);
+  });
+});
+
+describe('repo health check in buildInitPrompt', () => {
+  it('includes large file flagging step', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('FLAG LARGE FILES');
+  });
+
+  it('references the line threshold', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_LINES} lines`);
+  });
+
+  it('instructs to add split tasks to roadmap', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('Split');
+    expect(prompt).toContain('Refactor');
+    expect(prompt).toContain('MUST depend on the split task');
+  });
+
+  it('large file step comes before analysis step', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    const flagIdx = prompt.indexOf('### Step 1.5: FLAG LARGE FILES');
+    const analyzeIdx = prompt.indexOf('### Step 2: ANALYZE THE PROJECT REQUEST');
+    expect(flagIdx).toBeLessThan(analyzeIdx);
+  });
+});
+
+describe('repo health check in buildRedoPrompt', () => {
+  it('includes health check step', () => {
+    const prompt = buildRedoPrompt({
+      repo: 'o/r',
+      modelAlias: 'deep',
+      previousTasks: [],
+      taskToRedo: 'fix auth',
+    });
+    expect(prompt).toContain('REPO HEALTH CHECK');
+  });
+
+  it('references the line threshold', () => {
+    const prompt = buildRedoPrompt({
+      repo: 'o/r',
+      modelAlias: 'deep',
+      previousTasks: [],
+      taskToRedo: 'fix auth',
+    });
+    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_LINES} lines`);
+  });
+
+  it('health check comes between Step 2 and Step 3', () => {
+    const prompt = buildRedoPrompt({
+      repo: 'o/r',
+      modelAlias: 'deep',
+      previousTasks: [],
+      taskToRedo: 'fix auth',
+    });
+    const step2Idx = prompt.indexOf('## Step 2: UNDERSTAND CURRENT STATE');
+    const healthIdx = prompt.indexOf('## Step 2.5: REPO HEALTH CHECK');
+    const step3Idx = prompt.indexOf('## Step 3: RE-IMPLEMENT');
+    expect(step2Idx).toBeLessThan(healthIdx);
+    expect(healthIdx).toBeLessThan(step3Idx);
   });
 });
 

@@ -39,6 +39,11 @@ export interface OrchestraHistory {
 
 const MAX_HISTORY_TASKS = 30;
 
+// Repo health check thresholds — files above these limits should be split
+// before the bot attempts modifications
+export const LARGE_FILE_THRESHOLD_LINES = 300;
+export const LARGE_FILE_THRESHOLD_KB = 15;
+
 // Common file names the model should look for as existing roadmaps
 const ROADMAP_FILE_CANDIDATES = [
   'ROADMAP.md',
@@ -86,6 +91,12 @@ You are creating a structured project roadmap. Follow this workflow precisely.
   - Test patterns, CI configuration
   - Package dependencies
 
+### Step 1.5: FLAG LARGE FILES
+- While exploring the repo, note any SOURCE files that exceed ~${LARGE_FILE_THRESHOLD_LINES} lines or ~${LARGE_FILE_THRESHOLD_KB}KB
+- Only check source code files (.ts, .tsx, .js, .jsx, .py, .vue, .svelte, etc.) — skip config, generated, and lock files
+- If any large files are found, they MUST be split into smaller modules before other tasks modify them
+- Record which files are large and what they contain (e.g., "src/App.tsx — 800 lines, contains routing + all page components")
+
 ### Step 2: ANALYZE THE PROJECT REQUEST
 - Read the user's project description carefully
 - Break it down into concrete, implementable phases
@@ -127,6 +138,8 @@ Key rules for the roadmap:
 - Include file hints so the next run knows where to work
 - Include dependency info so tasks execute in order
 - 3-6 phases is typical, each with 2-5 tasks
+- **CRITICAL — Large file splitting:** If Step 1.5 found any large files (>${LARGE_FILE_THRESHOLD_LINES} lines), add a "Refactor: Split {filename} into modules" task EARLY in the roadmap (Phase 1 or as the first task in the phase that would modify the file). All tasks that modify that file MUST depend on the split task. Example:
+  \`- [ ] **Refactor**: Split src/App.tsx into route-level modules (~800 lines → ~6 files)\`
 
 ### Step 4: CREATE WORK_LOG.md
 Write a \`WORK_LOG.md\` file:
@@ -229,6 +242,33 @@ ${taskSelection}
   - Related code and patterns
   - Existing conventions (naming, imports, types)
   - Test patterns if tests are expected
+
+## Step 3.5: REPO HEALTH CHECK — Large File Detection
+Before implementing, check if any source file you need to modify is too large for safe editing.
+
+**How to check:**
+1. When you read files in Step 3, count the approximate line count
+2. A file is "too large" if it has more than ~${LARGE_FILE_THRESHOLD_LINES} lines or ~${LARGE_FILE_THRESHOLD_KB}KB of source code
+3. Config files, generated files, and lock files are exempt — only check source code (.ts, .tsx, .js, .jsx, .py, .vue, .svelte, etc.)
+
+**If you find a large file that your task needs to modify:**
+1. STOP — do NOT attempt the original task on the large file
+2. Instead, implement a FILE SPLITTING task:
+   - Split the large file into smaller, focused modules (each under ~${LARGE_FILE_THRESHOLD_LINES} lines)
+   - Preserve all existing functionality — this is a pure refactor
+   - Update all imports across the codebase
+   - Re-export from the original path if needed for backward compatibility
+3. Update ROADMAP.md:
+   - Add a new task: \`- [x] **Refactor**: Split {filename} into modules (~N lines → M files)\`
+   - Insert it BEFORE the original task you were going to do
+   - Keep the original task as \`- [ ]\` (uncompleted) for the next run
+4. In the PR title, prefix with "refactor:" and explain the split
+5. In the ORCHESTRA_RESULT summary, note: "Auto-detected large file ({filename}, ~N lines). Split into modules. Original task deferred to next run."
+
+**If all target files are reasonably sized (<${LARGE_FILE_THRESHOLD_LINES} lines):**
+- Proceed normally to Step 4
+
+This health check prevents failed or broken implementations caused by editing files too large for the AI context window.
 
 ## Step 4: IMPLEMENT
 - Make the code changes using either:
@@ -863,6 +903,11 @@ You are RE-DOING a task that was previously attempted but needs correction.
   - The current state of the code
   - What is wrong or missing
   - Test failures if any
+
+## Step 2.5: REPO HEALTH CHECK
+Before re-implementing, check if the target file(s) are too large (>${LARGE_FILE_THRESHOLD_LINES} lines / ~${LARGE_FILE_THRESHOLD_KB}KB of source code).
+If so, split the large file into smaller modules FIRST (pure refactor, no behavior change), then proceed with the redo on the now-smaller files.
+Update the roadmap to reflect the split as a completed prerequisite task.
 
 ## Step 3: RE-IMPLEMENT
 - Fix or rewrite the implementation
