@@ -278,6 +278,15 @@ This health check prevents failed or broken implementations caused by editing fi
 - Include proper types (no \`any\`)
 - Write tests if the repo has a test pattern
 
+### CRITICAL — Surgical Edits Only
+**NEVER regenerate or rewrite an entire file from scratch.** This is the most common failure mode.
+- Make TARGETED, SURGICAL changes — add/modify/remove only the specific lines needed for your task
+- ALL existing exports, functions, classes, and variables MUST be preserved unless the task explicitly requires removing them
+- If a file has \`exportCSV\`, \`btcPrice\`, \`businessClass\`, etc. — those MUST still exist after your changes
+- Before writing file content, mentally verify: "Does my new version still contain every function and export from the original?"
+- If you cannot make targeted edits because the file is too complex or large, STOP and do a file-splitting refactor instead (see Step 3.5)
+- The \`github_create_pr\` tool will BLOCK updates that lose more than 60% of original identifiers — so regenerating from scratch will fail
+
 ## Step 5: UPDATE ROADMAP & WORK LOG
 In the SAME PR, also include:
 
@@ -312,6 +321,7 @@ summary: {1-2 sentence summary including which roadmap task was completed}
 - Use the model alias "${modelAlias}" in branch names for traceability
 - Do NOT skip ahead — respect task dependencies in the roadmap
 - Do NOT modify unrelated files
+- **NEVER regenerate entire files** — make surgical, targeted edits only. Preserve all existing functions, exports, and business logic.
 ${historyContext}`;
 }
 
@@ -915,6 +925,14 @@ Update the roadmap to reflect the split as a completed prerequisite task.
 - Include proper types (no \`any\`)
 - Write/fix tests if the repo has a test pattern
 
+### CRITICAL — Surgical Edits Only
+**NEVER regenerate or rewrite an entire file from scratch.** This is the most common failure mode.
+- Make TARGETED, SURGICAL changes — add/modify/remove only the specific lines needed
+- ALL existing exports, functions, classes, and variables MUST be preserved unless the task explicitly requires removing them
+- Before writing file content, mentally verify: "Does my new version still contain every function and export from the original?"
+- If you cannot make targeted edits, STOP and do a file-splitting refactor first
+- The \`github_create_pr\` tool will BLOCK updates that lose more than 60% of original identifiers
+
 ## Step 4: UPDATE ROADMAP & WORK LOG
 In the SAME PR:
 
@@ -945,5 +963,6 @@ summary: {what was wrong and how it was fixed}
 - Focus on FIXING the previous attempt, not starting from zero (unless necessary)
 - ALWAYS update ROADMAP.md and WORK_LOG.md in the same PR
 - Do NOT modify unrelated files
+- **NEVER regenerate entire files** — make surgical, targeted edits only. Preserve all existing functions, exports, and business logic.
 ${historyContext}`;
 }

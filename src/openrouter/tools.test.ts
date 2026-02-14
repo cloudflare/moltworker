@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, geocodeCity, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache, type SandboxLike, type SandboxProcess } from './tools';
+import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, geocodeCity, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache, extractCodeIdentifiers, type SandboxLike, type SandboxProcess } from './tools';
 
 describe('url_metadata tool', () => {
   beforeEach(() => {
@@ -2655,6 +2655,315 @@ describe('github_create_pr tool', () => {
 
     expect(result.content).toContain('Rejecting update');
     expect(result.content).toContain('main.jsx');
+  });
+});
+
+describe('extractCodeIdentifiers', () => {
+  it('should extract JS/TS function and variable declarations', () => {
+    const source = `
+import React from 'react';
+
+export function calculateYield(amount, rate) {
+  return amount * rate;
+}
+
+export const exportCSV = () => { /* ... */ };
+
+const btcPrice = 45000;
+let darkTheme = true;
+
+function internalHelper() {}
+
+class FinancialEngine {
+  run() {}
+}
+
+export default function App() {
+  return <div />;
+}
+`.trim();
+
+    const ids = extractCodeIdentifiers(source);
+    expect(ids).toContain('calculateYield');
+    expect(ids).toContain('exportCSV');
+    expect(ids).toContain('btcPrice');
+    expect(ids).toContain('darkTheme');
+    expect(ids).toContain('internalHelper');
+    expect(ids).toContain('FinancialEngine');
+    // 'App' is generic and filtered out
+    expect(ids).not.toContain('App');
+  });
+
+  it('should extract Python definitions', () => {
+    const source = `
+def calculate_yield(amount, rate):
+    return amount * rate
+
+class FinancialEngine:
+    pass
+
+def export_csv():
+    pass
+`.trim();
+
+    const ids = extractCodeIdentifiers(source);
+    expect(ids).toContain('calculate_yield');
+    expect(ids).toContain('FinancialEngine');
+    expect(ids).toContain('export_csv');
+  });
+
+  it('should filter out generic names', () => {
+    const source = `
+export default function App() {}
+const state = {};
+function render() {}
+const props = {};
+`.trim();
+
+    const ids = extractCodeIdentifiers(source);
+    expect(ids).not.toContain('App');
+    expect(ids).not.toContain('state');
+    expect(ids).not.toContain('render');
+    expect(ids).not.toContain('props');
+  });
+
+  it('should skip comments', () => {
+    const source = `
+// function fakeDecl() {}
+/* const notReal = true; */
+* function alsoFake() {}
+export const realOne = 42;
+`.trim();
+
+    const ids = extractCodeIdentifiers(source);
+    expect(ids).not.toContain('fakeDecl');
+    expect(ids).not.toContain('notReal');
+    expect(ids).not.toContain('alsoFake');
+    expect(ids).toContain('realOne');
+  });
+});
+
+describe('full-rewrite detection in github_create_pr', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should block updates that lose most original identifiers (full rewrite)', async () => {
+    // Simulate a 100-line file with many business identifiers
+    const originalContent = [
+      'import React from "react";',
+      '',
+      'export function calculateYield(amount, rate) {',
+      '  return amount * rate;',
+      '}',
+      '',
+      'export const exportCSV = (data) => {',
+      '  // CSV export logic',
+      '  return data.map(r => r.join(",")).join("\\n");',
+      '}',
+      '',
+      'const btcPrice = 45000;',
+      'const businessClass = { fare: 2500 };',
+      'const travelCosts = { hotel: 200, meals: 50 };',
+      '',
+      'function formatCurrency(val) {',
+      '  return "$" + val.toFixed(2);',
+      '}',
+      '',
+      'export function getDarkTheme() {',
+      '  return { bg: "#1a1a1a", text: "#fff" };',
+      '}',
+      '',
+    ];
+    // Pad to >50 lines to trigger rewrite detection
+    for (let i = 0; i < 40; i++) {
+      originalContent.push(`const placeholder${i} = ${i};`);
+    }
+    const originalText = originalContent.join('\n');
+    const originalBase64 = btoa(originalText);
+
+    // New content: a full rewrite at SIMILAR SIZE that loses all business logic
+    // This is the exact pattern: bot regenerates file from scratch, same size, but all identifiers gone
+    const newContentLines = [
+      'import React, { useState } from "react";',
+      'import "./App.css";',
+      '',
+      'function MobileLayout({ children }) {',
+      '  return <div className="mobile-container">{children}</div>;',
+      '}',
+      '',
+      'function NavigationBar() {',
+      '  const [menuOpen, setMenuOpen] = useState(false);',
+      '  return (',
+      '    <nav className="responsive-nav">',
+      '      <button onClick={() => setMenuOpen(!menuOpen)}>Menu</button>',
+      '      {menuOpen && <ul><li>Home</li><li>About</li></ul>}',
+      '    </nav>',
+      '  );',
+      '}',
+      '',
+      'function ContentSection() {',
+      '  return (',
+      '    <section className="content">',
+      '      <h1>Welcome</h1>',
+      '      <p>This is the responsive layout.</p>',
+      '    </section>',
+      '  );',
+      '}',
+      '',
+      'function FooterSection() {',
+      '  return <footer className="footer"><p>Footer</p></footer>;',
+      '}',
+      '',
+    ];
+    // Pad to match original size so shrinkage guard doesn't trigger
+    for (let i = 0; i < 40; i++) {
+      newContentLines.push(`const styleVar${i} = "${i}px";`);
+    }
+    newContentLines.push('', 'export default function App() {', '  return (', '    <MobileLayout>', '      <NavigationBar />', '      <ContentSection />', '      <FooterSection />', '    </MobileLayout>', '  );', '}');
+    const newContent = newContentLines.join('\n');
+
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            size: originalText.length,
+            content: originalBase64,
+            encoding: 'base64',
+          }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'src/App.jsx', content: newContent, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_pr_rewrite',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Improve mobile responsiveness',
+          branch: 'test',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('Full-rewrite blocked');
+    expect(result.content).toContain('App.jsx');
+    // Should mention missing identifiers
+    expect(result.content).toMatch(/calculateYield|exportCSV|btcPrice|businessClass/);
+  });
+
+  it('should allow updates that preserve most original identifiers (targeted edit)', async () => {
+    // Original file with identifiers
+    const originalContent = [
+      'import React from "react";',
+      '',
+      'export function calculateYield(amount, rate) {',
+      '  return amount * rate;',
+      '}',
+      '',
+      'export const exportCSV = (data) => {',
+      '  return data.join(",");',
+      '}',
+      '',
+      'const btcPrice = 45000;',
+      'const businessClass = { fare: 2500 };',
+      '',
+      'function formatCurrency(val) {',
+      '  return "$" + val.toFixed(2);',
+      '}',
+      '',
+      'export function getDarkTheme() {',
+      '  return { bg: "#1a1a1a" };',
+      '}',
+      '',
+    ];
+    for (let i = 0; i < 40; i++) {
+      originalContent.push(`const item${i} = ${i};`);
+    }
+    const originalText = originalContent.join('\n');
+    const originalBase64 = btoa(originalText);
+
+    // New content: targeted edit — adds mobile responsiveness but keeps all identifiers
+    const newContent = originalText.replace(
+      'export function getDarkTheme() {\n  return { bg: "#1a1a1a" };\n}',
+      'export function getDarkTheme() {\n  return { bg: "#1a1a1a", mobileBreakpoint: "768px" };\n}'
+    ) + '\n\nexport const mobileStyles = { padding: "8px" };\n';
+
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            size: originalText.length,
+            content: originalBase64,
+            encoding: 'base64',
+          }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/blobs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/trees')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/commits')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/refs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/test' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/pulls')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/1', number: 1 }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'src/App.jsx', content: newContent, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_pr_surgical',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Add mobile styles',
+          branch: 'test',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    // Should succeed — not blocked
+    expect(result.content).toContain('Pull Request created successfully');
+    expect(result.content).not.toContain('Full-rewrite blocked');
   });
 });
 
