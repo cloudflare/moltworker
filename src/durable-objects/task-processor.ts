@@ -741,10 +741,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Resume from checkpoint
         conversationMessages = checkpoint.messages;
         task.toolsUsed = checkpoint.toolsUsed;
-        task.iterations = checkpoint.iterations;
+        // Reset iteration counter to 0 — give a fresh budget of maxIterations.
+        // The checkpoint preserves conversation state and tool results, so work
+        // isn't lost. Without this reset, resumed tasks immediately re-hit the
+        // iteration limit because checkpoint.iterations is close to maxIterations.
+        task.iterations = 0;
         // Restore phase from checkpoint, or default to 'work' (plan is already done)
         task.phase = checkpoint.phase || 'work';
-        task.phaseStartIteration = checkpoint.iterations;
+        task.phaseStartIteration = 0;
         resumedFromCheckpoint = true;
         await this.doState.storage.put('task', task);
 
@@ -1216,10 +1220,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // No more tool calls — increment stall counter
         // This catches models that spin without using tools or producing final answers
         consecutiveNoToolIterations++;
-        if (consecutiveNoToolIterations >= MAX_STALL_ITERATIONS && task.toolsUsed.length === 0) {
-          // Model has been running for N iterations without ever calling a tool
-          // This means it's generating text endlessly (common with weak models)
-          console.log(`[TaskProcessor] Stall detected: ${consecutiveNoToolIterations} iterations with no tool calls`);
+        // Stall if: (a) model never called tools, or (b) model stopped calling tools
+        // for MAX_STALL_ITERATIONS consecutive iterations (even if it used tools earlier).
+        // Higher threshold when tools were previously used — model may be composing a response.
+        const stallThreshold = task.toolsUsed.length === 0 ? MAX_STALL_ITERATIONS : MAX_STALL_ITERATIONS * 2;
+        if (consecutiveNoToolIterations >= stallThreshold) {
+          // Model is generating text endlessly without using tools
+          console.log(`[TaskProcessor] Stall detected: ${consecutiveNoToolIterations} consecutive iterations with no tool calls (${task.toolsUsed.length} tools used total)`);
           const content = choice.message.content || '';
           if (content.trim()) {
             // Use whatever content we have as the final response
@@ -1462,7 +1469,22 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         return;
       }
 
-      // Hit iteration limit
+      // Hit iteration limit — save checkpoint so resume can continue from here
+      if (this.r2) {
+        await this.saveCheckpoint(
+          this.r2,
+          request.userId,
+          request.taskId,
+          conversationMessages,
+          task.toolsUsed,
+          task.iterations,
+          request.prompt,
+          'latest',
+          false, // NOT completed — allow resume to pick this up
+          task.phase
+        );
+      }
+
       task.status = 'completed';
       task.result = 'Task hit iteration limit (100). Last response may be incomplete.';
       await this.doState.storage.put('task', task);
@@ -1474,10 +1496,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
       }
 
-      await this.sendTelegramMessage(
+      await this.sendTelegramMessageWithButtons(
         request.telegramToken,
         request.chatId,
-        '⚠️ Task reached iteration limit (100). Send "continue" to keep going.'
+        `⚠️ Task reached iteration limit (${maxIterations}). ${task.toolsUsed.length} tools used across ${task.iterations} iterations.\n\n💡 Progress saved. Tap Resume to continue from checkpoint.`,
+        [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
       );
 
     } catch (error) {

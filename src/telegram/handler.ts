@@ -17,6 +17,8 @@ import {
   loadOrchestraHistory,
   storeOrchestraTask,
   formatOrchestraHistory,
+  fetchRoadmapFromGitHub,
+  formatRoadmapStatus,
   type OrchestraTask,
 } from '../orchestra/orchestra';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
@@ -646,6 +648,14 @@ export class TelegramHandler {
       return;
     }
 
+    // Detect "continue" keyword — route through resume path instead of regular chat.
+    // When a task hits the iteration limit, it tells the user to send "continue".
+    // Without this, "continue" creates a brand-new task that immediately re-hits the limit.
+    if (text.trim().toLowerCase() === 'continue' && this.taskProcessor) {
+      await this.handleContinueResume(message);
+      return;
+    }
+
     // Regular text message - chat with AI
     if (text) {
       await this.handleChat(message, text);
@@ -1141,6 +1151,7 @@ export class TelegramHandler {
    *   /orch run [repo] [task]         — Execute specific task
    *   /orch next [task]               — Execute next task (uses locked repo)
    *   /orch history                   — Show past tasks
+   *   /orch roadmap [repo]            — Display roadmap status
    *   /orch                           — Show help
    */
   private async handleOrchestraCommand(
@@ -1155,6 +1166,32 @@ export class TelegramHandler {
     if (sub === 'history') {
       const history = await loadOrchestraHistory(this.r2Bucket, userId);
       await this.bot.sendMessage(chatId, formatOrchestraHistory(history));
+      return;
+    }
+
+    // /orch roadmap [owner/repo] — fetch and display ROADMAP.md status
+    if (sub === 'roadmap' || sub === 'status') {
+      const maybeRepo = args[1];
+      const hasExplicitRepo = maybeRepo && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(maybeRepo);
+      const repo = hasExplicitRepo ? maybeRepo : await this.storage.getOrchestraRepo(userId);
+      if (!repo) {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ No repo specified.\n\nUsage: /orch roadmap owner/repo\nOr: /orch set owner/repo first'
+        );
+        return;
+      }
+      try {
+        const [owner, repoName] = repo.split('/');
+        const { content, path } = await fetchRoadmapFromGitHub(owner, repoName, this.githubToken);
+        const formatted = formatRoadmapStatus(content, repo, path);
+        await this.bot.sendMessage(chatId, formatted);
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ ${error instanceof Error ? error.message : 'Failed to fetch roadmap'}`
+        );
+      }
       return;
     }
 
@@ -1273,7 +1310,8 @@ export class TelegramHandler {
       '/orch next [task] — Run next task (locked repo)\n' +
       '/orch set owner/repo — Lock default repo\n' +
       '/orch unset — Clear locked repo\n' +
-      '/orch history — View past tasks\n\n' +
+      '/orch history — View past tasks\n' +
+      '/orch roadmap — View roadmap status\n\n' +
       '━━━ Workflow ━━━\n' +
       '1. /orch set PetrAnto/myapp\n' +
       '2. /orch init Build a user auth system\n' +
@@ -1650,6 +1688,62 @@ export class TelegramHandler {
     } catch (error) {
       await this.bot.sendMessage(chatId, `Vision analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  /**
+   * Handle "continue" keyword by resuming from checkpoint.
+   * Mirrors the resume button callback logic but triggered by text message.
+   */
+  private async handleContinueResume(message: TelegramMessage): Promise<void> {
+    const chatId = message.chat.id;
+    const userId = String(message.from?.id || chatId);
+
+    if (!this.taskProcessor) return;
+
+    await this.bot.sendChatAction(chatId, 'typing');
+
+    // Get the last user message from storage (the original task, not "continue")
+    const history = await this.storage.getConversation(userId, 1);
+    const lastUserMessage = history.find(m => m.role === 'user');
+
+    if (!lastUserMessage) {
+      await this.bot.sendMessage(chatId, 'No previous task found to continue.');
+      return;
+    }
+
+    // Build minimal messages — checkpoint will be loaded by the TaskProcessor
+    const systemPrompt = await this.getSystemPrompt();
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: lastUserMessage.content },
+    ];
+
+    const modelAlias = await this.storage.getUserModel(userId);
+    const autoResume = await this.storage.getUserAutoResume(userId);
+    const taskId = `${userId}-${Date.now()}`;
+    const taskRequest: TaskRequest = {
+      taskId,
+      chatId,
+      userId,
+      modelAlias,
+      messages,
+      telegramToken: this.telegramToken,
+      openrouterKey: this.openrouterKey,
+      githubToken: this.githubToken,
+      dashscopeKey: this.dashscopeKey,
+      moonshotKey: this.moonshotKey,
+      deepseekKey: this.deepseekKey,
+      autoResume,
+    };
+
+    const doId = this.taskProcessor.idFromName(userId);
+    const doStub = this.taskProcessor.get(doId);
+    await doStub.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(taskRequest),
+    }));
+
+    // Don't add "continue" to conversation history — it's a control command, not content
   }
 
   /**
@@ -2831,6 +2925,7 @@ Step 4: Repeat
 /orch next <specific task> — Execute specific task
 /orch run owner/repo — Run with explicit repo
 /orch history — View past tasks
+/orch roadmap — View roadmap status
 /orch unset — Clear locked repo
 
 ━━━ What gets created ━━━
@@ -2906,6 +3001,7 @@ The bot calls these automatically when relevant:
 /orch next — Execute next roadmap task
 /orch next <task> — Execute specific task
 /orch history — View past tasks
+/orch roadmap — View roadmap status
 
 ━━━ Special Prefixes ━━━
 think:high <msg> — Deep reasoning (also: low, medium, off)
