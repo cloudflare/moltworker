@@ -17,6 +17,8 @@ import {
   loadOrchestraHistory,
   storeOrchestraTask,
   formatOrchestraHistory,
+  fetchRoadmapFromGitHub,
+  formatRoadmapStatus,
   type OrchestraTask,
 } from '../orchestra/orchestra';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
@@ -1149,6 +1151,7 @@ export class TelegramHandler {
    *   /orch run [repo] [task]         — Execute specific task
    *   /orch next [task]               — Execute next task (uses locked repo)
    *   /orch history                   — Show past tasks
+   *   /orch roadmap [repo]            — Display roadmap status
    *   /orch                           — Show help
    */
   private async handleOrchestraCommand(
@@ -1163,6 +1166,32 @@ export class TelegramHandler {
     if (sub === 'history') {
       const history = await loadOrchestraHistory(this.r2Bucket, userId);
       await this.bot.sendMessage(chatId, formatOrchestraHistory(history));
+      return;
+    }
+
+    // /orch roadmap [owner/repo] — fetch and display ROADMAP.md status
+    if (sub === 'roadmap' || sub === 'status') {
+      const maybeRepo = args[1];
+      const hasExplicitRepo = maybeRepo && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(maybeRepo);
+      const repo = hasExplicitRepo ? maybeRepo : await this.storage.getOrchestraRepo(userId);
+      if (!repo) {
+        await this.bot.sendMessage(
+          chatId,
+          '❌ No repo specified.\n\nUsage: /orch roadmap owner/repo\nOr: /orch set owner/repo first'
+        );
+        return;
+      }
+      try {
+        const [owner, repoName] = repo.split('/');
+        const { content, path } = await fetchRoadmapFromGitHub(owner, repoName, this.githubToken);
+        const formatted = formatRoadmapStatus(content, repo, path);
+        await this.bot.sendMessage(chatId, formatted);
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ ${error instanceof Error ? error.message : 'Failed to fetch roadmap'}`
+        );
+      }
       return;
     }
 
@@ -1281,7 +1310,8 @@ export class TelegramHandler {
       '/orch next [task] — Run next task (locked repo)\n' +
       '/orch set owner/repo — Lock default repo\n' +
       '/orch unset — Clear locked repo\n' +
-      '/orch history — View past tasks\n\n' +
+      '/orch history — View past tasks\n' +
+      '/orch roadmap — View roadmap status\n\n' +
       '━━━ Workflow ━━━\n' +
       '1. /orch set PetrAnto/myapp\n' +
       '2. /orch init Build a user auth system\n' +
@@ -2895,6 +2925,7 @@ Step 4: Repeat
 /orch next <specific task> — Execute specific task
 /orch run owner/repo — Run with explicit repo
 /orch history — View past tasks
+/orch roadmap — View roadmap status
 /orch unset — Clear locked repo
 
 ━━━ What gets created ━━━
@@ -2970,6 +3001,7 @@ The bot calls these automatically when relevant:
 /orch next — Execute next roadmap task
 /orch next <task> — Execute specific task
 /orch history — View past tasks
+/orch roadmap — View roadmap status
 
 ━━━ Special Prefixes ━━━
 think:high <msg> — Deep reasoning (also: low, medium, off)

@@ -484,3 +484,122 @@ export function formatOrchestraHistory(history: OrchestraHistory | null): string
 
   return lines.join('\n\n');
 }
+
+// ============================================================
+// Roadmap Status Display
+// ============================================================
+
+/**
+ * Fetch the roadmap file from a GitHub repo.
+ * Tries ROADMAP_FILE_CANDIDATES in order and returns the first found.
+ */
+export async function fetchRoadmapFromGitHub(
+  owner: string,
+  repo: string,
+  githubToken?: string
+): Promise<{ content: string; path: string }> {
+  const headers: Record<string, string> = {
+    'User-Agent': 'MoltworkerBot/1.0',
+    'Accept': 'application/vnd.github.v3+json',
+  };
+  if (githubToken) {
+    headers['Authorization'] = `Bearer ${githubToken}`;
+  }
+
+  for (const candidate of ROADMAP_FILE_CANDIDATES) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${candidate}`;
+    const response = await fetch(url, { headers });
+    if (!response.ok) continue;
+
+    const data = await response.json() as { content?: string; message?: string };
+    if (!data.content) continue;
+
+    const content = atob(data.content.replace(/\n/g, ''));
+    return { content, path: candidate };
+  }
+
+  throw new Error('No roadmap file found. Run `/orch init` to create one.');
+}
+
+/** Parsed phase from a roadmap */
+interface RoadmapPhase {
+  name: string;
+  tasks: { title: string; done: boolean }[];
+}
+
+/**
+ * Parse a ROADMAP.md into phases and tasks.
+ * Looks for `### Phase N: ...` headers and `- [x]`/`- [ ]` task lines.
+ */
+export function parseRoadmapPhases(content: string): RoadmapPhase[] {
+  const phases: RoadmapPhase[] = [];
+  let current: RoadmapPhase | null = null;
+
+  for (const line of content.split('\n')) {
+    // Match phase headers: "### Phase 1: Setup" or "### Phase 1 — Setup"
+    const phaseMatch = line.match(/^###\s+(?:Phase\s+\d+[:.—-]\s*)?(.+)/i);
+    if (phaseMatch) {
+      current = { name: phaseMatch[1].trim(), tasks: [] };
+      phases.push(current);
+      continue;
+    }
+
+    // Match task lines: "- [x] **Task 1.1**: ..." or "- [ ] Task title"
+    const taskMatch = line.match(/^[-*]\s+\[([ xX])\]\s+(.+)/);
+    if (taskMatch && current) {
+      const done = taskMatch[1].toLowerCase() === 'x';
+      // Strip bold task prefix like "**Task 1.1**: " or "**Title**:"
+      const title = taskMatch[2]
+        .replace(/^\*\*(?:Task\s+[\d.]+)?\*\*:?\s*/, '')
+        .trim();
+      current.tasks.push({ title, done });
+    }
+  }
+
+  return phases;
+}
+
+/**
+ * Format roadmap content into a concise status display for Telegram.
+ * Shows per-phase progress with task checkmarks.
+ */
+export function formatRoadmapStatus(content: string, repo: string, filePath: string): string {
+  const phases = parseRoadmapPhases(content);
+
+  if (phases.length === 0) {
+    // No structured phases found — show raw content (truncated)
+    const preview = content.length > 3000 ? content.slice(0, 3000) + '\n\n[Truncated]' : content;
+    return `📋 Roadmap — ${repo}\n📄 ${filePath}\n\n${preview}`;
+  }
+
+  const lines: string[] = [`📋 Roadmap Status — ${repo}`];
+  lines.push(`📄 ${filePath}\n`);
+
+  let totalDone = 0;
+  let totalTasks = 0;
+
+  for (const phase of phases) {
+    const done = phase.tasks.filter(t => t.done).length;
+    const total = phase.tasks.length;
+    totalDone += done;
+    totalTasks += total;
+
+    const phaseDone = total > 0 && done === total;
+    const phaseIcon = phaseDone ? '✅' : done > 0 ? '🔨' : '⏳';
+    lines.push(`${phaseIcon} ${phase.name} (${done}/${total})`);
+
+    for (const task of phase.tasks) {
+      lines.push(`  ${task.done ? '✅' : '⬜'} ${task.title}`);
+    }
+    lines.push('');
+  }
+
+  // Overall progress bar
+  const pct = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+  const filled = Math.round(pct / 10);
+  const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+  lines.push(`━━━ Overall: ${totalDone}/${totalTasks} tasks (${pct}%)`);
+  lines.push(`[${bar}]`);
+
+  return lines.join('\n');
+}
