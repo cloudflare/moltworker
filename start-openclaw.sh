@@ -218,7 +218,36 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
     }
 }
-
+// Ollama configuration
+if (process.env.OLLAMA_BASE_URL && process.env.OLLAMA_MODEL) {
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    
+    const headers = {};
+    if (process.env.OLLAMA_CLIENT_ID && process.env.OLLAMA_CLIENT_SECRET) {
+        headers['CF-Access-Client-Id'] = process.env.OLLAMA_CLIENT_ID;
+        headers['CF-Access-Client-Secret'] = process.env.OLLAMA_CLIENT_SECRET;
+    }
+    
+    config.models.providers['ollama-local'] = {
+        baseUrl: process.env.OLLAMA_BASE_URL,
+        api: 'openai-responses',
+        headers: headers,
+        models: [{
+            id: process.env.OLLAMA_MODEL,
+            name: process.env.OLLAMA_MODEL,
+            contextWindow: 8192,
+            maxTokens: 4096,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+        }]
+    };
+    
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: 'ollama-local/' + process.env.OLLAMA_MODEL };
+    
+    console.log('Ollama configured: ' + process.env.OLLAMA_BASE_URL + ' model=' + process.env.OLLAMA_MODEL);
+}
 // Telegram configuration
 // Overwrite entire channel object to drop stale keys from old R2 backups
 // that would fail OpenClaw's strict config validation (see #47)
