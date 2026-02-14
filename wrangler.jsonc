@@ -67,6 +67,35 @@
   "browser": {
     "binding": "BROWSER",
   },
+
+  // Bind secrets as environment variables for the sandbox container
+  "unsafe": {
+    "bindings": [
+      { "name": "ANTHROPIC_API_KEY", "type": "secret_text" },
+      { "name": "OPENAI_API_KEY", "type": "secret_text" },
+      { "name": "CLOUDFLARE_AI_GATEWAY_API_KEY", "type": "secret_text" },
+      { "name": "CF_AI_GATEWAY_ACCOUNT_ID", "type": "secret_text" },
+      { "name": "CF_AI_GATEWAY_GATEWAY_ID", "type": "secret_text" },
+      { "name": "CF_AI_GATEWAY_MODEL", "type": "secret_text" },
+      { "name": "OLLAMA_BASE_URL", "type": "secret_text" },
+      { "name": "OLLAMA_MODEL", "type": "secret_text" },
+      { "name": "OLLAMA_CLIENT_ID", "type": "secret_text" },
+      { "name": "OLLAMA_CLIENT_SECRET", "type": "secret_text" },
+      { "name": "OPENCLAW_GATEWAY_TOKEN", "type": "secret_text" },
+      { "name": "CF_ACCESS_TEAM_DOMAIN", "type": "secret_text" },
+      { "name": "CF_ACCESS_AUD", "type": "secret_text" },
+      { "name": "R2_ACCESS_KEY_ID", "type": "secret_text" },
+      { "name": "R2_SECRET_ACCESS_KEY", "type": "secret_text" },
+      { "name": "CF_ACCOUNT_ID", "type": "secret_text" },
+      { "name": "TELEGRAM_BOT_TOKEN", "type": "secret_text" },
+      { "name": "DISCORD_BOT_TOKEN", "type": "secret_text" },
+      { "name": "SLACK_BOT_TOKEN", "type": "secret_text" },
+      { "name": "SLACK_APP_TOKEN", "type": "secret_text" },
+      { "name": "CDP_SECRET", "type": "secret_text" },
+      { "name": "WORKER_URL", "type": "secret_text" }
+    ]
+  },
+
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
   //
