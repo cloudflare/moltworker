@@ -8,7 +8,7 @@ import {
   syncToR2,
   runCommandWithCleanup,
 } from '../gateway';
-import { R2_MOUNT_PATH } from '../config';
+import { R2_MOUNT_PATH, MOLTBOT_PORT } from '../config';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -29,14 +29,37 @@ const adminApi = new Hono<AppEnv>();
 // Middleware: Verify Cloudflare Access JWT for all admin routes
 adminApi.use('*', createAccessMiddleware({ type: 'json' }));
 
+// Quick port check timeout - fail fast instead of blocking for 3 minutes
+const QUICK_CHECK_MS = 5000;
+
 // GET /api/admin/devices - List pending and paired devices
 adminApi.get('/devices', async (c) => {
   const sandbox = c.get('sandbox');
 
-  try {
-    // Ensure moltbot is running first
-    await ensureMoltbotGateway(sandbox, c.env);
+  // Quick check: is the gateway already reachable? (5s instead of 3min)
+  // The cron job (every minute) handles starting the gateway.
+  const existingProcess = await findExistingMoltbotProcess(sandbox);
+  if (!existingProcess) {
+    return c.json({
+      pending: [],
+      paired: [],
+      gatewayStatus: 'not_running',
+      error: 'Gateway is not running. It will start automatically within a minute.',
+    });
+  }
 
+  try {
+    await existingProcess.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: QUICK_CHECK_MS });
+  } catch {
+    return c.json({
+      pending: [],
+      paired: [],
+      gatewayStatus: 'starting',
+      error: 'Gateway is starting up. Please wait...',
+    });
+  }
+
+  try {
     // Run OpenClaw CLI to list devices
     // Must specify --url and --token (OpenClaw v2026.2.3 requires explicit credentials with --url)
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;

@@ -37,6 +37,7 @@ export interface DeviceListResponse {
   stderr?: string;
   parseError?: string;
   error?: string;
+  gatewayStatus?: 'not_running' | 'starting';
 }
 
 export interface ApproveResponse {

@@ -51,6 +51,7 @@ export default function AdminPage() {
   const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [gatewayStatus, setGatewayStatus] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [restartInProgress, setRestartInProgress] = useState(false);
   const [syncInProgress, setSyncInProgress] = useState(false);
@@ -61,8 +62,10 @@ export default function AdminPage() {
       const data: DeviceListResponse = await listDevices();
       setPending(data.pending || []);
       setPaired(data.paired || []);
+      setGatewayStatus(data.gatewayStatus || null);
 
-      if (data.error) {
+      // Only show error if it's not a gateway status message
+      if (data.error && !data.gatewayStatus) {
         setError(data.error);
       } else if (data.parseError) {
         setError(`Parse error: ${data.parseError}`);
@@ -92,6 +95,13 @@ export default function AdminPage() {
     fetchDevices();
     fetchStorageStatus();
   }, [fetchDevices, fetchStorageStatus]);
+
+  // Auto-retry when gateway is starting or not running
+  useEffect(() => {
+    if (!gatewayStatus) return;
+    const interval = setInterval(fetchDevices, 3000);
+    return () => clearInterval(interval);
+  }, [gatewayStatus, fetchDevices]);
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId);
@@ -251,6 +261,12 @@ export default function AdminPage() {
         <div className="loading">
           <div className="spinner"></div>
           <p>Loading devices...</p>
+        </div>
+      ) : gatewayStatus ? (
+        <div className="loading">
+          <div className="spinner"></div>
+          <p>{gatewayStatus === 'starting' ? 'Gateway is starting up...' : 'Waiting for gateway to start...'}</p>
+          <p className="hint">This page will refresh automatically.</p>
         </div>
       ) : (
         <>
