@@ -18,6 +18,7 @@ export type TaskPhase = 'plan' | 'work' | 'review';
 // Phase-aware prompts injected at each stage
 const PLAN_PHASE_PROMPT = 'Before starting, briefly outline your approach (2-3 bullet points): what tools you\'ll use and in what order. Then proceed immediately with execution.';
 const REVIEW_PHASE_PROMPT = 'Before delivering your final answer, briefly verify: (1) Did you answer the complete question? (2) Are all data points current and accurate? (3) Is anything missing?';
+const ORCHESTRA_REVIEW_PROMPT = 'CRITICAL REVIEW — verify before reporting:\n(1) Did github_create_pr SUCCEED? Check the tool result — if it returned an error (422, 403, etc.), you MUST retry with a different branch name or fix the issue. Do NOT claim success if the PR was not created.\n(2) Does your ORCHESTRA_RESULT block contain a REAL PR URL (https://github.com/...)? If not, the task is NOT complete.\n(3) Did you update ROADMAP.md and WORK_LOG.md in the same PR?\nIf any of these fail, fix the issue NOW before reporting.';
 
 // Max characters for a single tool result before truncation
 const MAX_TOOL_RESULT_LENGTH = 8000; // ~2K tokens (reduced for CPU)
@@ -1336,6 +1337,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           await this.doState.storage.put('task', task);
           console.log(`[TaskProcessor] Phase transition: work → review (iteration ${task.iterations})`);
 
+          // Detect orchestra tasks for a stricter review prompt
+          const systemMsg = request.messages.find(m => m.role === 'system');
+          const sysContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
+          const isOrchestraTask = sysContent.includes('Orchestra INIT Mode') || sysContent.includes('Orchestra RUN Mode') || sysContent.includes('Orchestra REDO Mode');
+          const reviewPrompt = isOrchestraTask ? ORCHESTRA_REVIEW_PROMPT : REVIEW_PHASE_PROMPT;
+
           // Add the model's current response and inject review prompt
           conversationMessages.push({
             role: 'assistant',
@@ -1343,7 +1350,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           });
           conversationMessages.push({
             role: 'user',
-            content: `[REVIEW PHASE] ${REVIEW_PHASE_PROMPT}`,
+            content: `[REVIEW PHASE] ${reviewPrompt}`,
           });
           continue; // One more iteration for the review response
         }
@@ -1420,6 +1427,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 const userMsg = request.messages.find(m => m.role === 'user');
                 const prompt = typeof userMsg?.content === 'string' ? userMsg.content : '';
 
+                // Mark as failed if no valid PR URL — the model claimed success but didn't create a PR
+                const hasValidPr = orchestraResult.prUrl.startsWith('https://');
                 const completedTask: OrchestraTask = {
                   taskId: task.taskId,
                   timestamp: Date.now(),
@@ -1429,12 +1438,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   prompt: prompt.substring(0, 200),
                   branchName: orchestraResult.branch,
                   prUrl: orchestraResult.prUrl,
-                  status: 'completed',
+                  status: hasValidPr ? 'completed' : 'failed',
                   filesChanged: orchestraResult.files,
-                  summary: orchestraResult.summary,
+                  summary: hasValidPr
+                    ? orchestraResult.summary
+                    : `FAILED: No PR created. ${orchestraResult.summary || ''}`.trim(),
                 };
                 await storeOrchestraTask(this.r2, task.userId, completedTask);
-                console.log(`[TaskProcessor] Orchestra task completed: ${orchestraResult.branch} → ${orchestraResult.prUrl}`);
+                console.log(`[TaskProcessor] Orchestra task ${hasValidPr ? 'completed' : 'FAILED (no PR)'}: ${orchestraResult.branch} → ${orchestraResult.prUrl || 'none'}`);
               }
             }
           } catch (orchErr) {
