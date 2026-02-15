@@ -2,10 +2,12 @@
 # Stop and clean up ALL cloud e2e infrastructure
 #
 # This script:
-# 1. Deletes the deployed worker
-# 2. Deletes the R2 bucket (may fail if not empty - requires manual cleanup)
-# 3. Deletes the service token
-# 4. Cleans up local state files
+# 1. Deletes the Access application
+# 2. Deletes the deployed worker
+# 3. Deletes the container application
+# 4. Deletes the R2 bucket (may fail if not empty - requires manual cleanup)
+# 5. Deletes the service token (using saved ID for reliability)
+# 6. Cleans up local state files
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -40,6 +42,7 @@ WORKER_NAME=$(cat "$CCTR_FIXTURE_DIR/worker-name.txt" 2>/dev/null || echo "")
 R2_BUCKET=$(cat "$CCTR_FIXTURE_DIR/r2-bucket-name.txt" 2>/dev/null || echo "")
 TEST_RUN_ID=$(cat "$CCTR_FIXTURE_DIR/test-run-id.txt" 2>/dev/null || echo "")
 ACCESS_APP_ID=$(cat "$CCTR_FIXTURE_DIR/access-app-id.txt" 2>/dev/null || echo "")
+SERVICE_TOKEN_ID=$(cat "$CCTR_FIXTURE_DIR/service-token-id.txt" 2>/dev/null || echo "")
 
 # Step 0: Delete the Access application first (so it stops protecting the worker)
 if [ -n "$ACCESS_APP_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
@@ -87,16 +90,31 @@ if [ -n "$R2_BUCKET" ]; then
 fi
 
 # Step 3: Delete service token via API
+# First try using the saved service token ID (most reliable)
+if [ -n "$SERVICE_TOKEN_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+    echo "Deleting service token by ID: $SERVICE_TOKEN_ID" >&2
+    DELETE_RESULT=$(curl -s -X DELETE \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens/$SERVICE_TOKEN_ID" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+        -H "Content-Type: application/json")
+    if echo "$DELETE_RESULT" | jq -e '.success == true' >/dev/null 2>&1; then
+        echo "Service token deleted" >&2
+    else
+        echo "Warning: Failed to delete service token by ID, trying by name..." >&2
+    fi
+fi
+
+# Fallback: try to find and delete by name (for backwards compatibility)
 if [ -n "$TEST_RUN_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
-    echo "Deleting service token: moltbot-e2e-$TEST_RUN_ID" >&2
-    # Find and delete the service token
+    echo "Looking for service token by name: moltbot-e2e-$TEST_RUN_ID" >&2
     TOKEN_ID=$(curl -s -X GET \
         "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens" \
         -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
         -H "Content-Type: application/json" | \
         jq -r ".result[] | select(.name == \"moltbot-e2e-$TEST_RUN_ID\") | .id" 2>/dev/null || echo "")
     
-    if [ -n "$TOKEN_ID" ]; then
+    if [ -n "$TOKEN_ID" ] && [ "$TOKEN_ID" != "$SERVICE_TOKEN_ID" ]; then
+        echo "Found additional token by name, deleting: $TOKEN_ID" >&2
         curl -s -X DELETE \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens/$TOKEN_ID" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -113,6 +131,7 @@ rm -f "$CCTR_FIXTURE_DIR/worker-name.txt"
 rm -f "$CCTR_FIXTURE_DIR/gateway-token.txt"
 rm -f "$CCTR_FIXTURE_DIR/cf-access-client-id.txt"
 rm -f "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt"
+rm -f "$CCTR_FIXTURE_DIR/service-token-id.txt"
 rm -f "$CCTR_FIXTURE_DIR/test-run-id.txt"
 rm -f "$CCTR_FIXTURE_DIR/r2-bucket-name.txt"
 rm -f "$CCTR_FIXTURE_DIR/container-name.txt"
