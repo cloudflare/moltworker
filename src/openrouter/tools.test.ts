@@ -2967,6 +2967,133 @@ describe('full-rewrite detection in github_create_pr', () => {
   });
 });
 
+describe('incomplete refactor detection in github_create_pr', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should warn when new code files are created but no existing code files are updated', async () => {
+    // Simulate: model creates new modules but never touches the source file
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/blobs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/trees')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/commits')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/refs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/test' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/pulls')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/1', number: 1 }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    // Only creates new files + updates ROADMAP.md — no code file updates
+    const changes = [
+      { path: 'src/utils.js', content: 'export const clamp = (v, min, max) => Math.min(Math.max(v, min), max);\n', action: 'create' },
+      { path: 'src/components/Banner.jsx', content: 'import React from "react";\nexport const Banner = () => <div>Banner</div>;\n', action: 'create' },
+      { path: 'src/components/LineChart.jsx', content: 'import React from "react";\nexport const LineChart = () => <div>Chart</div>;\n', action: 'create' },
+      { path: 'ROADMAP.md', content: '- [x] Split App.jsx into modules\n', action: 'update' },
+      { path: 'WORK_LOG.md', content: '## Split App.jsx\nExtracted utils, Banner, LineChart\n', action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_pr_incomplete_refactor',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'refactor: Split App.jsx into modules',
+          branch: 'test-split',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    // PR should succeed but with an INCOMPLETE REFACTOR warning
+    expect(result.content).toContain('Pull Request created successfully');
+    expect(result.content).toContain('INCOMPLETE REFACTOR');
+    expect(result.content).toContain('src/utils.js');
+    expect(result.content).toContain('no existing code files were updated');
+  });
+
+  it('should NOT warn when new code files are created alongside code file updates', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/')) {
+        // Return size close to new content so shrinkage checks don't trigger
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ size: 200 }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/blobs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/trees')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/commits')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/refs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/test' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/pulls')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/2', number: 2 }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    // Creates new modules AND updates the source file — proper refactor
+    const appContent = 'import { clamp } from "./utils";\nimport { Banner } from "./components/Banner";\n// rest of App.jsx with functions removed\nexport default function App() { return <div><Banner /></div>; }\n';
+    const changes = [
+      { path: 'src/utils.js', content: 'export const clamp = (v, min, max) => Math.min(Math.max(v, min), max);\n', action: 'create' },
+      { path: 'src/components/Banner.jsx', content: 'import React from "react";\nexport const Banner = () => <div>Banner</div>;\n', action: 'create' },
+      { path: 'src/App.jsx', content: appContent, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_pr_complete_refactor',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'refactor: Split App.jsx into modules',
+          branch: 'test-split-complete',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    // PR should succeed without INCOMPLETE REFACTOR warning
+    expect(result.content).toContain('Pull Request created successfully');
+    expect(result.content).not.toContain('INCOMPLETE REFACTOR');
+  });
+});
+
 describe('sandbox_exec tool', () => {
   beforeEach(() => {
     vi.restoreAllMocks();

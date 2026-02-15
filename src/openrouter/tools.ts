@@ -969,6 +969,26 @@ async function githubCreatePr(
     }
   }
 
+  // 5. Detect incomplete refactor: new code files created but no existing code files updated
+  //    This catches "dead module" PRs where the model extracts code into new files
+  //    but never updates the source file to import from them.
+  const NON_CODE_FILES = /^(ROADMAP|WORK_LOG|README|CHANGELOG|LICENSE|\.github)/i;
+  const createdCodeFiles = changes.filter(c =>
+    c.action === 'create' && CODE_EXTENSIONS.test(c.path) && !NON_CODE_FILES.test(c.path.split('/').pop() || '')
+  );
+  const updatedCodeFiles = changes.filter(c =>
+    c.action === 'update' && CODE_EXTENSIONS.test(c.path) && !NON_CODE_FILES.test(c.path.split('/').pop() || '')
+  );
+
+  if (createdCodeFiles.length > 0 && updatedCodeFiles.length === 0) {
+    warnings.push(
+      `⚠️ INCOMPLETE REFACTOR: ${createdCodeFiles.length} new code file(s) created ` +
+      `(${createdCodeFiles.map(c => c.path).join(', ')}) but no existing code files were updated. ` +
+      `These modules are likely dead code — nothing imports them. ` +
+      `Did you forget to update the source file to import from the new modules?`
+    );
+  }
+
   console.log(`[github_create_pr] Creating PR: ${owner}/${repo} "${title}" (${changes.length} files)${warnings.length > 0 ? ` [${warnings.length} warnings]` : ''}`);
   for (const change of changes) {
     console.log(`  ${change.action}: ${change.path} (${change.content?.length || 0} bytes, ${change.content?.split('\n').length || 0} lines)`);

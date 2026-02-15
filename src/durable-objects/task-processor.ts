@@ -18,7 +18,7 @@ export type TaskPhase = 'plan' | 'work' | 'review';
 // Phase-aware prompts injected at each stage
 const PLAN_PHASE_PROMPT = 'Before starting, briefly outline your approach (2-3 bullet points): what tools you\'ll use and in what order. Then proceed immediately with execution.';
 const REVIEW_PHASE_PROMPT = 'Before delivering your final answer, briefly verify: (1) Did you answer the complete question? (2) Are all data points current and accurate? (3) Is anything missing?';
-const ORCHESTRA_REVIEW_PROMPT = 'CRITICAL REVIEW — verify before reporting:\n(1) Did github_create_pr SUCCEED? Check the tool result — if it returned an error (422, 403, etc.), you MUST retry with a different branch name or fix the issue. Do NOT claim success if the PR was not created.\n(2) Does your ORCHESTRA_RESULT block contain a REAL PR URL (https://github.com/...)? If not, the task is NOT complete.\n(3) Did you update ROADMAP.md and WORK_LOG.md in the same PR?\nIf any of these fail, fix the issue NOW before reporting.';
+const ORCHESTRA_REVIEW_PROMPT = 'CRITICAL REVIEW — verify before reporting:\n(1) Did github_create_pr SUCCEED? Check the tool result — if it returned an error (422, 403, etc.), you MUST retry with a different branch name or fix the issue. Do NOT claim success if the PR was not created.\n(2) Does your ORCHESTRA_RESULT block contain a REAL PR URL (https://github.com/...)? If not, the task is NOT complete.\n(3) Did you update ROADMAP.md and WORK_LOG.md in the same PR?\n(4) INCOMPLETE REFACTOR CHECK: If you created new module files (extracted code into separate files), did you ALSO update the SOURCE file to import from the new modules and remove the duplicated code? Creating new files without updating the original is dead code and the task is NOT complete. Check the github_create_pr tool result for "INCOMPLETE REFACTOR" warnings.\nIf any of these fail, fix the issue NOW before reporting.';
 
 // Max characters for a single tool result before truncation
 const MAX_TOOL_RESULT_LENGTH = 8000; // ~2K tokens (reduced for CPU)
@@ -1429,6 +1429,25 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
                 // Mark as failed if no valid PR URL — the model claimed success but didn't create a PR
                 const hasValidPr = orchestraResult.prUrl.startsWith('https://');
+
+                // Detect incomplete refactor: new module files created but source file not updated
+                // Check if the github_create_pr tool result contained an INCOMPLETE REFACTOR warning
+                const hasIncompleteRefactor = task.result.includes('INCOMPLETE REFACTOR');
+
+                // Determine final status and summary
+                let taskStatus: 'completed' | 'failed';
+                let taskSummary: string;
+                if (!hasValidPr) {
+                  taskStatus = 'failed';
+                  taskSummary = `FAILED: No PR created. ${orchestraResult.summary || ''}`.trim();
+                } else if (hasIncompleteRefactor) {
+                  taskStatus = 'failed';
+                  taskSummary = `FAILED: Incomplete refactor — new modules created but source file not updated (dead code). ${orchestraResult.summary || ''}`.trim();
+                } else {
+                  taskStatus = 'completed';
+                  taskSummary = orchestraResult.summary;
+                }
+
                 const completedTask: OrchestraTask = {
                   taskId: task.taskId,
                   timestamp: Date.now(),
@@ -1438,14 +1457,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   prompt: prompt.substring(0, 200),
                   branchName: orchestraResult.branch,
                   prUrl: orchestraResult.prUrl,
-                  status: hasValidPr ? 'completed' : 'failed',
+                  status: taskStatus,
                   filesChanged: orchestraResult.files,
-                  summary: hasValidPr
-                    ? orchestraResult.summary
-                    : `FAILED: No PR created. ${orchestraResult.summary || ''}`.trim(),
+                  summary: taskSummary,
                 };
                 await storeOrchestraTask(this.r2, task.userId, completedTask);
-                console.log(`[TaskProcessor] Orchestra task ${hasValidPr ? 'completed' : 'FAILED (no PR)'}: ${orchestraResult.branch} → ${orchestraResult.prUrl || 'none'}`);
+                const statusLabel = taskStatus === 'completed' ? 'completed' : hasIncompleteRefactor ? 'FAILED (incomplete refactor)' : 'FAILED (no PR)';
+                console.log(`[TaskProcessor] Orchestra task ${statusLabel}: ${orchestraResult.branch} → ${orchestraResult.prUrl || 'none'}`);
               }
             }
           } catch (orchErr) {
