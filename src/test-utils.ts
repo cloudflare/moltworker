@@ -2,7 +2,7 @@
  * Shared test utilities for mocking sandbox and environment
  */
 import { vi } from 'vitest';
-import type { Sandbox, Process } from '@cloudflare/sandbox';
+import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from './types';
 
 /**
@@ -30,55 +30,47 @@ export function createMockEnvWithR2(overrides: Partial<MoltbotEnv> = {}): Moltbo
 }
 
 /**
- * Create a mock process object
+ * Create a mock exec result (returned by sandbox.exec())
  */
-export function createMockProcess(
-  stdout: string = '', 
-  options: { exitCode?: number; stderr?: string; status?: string } = {}
-): Partial<Process> {
-  const { exitCode = 0, stderr = '', status = 'completed' } = options;
-  return {
-    status: status as Process['status'],
-    exitCode,
-    getLogs: vi.fn().mockResolvedValue({ stdout, stderr }),
-  };
+export function createMockExecResult(
+  stdout: string = '',
+  options: { success?: boolean; stderr?: string } = {},
+): { stdout: string; stderr: string; success: boolean } {
+  const { success = true, stderr = '' } = options;
+  return { stdout, stderr, success };
 }
 
 export interface MockSandbox {
   sandbox: Sandbox;
-  mountBucketMock: ReturnType<typeof vi.fn>;
-  startProcessMock: ReturnType<typeof vi.fn>;
+  execMock: ReturnType<typeof vi.fn>;
+  writeFileMock: ReturnType<typeof vi.fn>;
   listProcessesMock: ReturnType<typeof vi.fn>;
+  startProcessMock: ReturnType<typeof vi.fn>;
   containerFetchMock: ReturnType<typeof vi.fn>;
 }
 
 /**
  * Create a mock sandbox with configurable behavior
  */
-export function createMockSandbox(options: { 
-  mounted?: boolean;
-  processes?: Partial<Process>[];
+export function createMockSandbox(options: {
+  processes?: any[];
 } = {}): MockSandbox {
-  const mountBucketMock = vi.fn().mockResolvedValue(undefined);
+  const execMock = vi.fn().mockResolvedValue(createMockExecResult(''));
+  const writeFileMock = vi.fn().mockResolvedValue(undefined);
   const listProcessesMock = vi.fn().mockResolvedValue(options.processes || []);
+  const startProcessMock = vi.fn();
   const containerFetchMock = vi.fn();
-  
-  // Default: return empty stdout (not mounted), unless mounted: true
-  const startProcessMock = vi.fn().mockResolvedValue(
-    options.mounted 
-      ? createMockProcess('s3fs on /data/moltbot type fuse.s3fs (rw,nosuid,nodev,relatime,user_id=0,group_id=0)\n')
-      : createMockProcess('')
-  );
-  
+
   const sandbox = {
-    mountBucket: mountBucketMock,
+    exec: execMock,
+    writeFile: writeFileMock,
     listProcesses: listProcessesMock,
     startProcess: startProcessMock,
     containerFetch: containerFetchMock,
     wsConnect: vi.fn(),
   } as unknown as Sandbox;
 
-  return { sandbox, mountBucketMock, startProcessMock, listProcessesMock, containerFetchMock };
+  return { sandbox, execMock, writeFileMock, listProcessesMock, startProcessMock, containerFetchMock };
 }
 
 /**

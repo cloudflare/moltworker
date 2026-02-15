@@ -45,3 +45,6 @@ Thumbs.db
 
 # playwright-cli
 .playwright-cli/
+
+# npm config (may contain registry overrides for @cloudflare packages)
+.npmrc

@@ -1,5 +1,4 @@
-export { buildEnvVars } from './env';
-export { mountR2Storage } from './r2';
-export { findExistingMoltbotProcess, ensureMoltbotGateway } from './process';
-export { syncToR2 } from './sync';
+export { ensureMoltbotGateway, findExistingMoltbotProcess } from './process';
 export { waitForProcess } from './utils';
+export { ensureRcloneConfig } from './r2';
+export { syncToR2 } from './sync';

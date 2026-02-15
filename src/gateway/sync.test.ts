@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { syncToR2 } from './sync';
-import { 
-  createMockEnv, 
-  createMockEnvWithR2, 
-  createMockProcess, 
-  createMockSandbox, 
-  suppressConsole 
+import {
+  createMockEnv,
+  createMockEnvWithR2,
+  createMockExecResult,
+  createMockSandbox,
+  suppressConsole,
 } from '../test-utils';
 
 describe('syncToR2', () => {
@@ -23,50 +23,46 @@ describe('syncToR2', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('R2 storage is not configured');
     });
-
-    it('returns error when mount fails', async () => {
-      const { sandbox, startProcessMock, mountBucketMock } = createMockSandbox();
-      startProcessMock.mockResolvedValue(createMockProcess(''));
-      mountBucketMock.mockRejectedValue(new Error('Mount failed'));
-      
-      const env = createMockEnvWithR2();
-
-      const result = await syncToR2(sandbox, env);
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('Failed to mount R2 storage');
-    });
   });
 
-  describe('sanity checks', () => {
-    it('returns error when source is missing clawdbot.json', async () => {
-      const { sandbox, startProcessMock } = createMockSandbox();
-      startProcessMock
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 })); // No clawdbot.json
+  describe('config detection', () => {
+    it('returns error when no config file found', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      execMock
+        // ensureRcloneConfig: flag check → already configured
+        .mockResolvedValueOnce(createMockExecResult('yes\n'))
+        // detectConfigDir: neither openclaw.json nor clawdbot.json
+        .mockResolvedValueOnce(createMockExecResult('none\n'));
 
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
 
-      // Error message still references clawdbot.json since that's the actual file name
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Sync aborted: source missing clawdbot.json');
-      expect(result.details).toContain('missing critical files');
+      expect(result.error).toBe('Sync aborted: no config file found');
     });
   });
 
   describe('sync execution', () => {
-    it('returns success when sync completes', async () => {
-      const { sandbox, startProcessMock } = createMockSandbox();
-      const timestamp = '2026-01-27T12:00:00+00:00';
-      
-      // Calls: mount check, sanity check (exitCode 0 = file exists), rsync, cat timestamp
-      startProcessMock
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 0 }))
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess(timestamp));
+    it('returns success when sync completes with openclaw config', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      const timestamp = '2026-02-15T12:00:00+00:00';
+
+      execMock
+        // ensureRcloneConfig: already configured
+        .mockResolvedValueOnce(createMockExecResult('yes\n'))
+        // detectConfigDir: openclaw found
+        .mockResolvedValueOnce(createMockExecResult('openclaw\n'))
+        // rclone sync config → success
+        .mockResolvedValueOnce(createMockExecResult('', { success: true }))
+        // rclone sync workspace → success
+        .mockResolvedValueOnce(createMockExecResult(''))
+        // rclone sync skills → success
+        .mockResolvedValueOnce(createMockExecResult(''))
+        // date write
+        .mockResolvedValueOnce(createMockExecResult(''))
+        // cat timestamp
+        .mockResolvedValueOnce(createMockExecResult(timestamp));
 
       const env = createMockEnvWithR2();
 
@@ -76,45 +72,68 @@ describe('syncToR2', () => {
       expect(result.lastSync).toBe(timestamp);
     });
 
-    it('returns error when rsync fails (no timestamp created)', async () => {
-      const { sandbox, startProcessMock } = createMockSandbox();
+    it('returns success with legacy clawdbot config', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      const timestamp = '2026-02-15T12:00:00+00:00';
 
-      // Calls: mount check, sanity check (exitCode 0 = file exists), rsync (fails), cat timestamp (empty)
-      startProcessMock
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 0 }))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 1 }))
-        .mockResolvedValueOnce(createMockProcess(''));
-      
+      execMock
+        .mockResolvedValueOnce(createMockExecResult('yes\n'))
+        // detectConfigDir: clawdbot fallback
+        .mockResolvedValueOnce(createMockExecResult('clawdbot\n'))
+        .mockResolvedValueOnce(createMockExecResult('', { success: true }))
+        .mockResolvedValueOnce(createMockExecResult(''))
+        .mockResolvedValueOnce(createMockExecResult(''))
+        .mockResolvedValueOnce(createMockExecResult(''))
+        .mockResolvedValueOnce(createMockExecResult(timestamp));
+
+      const env = createMockEnvWithR2();
+
+      const result = await syncToR2(sandbox, env);
+
+      expect(result.success).toBe(true);
+    });
+
+    it('returns error when config sync fails', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+
+      execMock
+        .mockResolvedValueOnce(createMockExecResult('yes\n'))
+        .mockResolvedValueOnce(createMockExecResult('openclaw\n'))
+        // rclone sync config → fails
+        .mockResolvedValueOnce(createMockExecResult('', { success: false, stderr: 'sync error' }));
+
       const env = createMockEnvWithR2();
 
       const result = await syncToR2(sandbox, env);
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Sync failed');
+      expect(result.error).toBe('Config sync failed');
     });
 
-    it('verifies rsync command is called with correct flags', async () => {
-      const { sandbox, startProcessMock } = createMockSandbox();
-      const timestamp = '2026-01-27T12:00:00+00:00';
-      
-      startProcessMock
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'))
-        .mockResolvedValueOnce(createMockProcess('', { exitCode: 0 }))
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess(timestamp));
+    it('verifies rclone command includes correct flags', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      const timestamp = '2026-02-15T12:00:00+00:00';
+
+      execMock
+        .mockResolvedValueOnce(createMockExecResult('yes\n'))
+        .mockResolvedValueOnce(createMockExecResult('openclaw\n'))
+        .mockResolvedValueOnce(createMockExecResult('', { success: true }))
+        .mockResolvedValueOnce(createMockExecResult(''))
+        .mockResolvedValueOnce(createMockExecResult(''))
+        .mockResolvedValueOnce(createMockExecResult(''))
+        .mockResolvedValueOnce(createMockExecResult(timestamp));
 
       const env = createMockEnvWithR2();
 
       await syncToR2(sandbox, env);
 
-      // Third call should be rsync (paths still use clawdbot internally)
-      const rsyncCall = startProcessMock.mock.calls[2][0];
-      expect(rsyncCall).toContain('rsync');
-      expect(rsyncCall).toContain('--no-times');
-      expect(rsyncCall).toContain('--delete');
-      expect(rsyncCall).toContain('/root/.clawdbot/');
-      expect(rsyncCall).toContain('/data/moltbot/');
+      // Third call should be rclone sync for config
+      const rcloneCall = execMock.mock.calls[2][0];
+      expect(rcloneCall).toContain('rclone sync');
+      expect(rcloneCall).toContain('--transfers=16');
+      expect(rcloneCall).toContain('--fast-list');
+      expect(rcloneCall).toContain('/root/.openclaw/');
+      expect(rcloneCall).toContain('.git/**');
     });
   });
 });

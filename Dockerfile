@@ -1,6 +1,6 @@
 FROM docker.io/cloudflare/sandbox:0.7.0
 
-# Install Node.js 22 (required by clawdbot) and rsync (for R2 backup sync)
+# Install Node.js 22 (required by OpenClaw) and rclone (for R2 persistence)
 ENV NODE_VERSION=22.13.1
 RUN ARCH="$(dpkg --print-architecture)" \
     && case "${ARCH}" in \
@@ -8,7 +8,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
          arm64) NODE_ARCH="arm64" ;; \
          *) echo "Unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
        esac \
-    && apt-get update && apt-get install -y xz-utils ca-certificates rsync \
+    && apt-get update && apt-get install -y xz-utils ca-certificates rclone \
     && curl -fsSLk https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz -o /tmp/node.tar.xz \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && rm /tmp/node.tar.xz \
@@ -36,22 +36,19 @@ RUN mkdir -p /root/repos
 # Install pnpm globally
 RUN npm install -g pnpm
 
-# Install moltbot (CLI is still named clawdbot until upstream renames)
-RUN npm install -g clawdbot@latest \
-    && clawdbot --version
+# Install OpenClaw (formerly clawdbot/moltbot)
+RUN npm install -g openclaw@2026.2.3 \
+    && openclaw --version
 
-# Create moltbot directories
-RUN mkdir -p /root/.clawdbot \
-    && mkdir -p /root/.clawdbot-templates \
+# Create OpenClaw directories
+# Legacy .clawdbot paths kept for R2 backup migration
+RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
-# Build cache bust: 2026-02-07-upstream-sync
-COPY start-moltbot.sh /usr/local/bin/start-moltbot.sh
-RUN chmod +x /usr/local/bin/start-moltbot.sh
-
-# Rebuilt at 1769883636
-COPY moltbot.json.template /root/.clawdbot-templates/moltbot.json.template
+# Build cache bust: 2026-02-15-openclaw-rclone
+COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
+RUN chmod +x /usr/local/bin/start-openclaw.sh
 
 COPY skills/ /root/clawd/skills/
 

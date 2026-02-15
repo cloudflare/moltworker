@@ -13,7 +13,11 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "oxlint src/",
+    "lint:fix": "oxlint --fix src/",
+    "format": "oxfmt --write src/",
+    "format:check": "oxfmt --check src/"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.0.5",
@@ -34,6 +38,8 @@
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vitest": "^4.0.18",
+    "oxfmt": "^0.28.0",
+    "oxlint": "^1.43.0",
     "wrangler": "^4.50.0"
   },
   "author": "",

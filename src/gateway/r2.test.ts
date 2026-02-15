@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mountR2Storage } from './r2';
-import { 
-  createMockEnv, 
-  createMockEnvWithR2, 
-  createMockProcess, 
-  createMockSandbox, 
-  suppressConsole 
+import { ensureRcloneConfig } from './r2';
+import {
+  createMockEnv,
+  createMockEnvWithR2,
+  createMockExecResult,
+  createMockSandbox,
+  suppressConsole,
 } from '../test-utils';
 
-describe('mountR2Storage', () => {
+describe('ensureRcloneConfig', () => {
   beforeEach(() => {
     suppressConsole();
   });
@@ -21,7 +21,7 @@ describe('mountR2Storage', () => {
         CF_ACCOUNT_ID: 'account123',
       });
 
-      const result = await mountR2Storage(sandbox, env);
+      const result = await ensureRcloneConfig(sandbox, env);
 
       expect(result).toBe(false);
     });
@@ -33,7 +33,7 @@ describe('mountR2Storage', () => {
         CF_ACCOUNT_ID: 'account123',
       });
 
-      const result = await mountR2Storage(sandbox, env);
+      const result = await ensureRcloneConfig(sandbox, env);
 
       expect(result).toBe(false);
     });
@@ -45,7 +45,7 @@ describe('mountR2Storage', () => {
         R2_SECRET_ACCESS_KEY: 'secret',
       });
 
-      const result = await mountR2Storage(sandbox, env);
+      const result = await ensureRcloneConfig(sandbox, env);
 
       expect(result).toBe(false);
     });
@@ -54,99 +54,52 @@ describe('mountR2Storage', () => {
       const { sandbox } = createMockSandbox();
       const env = createMockEnv();
 
-      const result = await mountR2Storage(sandbox, env);
+      const result = await ensureRcloneConfig(sandbox, env);
 
       expect(result).toBe(false);
       expect(console.log).toHaveBeenCalledWith(
-        expect.stringContaining('R2 storage not configured')
+        expect.stringContaining('R2 storage not configured'),
       );
     });
   });
 
-  describe('mounting behavior', () => {
-    it('mounts R2 bucket when credentials provided and not already mounted', async () => {
-      const { sandbox, mountBucketMock } = createMockSandbox({ mounted: false });
-      const env = createMockEnvWithR2({
-        R2_ACCESS_KEY_ID: 'key123',
-        R2_SECRET_ACCESS_KEY: 'secret',
-        CF_ACCOUNT_ID: 'account123',
-      });
+  describe('configuration behavior', () => {
+    it('writes rclone config when credentials provided and not already configured', async () => {
+      const { sandbox, execMock, writeFileMock } = createMockSandbox();
+      // First exec: check flag file → not configured
+      execMock
+        .mockResolvedValueOnce(createMockExecResult('no\n'))
+        // mkdir
+        .mockResolvedValueOnce(createMockExecResult(''))
+        // touch flag
+        .mockResolvedValueOnce(createMockExecResult(''));
 
-      const result = await mountR2Storage(sandbox, env);
+      const env = createMockEnvWithR2();
+
+      const result = await ensureRcloneConfig(sandbox, env);
 
       expect(result).toBe(true);
-      expect(mountBucketMock).toHaveBeenCalledWith(
-        'moltbot-data',
-        '/data/moltbot',
-        {
-          endpoint: 'https://account123.r2.cloudflarestorage.com',
-          credentials: {
-            accessKeyId: 'key123',
-            secretAccessKey: 'secret',
-          },
-        }
+      expect(writeFileMock).toHaveBeenCalledWith(
+        '/root/.config/rclone/rclone.conf',
+        expect.stringContaining('[r2]'),
+      );
+      expect(writeFileMock).toHaveBeenCalledWith(
+        '/root/.config/rclone/rclone.conf',
+        expect.stringContaining('test-account-id'),
       );
     });
 
-    it('returns true immediately when bucket is already mounted', async () => {
-      const { sandbox, mountBucketMock } = createMockSandbox({ mounted: true });
+    it('returns true immediately when already configured', async () => {
+      const { sandbox, execMock, writeFileMock } = createMockSandbox();
+      // Flag file exists
+      execMock.mockResolvedValueOnce(createMockExecResult('yes\n'));
+
       const env = createMockEnvWithR2();
 
-      const result = await mountR2Storage(sandbox, env);
+      const result = await ensureRcloneConfig(sandbox, env);
 
       expect(result).toBe(true);
-      expect(mountBucketMock).not.toHaveBeenCalled();
-      expect(console.log).toHaveBeenCalledWith(
-        'R2 bucket already mounted at',
-        '/data/moltbot'
-      );
-    });
-
-    it('logs success message when mounted successfully', async () => {
-      const { sandbox } = createMockSandbox({ mounted: false });
-      const env = createMockEnvWithR2();
-
-      await mountR2Storage(sandbox, env);
-
-      expect(console.log).toHaveBeenCalledWith(
-        'R2 bucket mounted successfully - moltbot data will persist across sessions'
-      );
-    });
-  });
-
-  describe('error handling', () => {
-    it('returns false when mountBucket throws and mount check fails', async () => {
-      const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox({ mounted: false });
-      mountBucketMock.mockRejectedValue(new Error('Mount failed'));
-      startProcessMock
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess(''));
-      
-      const env = createMockEnvWithR2();
-
-      const result = await mountR2Storage(sandbox, env);
-
-      expect(result).toBe(false);
-      expect(console.error).toHaveBeenCalledWith(
-        'Failed to mount R2 bucket:',
-        expect.any(Error)
-      );
-    });
-
-    it('returns true if mount fails but check shows it is actually mounted', async () => {
-      const { sandbox, mountBucketMock, startProcessMock } = createMockSandbox();
-      startProcessMock
-        .mockResolvedValueOnce(createMockProcess(''))
-        .mockResolvedValueOnce(createMockProcess('s3fs on /data/moltbot type fuse.s3fs\n'));
-      
-      mountBucketMock.mockRejectedValue(new Error('Transient error'));
-      
-      const env = createMockEnvWithR2();
-
-      const result = await mountR2Storage(sandbox, env);
-
-      expect(result).toBe(true);
-      expect(console.log).toHaveBeenCalledWith('R2 bucket is mounted despite error');
+      expect(writeFileMock).not.toHaveBeenCalled();
     });
   });
 });
