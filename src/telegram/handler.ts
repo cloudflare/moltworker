@@ -3135,6 +3135,7 @@ Available: fluxklein, fluxpro, fluxflex, fluxmax
 ━━━ Models (quick switch) ━━━
 Paid:  /deep /grok /gpt /sonnet /haiku /flash /mimo
 Free:  /trinity /deepfree /qwencoderfree /devstral
+Direct: /dcode /dreason /q3coder /kimidirect
 All:   /models for full list
 /syncmodels — Fetch latest free models from OpenRouter
 
@@ -3173,7 +3174,7 @@ Both work together: think:high json: analyze X
 ━━━ Vision ━━━
 Send a photo with a caption — the bot analyzes the image and can call tools based on what it sees (e.g. identify a city, then look up its weather).
 Send a photo without caption — defaults to "What is in this image?"
-Models with vision: gpt, sonnet, haiku, flash, geminipro, kimi`;
+Models with vision: gpt, sonnet, haiku, flash, geminipro, kimi, kimidirect`;
   }
 
   /**
