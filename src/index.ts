@@ -18,6 +18,7 @@
  * - TELEGRAM_BOT_TOKEN: Telegram bot token
  * - DISCORD_BOT_TOKEN: Discord bot token
  * - SLACK_BOT_TOKEN + SLACK_APP_TOKEN: Slack tokens
+ * - FEISHU_APP_ID + FEISHU_APP_SECRET: Feishu (Lark) bot (requires @openclaw/feishu in container)
  */
 
 import { Hono } from 'hono';

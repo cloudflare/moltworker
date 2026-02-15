@@ -110,6 +110,9 @@ describe('buildEnvVars', () => {
       DISCORD_DM_POLICY: 'open',
       SLACK_BOT_TOKEN: 'slack-bot',
       SLACK_APP_TOKEN: 'slack-app',
+      FEISHU_APP_ID: 'cli_xxx',
+      FEISHU_APP_SECRET: 'secret',
+      FEISHU_DOMAIN: 'lark',
     });
     const result = buildEnvVars(env);
 
@@ -119,6 +122,9 @@ describe('buildEnvVars', () => {
     expect(result.DISCORD_DM_POLICY).toBe('open');
     expect(result.SLACK_BOT_TOKEN).toBe('slack-bot');
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
+    expect(result.FEISHU_APP_ID).toBe('cli_xxx');
+    expect(result.FEISHU_APP_SECRET).toBe('secret');
+    expect(result.FEISHU_DOMAIN).toBe('lark');
   });
 
   it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {

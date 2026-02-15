@@ -286,6 +286,19 @@ npx wrangler secret put SLACK_APP_TOKEN
 npm run deploy
 ```
 
+### Feishu (飞书 / Lark)
+
+The container image includes the `@openclaw/feishu` plugin. Configure your Feishu app at [Feishu Open Platform](https://open.feishu.cn/app) (or [Lark](https://open.larksuite.com/app) for international), enable bot capability and event subscription with **WebSocket long connection** for `im.message.receive_v1`, then set secrets:
+
+```bash
+npx wrangler secret put FEISHU_APP_ID
+npx wrangler secret put FEISHU_APP_SECRET
+# Optional, for Lark (international): npx wrangler secret put FEISHU_DOMAIN  # value: lark
+npm run deploy
+```
+
+After deploy, approve pairing: in Control UI or `openclaw pairing approve feishu <request_id>`. See [OpenClaw Feishu docs](https://docs.openclaw.ai/channels/feishu).
+
 ## Optional: Browser Automation (CDP)
 
 This worker includes a Chrome DevTools Protocol (CDP) shim that enables browser automation capabilities. This allows OpenClaw to control a headless browser for tasks like web scraping, screenshots, and automated testing.
@@ -436,6 +449,9 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `DISCORD_DM_POLICY` | No | Discord DM policy: `pairing` (default) or `open` |
 | `SLACK_BOT_TOKEN` | No | Slack bot token |
 | `SLACK_APP_TOKEN` | No | Slack app token |
+| `FEISHU_APP_ID` | No | Feishu (Lark) app ID (`cli_xxx`) |
+| `FEISHU_APP_SECRET` | No | Feishu (Lark) app secret |
+| `FEISHU_DOMAIN` | No | Feishu API domain: `lark` for international Lark |
 | `CDP_SECRET` | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
 | `WORKER_URL` | No | Public URL of the worker (required for CDP) |
 

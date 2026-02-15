@@ -36,6 +36,13 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
 # DISCORD_BOT_TOKEN=optional
+# Feishu (Lark) - requires @openclaw/feishu in container; FEISHU_DOMAIN=lark for international
+# FEISHU_APP_ID=cli_xxx
+# FEISHU_APP_SECRET=xxx
+# Feishu (Lark) - requires @openclaw/feishu in container; use lark domain for international
+# FEISHU_APP_ID=cli_xxx
+# FEISHU_APP_SECRET=your-app-secret
+# FEISHU_DOMAIN=lark   # only for Lark (international) tenant
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth

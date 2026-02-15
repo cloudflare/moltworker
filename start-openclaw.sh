@@ -260,6 +260,24 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
+// Feishu (Lark) configuration - requires @openclaw/feishu plugin
+// See https://docs.openclaw.ai/channels/feishu
+if (process.env.FEISHU_APP_ID && process.env.FEISHU_APP_SECRET) {
+    config.channels.feishu = {
+        enabled: true,
+        dmPolicy: 'pairing',
+        accounts: {
+            main: {
+                appId: process.env.FEISHU_APP_ID,
+                appSecret: process.env.FEISHU_APP_SECRET,
+            },
+        },
+    };
+    if (process.env.FEISHU_DOMAIN) {
+        config.channels.feishu.domain = process.env.FEISHU_DOMAIN;
+    }
+}
+
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
