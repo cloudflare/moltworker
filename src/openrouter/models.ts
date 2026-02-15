@@ -21,7 +21,7 @@ export const PROVIDERS: Record<Provider, ProviderConfig> = {
     envKey: 'DASHSCOPE_API_KEY',
   },
   moonshot: {
-    baseUrl: 'https://api.moonshot.cn/v1/chat/completions',
+    baseUrl: 'https://api.moonshot.ai/v1/chat/completions',
     envKey: 'MOONSHOT_API_KEY',
   },
   deepseek: {
@@ -120,6 +120,7 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     isFree: true,
     parallelCalls: true,
+    structuredOutput: true,
     maxContext: 262144,
   },
   // llama70free removed — replaced by maverick (Llama 4 Maverick, 400B MoE, 1M ctx)
@@ -403,6 +404,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.22/$0.95',
     supportsTools: true,
     parallelCalls: true,
+    structuredOutput: true,
     maxContext: 262144,
   },
   deep: {
@@ -416,7 +418,7 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     structuredOutput: true,
     reasoning: 'configurable',
-    maxContext: 65536,
+    maxContext: 131072,
   },
   deepreason: {
     id: 'deepseek/deepseek-r1-0528',
@@ -567,28 +569,31 @@ export const MODELS: Record<string, ModelInfo> = {
     reasoning: 'fixed',
     maxContext: 131072,
   },
-  q25: {
-    id: 'qwen-plus',
-    alias: 'q25',
-    name: 'Qwen 2.5 Plus (Direct)',
-    specialty: 'Direct Qwen API - Fast Coding',
-    score: 'Great for coding, cheap',
-    cost: '$0.80/$2.00',
+  q3coder: {
+    id: 'qwen3-coder-plus',
+    alias: 'q3coder',
+    name: 'Qwen3 Coder Plus (Direct)',
+    specialty: 'Direct DashScope API - Agentic Coding',
+    score: '480B MoE, 256K ctx, context cache (20% rate on hits)',
+    cost: '$1.00/$5.00',
     supportsTools: true,
     provider: 'dashscope',
     parallelCalls: true,
-    maxContext: 131072,
+    structuredOutput: true,
+    maxContext: 262144,
   },
-  k21: {
-    id: 'moonshot-v1-128k',
-    alias: 'k21',
-    name: 'Kimi 128K (Direct)',
-    specialty: 'Direct Moonshot API - Long Context',
-    score: '128K context, good reasoning',
-    cost: '$8/$8',
+  kimidirect: {
+    id: 'kimi-k2.5',
+    alias: 'kimidirect',
+    name: 'Kimi K2.5 (Direct)',
+    specialty: 'Direct Moonshot API - Agentic/Vision/Coding',
+    score: '1T MoE (32B active), 256K ctx, 76.8% SWE-Bench, cache hits $0.10/M',
+    cost: '$0.60/$3.00',
     supportsTools: true,
+    supportsVision: true,
     provider: 'moonshot',
-    maxContext: 131072,
+    parallelCalls: true,
+    maxContext: 262144,
   },
 };
 
