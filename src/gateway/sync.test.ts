@@ -137,6 +137,50 @@ describe('syncToR2', () => {
       expect(configCmd).toContain('r2:moltbot-data/openclaw/');
     });
 
+    it('syncs workspace and skills under openclaw/ prefix', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      execMock
+        .mockResolvedValueOnce(createMockExecResult('yes'))
+        .mockResolvedValueOnce(createMockExecResult('openclaw'))
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult('2026-01-27'));
+
+      const env = createMockEnvWithR2();
+      await syncToR2(sandbox, env);
+
+      // Workspace sync (call index 3) must target openclaw/workspace/
+      const workspaceCmd = execMock.mock.calls[3][0];
+      expect(workspaceCmd).toContain('r2:moltbot-data/openclaw/workspace/');
+      expect(workspaceCmd).not.toMatch(/r2:moltbot-data\/workspace\//);
+
+      // Skills sync (call index 4) must target openclaw/skills/
+      const skillsCmd = execMock.mock.calls[4][0];
+      expect(skillsCmd).toContain('r2:moltbot-data/openclaw/skills/');
+      expect(skillsCmd).not.toMatch(/r2:moltbot-data\/skills\/[^.]/);
+    });
+
+    it('config sync excludes workspace and skills subdirectories', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      execMock
+        .mockResolvedValueOnce(createMockExecResult('yes'))
+        .mockResolvedValueOnce(createMockExecResult('openclaw'))
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult())
+        .mockResolvedValueOnce(createMockExecResult('2026-01-27'));
+
+      const env = createMockEnvWithR2();
+      await syncToR2(sandbox, env);
+
+      const configCmd = execMock.mock.calls[2][0];
+      expect(configCmd).toContain("--exclude='workspace/**'");
+      expect(configCmd).toContain("--exclude='skills/**'");
+    });
+
     it('uses custom bucket name', async () => {
       const { sandbox, execMock } = createMockSandbox();
       execMock

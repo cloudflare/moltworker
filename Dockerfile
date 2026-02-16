@@ -25,6 +25,11 @@ RUN npm install -g pnpm
 RUN npm install -g openclaw@2026.2.3 \
     && openclaw --version
 
+# Install Python3 + pip, jq, and skill dependencies (pdf-tools, excel, docx handling)
+RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip jq \
+    && pip3 install pdfplumber PyPDF2 openpyxl python-docx \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create OpenClaw directories
 # Legacy .clawdbot paths are kept for R2 backup migration
 RUN mkdir -p /root/.openclaw \
@@ -32,12 +37,13 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy startup script
-# Build cache bust: 2026-02-11-v30-rclone
+# Build cache bust: 2026-02-16-v35-strip-suspect-config
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
-# Copy custom skills
+# Copy custom skills and ensure scripts are executable
 COPY skills/ /root/clawd/skills/
+RUN find /root/clawd/skills -name "*.sh" -exec chmod +x {} \;
 
 # Set working directory
 WORKDIR /root/clawd

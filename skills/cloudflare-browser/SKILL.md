@@ -1,6 +1,6 @@
 ---
 name: cloudflare-browser
-description: Control headless Chrome via Cloudflare Browser Rendering CDP WebSocket. Use for screenshots, page navigation, scraping, and video capture when browser automation is needed in a Cloudflare Workers environment. Requires CDP_SECRET env var and cdpUrl configured in browser.profiles.
+description: Web search, page fetching, screenshots, and browser automation via Cloudflare Browser Rendering CDP. Use search.js for web research, fetch.js to read web pages, screenshot.js for visual capture. Requires CDP_SECRET and WORKER_URL env vars.
 ---
 
 # Cloudflare Browser Rendering
@@ -10,87 +10,74 @@ Control headless browsers via Cloudflare's Browser Rendering service using CDP (
 ## Prerequisites
 
 - `CDP_SECRET` environment variable set
-- Browser profile configured in openclaw.json with `cdpUrl` pointing to the worker endpoint:
-  ```json
-  "browser": {
-    "profiles": {
-      "cloudflare": {
-        "cdpUrl": "https://your-worker.workers.dev/cdp?secret=..."
-      }
-    }
-  }
-  ```
+- `WORKER_URL` environment variable set (e.g. `https://your-worker.workers.dev`)
 
-## Quick Start
+## Web Research
+
+### Search the web
+```bash
+node skills/cloudflare-browser/scripts/search.js "santa barbara county ag enterprise ordinance 2024"
+node skills/cloudflare-browser/scripts/search.js "sta rita hills vineyard comparable sales" --max 15
+node skills/cloudflare-browser/scripts/search.js "qualified opportunity zone map california" --json
+```
+
+Returns markdown-formatted results with title, URL, and snippet. Use `--json` for structured output. Use `--max N` to control result count.
+
+### Fetch a web page (read articles, docs, regulations)
+```bash
+node skills/cloudflare-browser/scripts/fetch.js https://example.com
+node skills/cloudflare-browser/scripts/fetch.js https://county-code.example.com/chapter-35 --save data-room/02-zoning-planning/ch35-text.md
+node skills/cloudflare-browser/scripts/fetch.js https://example.com --html
+```
+
+Extracts clean text content from web pages. Strips nav, footer, ads. Use `--save` to write directly to a file. Use `--html` for raw HTML (tables, structured data).
+
+### Research workflow
+1. **Search** for a topic → get URLs
+2. **Fetch** the most relevant pages → get content
+3. **File** findings in the data room with source attribution
+
+## Visual Capture
 
 ### Screenshot
 ```bash
-node /path/to/skills/cloudflare-browser/scripts/screenshot.js https://example.com output.png
+node skills/cloudflare-browser/scripts/screenshot.js https://example.com output.png
 ```
 
 ### Multi-page Video
 ```bash
-node /path/to/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4
+node skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4
 ```
 
-## CDP Connection Pattern
+## CDP Client Library
 
-The worker creates a page target automatically on WebSocket connect. Listen for Target.targetCreated event to get the targetId:
+For custom scripts, import the reusable CDP client:
 
 ```javascript
-const WebSocket = require('ws');
-const CDP_SECRET = process.env.CDP_SECRET;
-const WS_URL = `wss://your-worker.workers.dev/cdp?secret=${encodeURIComponent(CDP_SECRET)}`;
-
-const ws = new WebSocket(WS_URL);
-let targetId = null;
-
-ws.on('message', (data) => {
-  const msg = JSON.parse(data.toString());
-  if (msg.method === 'Target.targetCreated' && msg.params?.targetInfo?.type === 'page') {
-    targetId = msg.params.targetInfo.targetId;
-  }
-});
+const { createClient } = require('./cdp-client');
+const client = await createClient();
+await client.navigate('https://example.com');
+const text = await client.getText();
+const html = await client.getHTML();
+await client.evaluate('document.title');
+const screenshot = await client.screenshot();
+client.close();
 ```
 
-## Key CDP Commands
+### Client Methods
 
-| Command | Purpose |
-|---------|---------|
-| Page.navigate | Navigate to URL |
-| Page.captureScreenshot | Capture PNG/JPEG |
-| Runtime.evaluate | Execute JavaScript |
-| Emulation.setDeviceMetricsOverride | Set viewport size |
-
-## Common Patterns
-
-### Navigate and Screenshot
-```javascript
-await send('Page.navigate', { url: 'https://example.com' });
-await new Promise(r => setTimeout(r, 3000)); // Wait for render
-const { data } = await send('Page.captureScreenshot', { format: 'png' });
-fs.writeFileSync('out.png', Buffer.from(data, 'base64'));
-```
-
-### Scroll Page
-```javascript
-await send('Runtime.evaluate', { expression: 'window.scrollBy(0, 300)' });
-```
-
-### Set Viewport
-```javascript
-await send('Emulation.setDeviceMetricsOverride', {
-  width: 1280,
-  height: 720,
-  deviceScaleFactor: 1,
-  mobile: false
-});
-```
-
-## Creating Videos
-
-1. Capture frames as PNGs during navigation
-2. Use ffmpeg to stitch: `ffmpeg -framerate 10 -i frame_%04d.png -c:v libx264 -pix_fmt yuv420p output.mp4`
+| Method | Purpose |
+|--------|---------|
+| `navigate(url, waitMs)` | Navigate to URL, wait for render |
+| `getText()` | Get page text content |
+| `getHTML()` | Get full page HTML |
+| `evaluate(expr)` | Run JavaScript on page |
+| `screenshot(format)` | Capture PNG/JPEG |
+| `click(selector)` | Click an element |
+| `type(selector, text)` | Type into an input |
+| `scroll(pixels)` | Scroll the page |
+| `setViewport(w, h)` | Set viewport dimensions |
+| `close()` | Close the connection |
 
 ## Troubleshooting
 
