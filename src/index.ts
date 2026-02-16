@@ -517,7 +517,7 @@ async function scheduled(
   _ctx: ExecutionContext,
 ): Promise<void> {
   const options = buildSandboxOptions(env);
-  const sandbox = getSandbox(env.Sandbox, 'moltbot-v2', options);
+  const sandbox = getSandbox(env.Sandbox, 'moltbot-v3', options);
 
   // Monitor total process count for leaks
   let processCount = 0;
