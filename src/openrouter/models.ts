@@ -9,6 +9,7 @@ export type Provider = 'openrouter' | 'dashscope' | 'moonshot' | 'deepseek';
 export interface ProviderConfig {
   baseUrl: string;
   envKey: string; // Environment variable name for API key
+  maxOutputTokens?: number; // Provider-specific max_tokens ceiling
 }
 
 export const PROVIDERS: Record<Provider, ProviderConfig> = {
@@ -27,6 +28,7 @@ export const PROVIDERS: Record<Provider, ProviderConfig> = {
   deepseek: {
     baseUrl: 'https://api.deepseek.com/chat/completions',
     envKey: 'DEEPSEEK_API_KEY',
+    maxOutputTokens: 8192, // DeepSeek API hard limit
   },
 };
 
@@ -702,6 +704,18 @@ export function getProviderConfig(alias: string): ProviderConfig {
 export function isDirectApi(alias: string): boolean {
   const model = getModel(alias);
   return !!model?.provider && model.provider !== 'openrouter';
+}
+
+/**
+ * Clamp max_tokens to the provider's ceiling.
+ * Some APIs (e.g. DeepSeek: 8192) reject requests exceeding their limit.
+ */
+export function clampMaxTokens(alias: string, requested: number): number {
+  const config = getProviderConfig(alias);
+  if (config.maxOutputTokens && requested > config.maxOutputTokens) {
+    return config.maxOutputTokens;
+  }
+  return requested;
 }
 
 /**

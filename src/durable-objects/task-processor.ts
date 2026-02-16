@@ -7,7 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
-import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
+import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { extractLearning, storeLearning, storeLastTaskSummary } from '../openrouter/learnings';
 import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
@@ -476,8 +476,26 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     // Always keep: system message (first), user message (second), and recent messages
     const systemMsg = messages[0];
     const userMsg = messages[1];
-    const recentMessages = messages.slice(-keepRecent);
-    const middleMessages = messages.slice(2, -keepRecent);
+    let recentMessages = messages.slice(-keepRecent);
+    const middleEnd = messages.length - keepRecent;
+
+    // Fix: ensure recentMessages don't start with orphaned tool messages
+    // (tool messages without a preceding assistant+tool_calls message)
+    // Direct APIs (DeepSeek, Moonshot) reject orphaned tool messages.
+    let orphanCount = 0;
+    for (const msg of recentMessages) {
+      if (msg.role === 'tool') {
+        orphanCount++;
+      } else {
+        break;
+      }
+    }
+    if (orphanCount > 0) {
+      // Move orphaned tool messages into the middle (will be summarized)
+      recentMessages = recentMessages.slice(orphanCount);
+    }
+
+    const middleMessages = messages.slice(2, middleEnd + orphanCount);
 
     // Summarize middle messages into a single assistant message
     // We can't keep tool messages without their tool_calls, so just summarize everything
@@ -941,7 +959,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 const requestBody: Record<string, unknown> = {
                     model: getModelId(task.modelAlias),
                     messages: conversationMessages,
-                    max_tokens: 16384,
+                    max_tokens: clampMaxTokens(task.modelAlias, 16384),
                     temperature: 0.7,
                   };
                 if (useTools) {
