@@ -294,6 +294,29 @@ Via WhatsApp Business API (requires approval).
 
 ---
 
+## BYOK / Direct API Lessons Learned
+
+> Critical for byok.cloud and any future BYOK (Bring Your Own Key) feature.
+
+### API Keys Are Region-Locked (DashScope / Alibaba Cloud)
+- **Issue:** DashScope API keys are scoped to the region where they were created (Singapore, US Virginia, China Beijing). A Singapore key returns 401 on the Beijing endpoint.
+- **Regional endpoints:**
+  - Singapore: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+  - US (Virginia): `https://dashscope-us.aliyuncs.com/compatible-mode/v1`
+  - China (Beijing): `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- **Impact on BYOK:** When users bring their own DashScope keys, we must either:
+  1. Ask which region their key belongs to, or
+  2. Auto-detect by trying the key against each regional endpoint, or
+  3. Let users provide a custom base URL
+- **Lesson:** Never assume a single base URL works for all users of a provider. Other providers may have similar region-locking (Azure OpenAI, AWS Bedrock, etc.).
+
+### General BYOK Considerations
+- Validate keys at setup time — make a lightweight test call and surface clear errors
+- Store per-user provider config (endpoint + key), not just the key
+- Some providers require additional config beyond just an API key (region, project ID, deployment name)
+
+---
+
 ## Decision Log
 
 | Date | Decision | Rationale |
@@ -301,6 +324,7 @@ Via WhatsApp Business API (requires approval).
 | Feb 2026 | Use OpenRouter instead of direct APIs | Unified access to 26+ models, simpler billing |
 | Feb 2026 | Implement Durable Objects | Unlimited task time for complex coding |
 | Feb 2026 | Bypass Gateway for Telegram | Custom multi-model support, image gen |
+| Feb 2026 | Switch DashScope to `-intl` endpoint | API keys are region-locked; our key is Singapore, not Beijing |
 
 ---
 
