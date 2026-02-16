@@ -77,7 +77,7 @@ fi
 # Restore workspace and skills from R2 (also under timeout)
 timeout 20 bash -c '
 BACKUP_DIR="/data/moltbot"
-WORKSPACE_DIR="/root/clawd"
+WORKSPACE_DIR="/root/.openclaw/workspace"
 SKILLS_DIR="/root/clawd/skills"
 
 if [ -d "$BACKUP_DIR/workspace" ] && [ "$(ls -A $BACKUP_DIR/workspace 2>/dev/null)" ]; then

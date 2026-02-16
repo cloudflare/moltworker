@@ -22,7 +22,7 @@ export interface SyncResult {
  *
  * Syncs three directories:
  * - Config: /root/.openclaw/ (or /root/.clawdbot/) → R2:/openclaw/
- * - Workspace: /root/clawd/ → R2:/workspace/ (IDENTITY.md, MEMORY.md, memory/, assets/)
+ * - Workspace: /root/.openclaw/workspace/ → R2:/workspace/ (IDENTITY.md, MEMORY.md, memory/, assets/)
  * - Skills: /root/clawd/skills/ → R2:/skills/
  *
  * @param sandbox - The sandbox instance
@@ -77,8 +77,8 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   }
 
   // Sync to the new openclaw/ R2 prefix (even if source is legacy .clawdbot)
-  // Also sync workspace directory (excluding skills since they're synced separately)
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete --exclude='skills' --exclude='.git' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete --exclude='.git' /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Also sync workspace directory (OpenClaw stores MEMORY.md, IDENTITY.md, etc. in /root/.openclaw/workspace/)
+  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete --exclude='.git' /root/.openclaw/workspace/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete --exclude='.git' /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
 
   try {
     const syncResult = await runCommandWithCleanup(sandbox, syncCmd, 30000); // 30 second timeout for sync

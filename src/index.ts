@@ -580,7 +580,7 @@ async function scheduled(
     } catch (error) {
       console.error('[cron] Gateway restart failed:', error);
     }
-    return;
+    // Fall through to sync — don't skip backup just because gateway was restarted
   }
 
   console.log('[cron] Starting backup sync to R2...');
