@@ -3094,6 +3094,310 @@ describe('incomplete refactor detection in github_create_pr', () => {
   });
 });
 
+describe('net deletion ratio guard in github_create_pr', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should block PRs where code updates delete far more lines than they add', async () => {
+    // Simulate: original file is 200 lines, new content preserves identifiers (so rewrite
+    // detection passes) but deletes >40% of lines. We keep byte size above 20% to
+    // avoid the destructive-size check — this tests the NET DELETION guard specifically.
+    const sharedFunctions = Array.from({ length: 20 }, (_, i) =>
+      `export function func${i}() { return ${i}; }`
+    );
+    // Each line ~40 chars, 180 lines = ~7200 bytes of data
+    const dataLines = Array.from({ length: 180 }, (_, i) =>
+      `  { id: ${i}, name: "item${i}", value: ${i * 10} },`
+    );
+    const originalContent = [
+      ...sharedFunctions,
+      'export const destinations = [',
+      ...dataLines,
+      '];',
+    ].join('\n');
+    const originalB64 = btoa(originalContent);
+
+    // New content: keeps all functions but removes most data lines.
+    // Pad with long comment lines to keep byte size above 20% of original
+    // while still having far fewer actual lines.
+    const paddingLines = Array.from({ length: 10 }, (_, i) =>
+      `// Configuration block ${i}: ${'x'.repeat(80)}`
+    );
+    const newContent = [
+      ...sharedFunctions,
+      ...paddingLines,
+      'export const destinations = [',
+      '  { id: 0, name: "item0", value: 0 },',
+      '];',
+    ].join('\n');
+
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            size: originalContent.length,
+            content: originalB64,
+            encoding: 'base64',
+          }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'src/App.jsx', content: newContent, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_net_deletion',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Add features',
+          branch: 'test-net-deletion',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('NET DELETION blocked');
+    expect(result.content).toContain('removes far more code than it adds');
+  });
+});
+
+describe('audit trail protection in github_create_pr', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should block WORK_LOG.md updates that delete existing rows', async () => {
+    const originalWorkLog = [
+      '# Work Log',
+      '',
+      '| Date | Task | Model | Branch | PR | Status |',
+      '|------|------|-------|--------|-----|--------|',
+      '| 2026-02-10 | Init roadmap | /q3coder | bot/init | #1 | Done |',
+      '| 2026-02-12 | Add features | /q3coder | bot/feat | #5 | Done |',
+      '| 2026-02-14 | Fix bug | /q3coder | bot/fix | #8 | Done |',
+    ].join('\n');
+    const originalB64 = btoa(originalWorkLog);
+
+    // New content erases the existing rows
+    const newWorkLog = [
+      '# Work Log',
+      '',
+      '| Date | Task | Model | Branch | PR | Status |',
+      '|------|------|-------|--------|-----|--------|',
+      '| 2026-02-16 | Add destinations | /q3coder | bot/dest | #19 | Done |',
+    ].join('\n');
+
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/WORK_LOG.md')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            size: originalWorkLog.length,
+            content: originalB64,
+            encoding: 'base64',
+          }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'WORK_LOG.md', content: newWorkLog, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_audit_trail',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Update docs',
+          branch: 'test-audit',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('AUDIT TRAIL VIOLATION');
+    expect(result.content).toContain('APPEND-ONLY');
+  });
+
+  it('should allow WORK_LOG.md updates that append new rows', async () => {
+    const originalWorkLog = [
+      '# Work Log',
+      '',
+      '| Date | Task | Model | Branch | PR | Status |',
+      '|------|------|-------|--------|-----|--------|',
+      '| 2026-02-10 | Init roadmap | /q3coder | bot/init | #1 | Done |',
+    ].join('\n');
+    const originalB64 = btoa(originalWorkLog);
+
+    // New content keeps existing row and adds a new one
+    const newWorkLog = [
+      '# Work Log',
+      '',
+      '| Date | Task | Model | Branch | PR | Status |',
+      '|------|------|-------|--------|-----|--------|',
+      '| 2026-02-10 | Init roadmap | /q3coder | bot/init | #1 | Done |',
+      '| 2026-02-16 | Add features | /q3coder | bot/feat | #19 | Done |',
+    ].join('\n');
+
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/WORK_LOG.md')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            size: originalWorkLog.length,
+            content: originalB64,
+            encoding: 'base64',
+          }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/blobs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'blob-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/trees')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'tree-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/commits')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ sha: 'commit-sha' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/git/refs')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ref: 'refs/heads/bot/test' }) });
+      }
+      if (method === 'POST' && urlStr.includes('/pulls')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ html_url: 'https://github.com/o/r/pull/1', number: 1 }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'WORK_LOG.md', content: newWorkLog, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_audit_append',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Update docs',
+          branch: 'test-audit-ok',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('Pull Request created successfully');
+    expect(result.content).not.toContain('AUDIT TRAIL');
+  });
+
+  it('should block ROADMAP.md updates that silently delete many tasks', async () => {
+    const originalRoadmap = [
+      '# Roadmap',
+      '## Phases',
+      '### Phase 1: Foundation',
+      '- [x] **Task 1.1**: Set up project structure',
+      '- [x] **Task 1.2**: Add dark theme',
+      '- [x] **Task 1.3**: Add CSV export',
+      '- [x] **Task 1.4**: Add PDF export',
+      '### Phase 2: Features',
+      '- [ ] **Task 2.1**: Add 5 destinations',
+      '- [ ] **Task 2.2**: Add currency widget',
+      '## Notes',
+      'Important context about the project.',
+    ].join('\n');
+    const originalB64 = btoa(originalRoadmap);
+
+    // New content removes most tasks
+    const newRoadmap = [
+      '# Roadmap',
+      '## Phases',
+      '### Phase 1: Foundation',
+      '- [x] **Task 1.1**: Set up project structure',
+      '### Phase 2: Features',
+      '- [x] **Task 2.1**: Add 5 destinations',
+    ].join('\n');
+
+    const mockFetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : '';
+      const method = init?.method || 'GET';
+
+      if (method === 'GET' && urlStr.includes('/contents/ROADMAP.md')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            size: originalRoadmap.length,
+            content: originalB64,
+            encoding: 'base64',
+          }),
+        });
+      }
+      if (method === 'GET' && urlStr.includes('/git/ref/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ object: { sha: 'sha' } }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const changes = [
+      { path: 'ROADMAP.md', content: newRoadmap, action: 'update' },
+    ];
+
+    const result = await executeTool({
+      id: 'call_roadmap_tamper',
+      type: 'function',
+      function: {
+        name: 'github_create_pr',
+        arguments: JSON.stringify({
+          owner: 'o',
+          repo: 'r',
+          title: 'Update roadmap',
+          branch: 'test-roadmap-tamper',
+          changes: JSON.stringify(changes),
+        }),
+      },
+    }, { githubToken: 'token' });
+
+    expect(result.content).toContain('ROADMAP TAMPERING');
+    expect(result.content).toContain('tasks would be silently deleted');
+  });
+});
+
 describe('sandbox_exec tool', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
