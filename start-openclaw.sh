@@ -224,6 +224,8 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
 // that would fail OpenClaw's strict config validation (see #47)
 if (process.env.TELEGRAM_BOT_TOKEN) {
     const dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    // Preserve paired users from R2-restored config (#3631)
+    const prevTelegramAllowFrom = config.channels?.telegram?.allowFrom;
     config.channels.telegram = {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
         enabled: true,
@@ -233,6 +235,8 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
         config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',');
     } else if (dmPolicy === 'open') {
         config.channels.telegram.allowFrom = ['*'];
+    } else if (prevTelegramAllowFrom) {
+        config.channels.telegram.allowFrom = prevTelegramAllowFrom;
     }
 }
 
@@ -240,6 +244,8 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 // Discord uses a nested dm object: dm.policy, dm.allowFrom (per DiscordDmConfig)
 if (process.env.DISCORD_BOT_TOKEN) {
     const dmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
+    // Preserve paired users from R2-restored config (#3631)
+    const prevDiscordAllowFrom = config.channels?.discord?.dm?.allowFrom;
     const dm = { policy: dmPolicy };
     if (dmPolicy === 'open') {
         dm.allowFrom = ['*'];
@@ -249,6 +255,11 @@ if (process.env.DISCORD_BOT_TOKEN) {
         enabled: true,
         dm: dm,
     };
+    if (process.env.DISCORD_DM_ALLOW_FROM) {
+        config.channels.discord.dm.allowFrom = process.env.DISCORD_DM_ALLOW_FROM.split(',');
+    } else if (!config.channels.discord.dm.allowFrom && prevDiscordAllowFrom) {
+        config.channels.discord.dm.allowFrom = prevDiscordAllowFrom;
+    }
 }
 
 // Slack configuration
