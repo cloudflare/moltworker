@@ -47,6 +47,32 @@ function transformErrorMessage(message: string, host: string): string {
   return message;
 }
 
+function isSendableWsCloseCode(code: number): boolean {
+  // RFC 6455: 1005/1006/1015 are reserved and MUST NOT be sent in close frames.
+  if (!Number.isInteger(code)) return false;
+  if (code === 1005 || code === 1006 || code === 1015) return false;
+  if (code < 1000 || code >= 5000) return false;
+  if (code <= 1014) return true;
+  return code >= 3000 && code <= 4999;
+}
+
+function safeCloseWebSocket(ws: WebSocket, code: number, reason: string, fallbackCode = 1000): void {
+  if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) return;
+
+  const safeCode = isSendableWsCloseCode(code) ? code : fallbackCode;
+  const safeReason = reason.length > 123 ? `${reason.slice(0, 120)}...` : reason;
+
+  try {
+    ws.close(safeCode, safeReason);
+  } catch {
+    try {
+      ws.close(fallbackCode, '');
+    } catch {
+      // ignore secondary close errors
+    }
+  }
+}
+
 export { Sandbox };
 
 /**
@@ -390,7 +416,7 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Client closed:', event.code, event.reason);
       }
-      containerWs.close(event.code, event.reason);
+      safeCloseWebSocket(containerWs, event.code, event.reason, 1000);
     });
 
     containerWs.addEventListener('close', (event) => {
@@ -405,18 +431,18 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Transformed close reason:', reason);
       }
-      serverWs.close(event.code, reason);
+      safeCloseWebSocket(serverWs, event.code, reason, 1000);
     });
 
     // Handle errors
     serverWs.addEventListener('error', (event) => {
       console.error('[WS] Client error:', event);
-      containerWs.close(1011, 'Client error');
+      safeCloseWebSocket(containerWs, 1011, 'Client error', 1011);
     });
 
     containerWs.addEventListener('error', (event) => {
       console.error('[WS] Container error:', event);
-      serverWs.close(1011, 'Container error');
+      safeCloseWebSocket(serverWs, 1011, 'Container error', 1011);
     });
 
     if (debugLogs) {
