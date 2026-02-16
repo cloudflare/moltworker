@@ -62,13 +62,14 @@ if r2_configured; then
 
     echo "Checking R2 for existing backup..."
     # Check if R2 has an openclaw config backup
+    # IMPORTANT: exclude workspace/ and skills/ from config restore — they're restored separately below
     if rclone ls "r2:${R2_BUCKET}/openclaw/openclaw.json" $RCLONE_FLAGS 2>/dev/null | grep -q openclaw.json; then
         echo "Restoring config from R2..."
-        rclone copy "r2:${R2_BUCKET}/openclaw/" "$CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: config restore failed with exit code $?"
+        rclone copy "r2:${R2_BUCKET}/openclaw/" "$CONFIG_DIR/" $RCLONE_FLAGS --exclude='workspace/**' --exclude='skills/**' -v 2>&1 || echo "WARNING: config restore failed with exit code $?"
         echo "Config restored"
     elif rclone ls "r2:${R2_BUCKET}/clawdbot/clawdbot.json" $RCLONE_FLAGS 2>/dev/null | grep -q clawdbot.json; then
         echo "Restoring from legacy R2 backup..."
-        rclone copy "r2:${R2_BUCKET}/clawdbot/" "$CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: legacy config restore failed with exit code $?"
+        rclone copy "r2:${R2_BUCKET}/clawdbot/" "$CONFIG_DIR/" $RCLONE_FLAGS --exclude='workspace/**' --exclude='skills/**' -v 2>&1 || echo "WARNING: legacy config restore failed with exit code $?"
         if [ -f "$CONFIG_DIR/clawdbot.json" ] && [ ! -f "$CONFIG_FILE" ]; then
             mv "$CONFIG_DIR/clawdbot.json" "$CONFIG_FILE"
         fi
@@ -77,23 +78,25 @@ if r2_configured; then
         echo "No backup found in R2, starting fresh"
     fi
 
-    # Restore workspace
-    REMOTE_WS_COUNT=$(rclone ls "r2:${R2_BUCKET}/openclaw/workspace/" $RCLONE_FLAGS 2>/dev/null | wc -l)
-    if [ "$REMOTE_WS_COUNT" -gt 0 ]; then
-        echo "Restoring workspace from R2 ($REMOTE_WS_COUNT files)..."
-        mkdir -p "$WORKSPACE_DIR"
-        rclone copy "r2:${R2_BUCKET}/openclaw/workspace/" "$WORKSPACE_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: workspace restore failed with exit code $?"
-        echo "Workspace restored"
-    fi
+    # Restore workspace + skills in background (don't block gateway startup)
+    (
+        REMOTE_WS_COUNT=$(rclone ls "r2:${R2_BUCKET}/openclaw/workspace/" $RCLONE_FLAGS 2>/dev/null | wc -l)
+        if [ "$REMOTE_WS_COUNT" -gt 0 ]; then
+            echo "Restoring workspace from R2 ($REMOTE_WS_COUNT files)..."
+            mkdir -p "$WORKSPACE_DIR"
+            rclone copy "r2:${R2_BUCKET}/openclaw/workspace/" "$WORKSPACE_DIR/" $RCLONE_FLAGS 2>&1 || echo "WARNING: workspace restore failed"
+            echo "Workspace restored"
+        fi
 
-    # Restore skills
-    REMOTE_SK_COUNT=$(rclone ls "r2:${R2_BUCKET}/openclaw/skills/" $RCLONE_FLAGS 2>/dev/null | wc -l)
-    if [ "$REMOTE_SK_COUNT" -gt 0 ]; then
-        echo "Restoring skills from R2 ($REMOTE_SK_COUNT files)..."
-        mkdir -p "$SKILLS_DIR"
-        rclone copy "r2:${R2_BUCKET}/openclaw/skills/" "$SKILLS_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: skills restore failed with exit code $?"
-        echo "Skills restored"
-    fi
+        REMOTE_SK_COUNT=$(rclone ls "r2:${R2_BUCKET}/openclaw/skills/" $RCLONE_FLAGS 2>/dev/null | wc -l)
+        if [ "$REMOTE_SK_COUNT" -gt 0 ]; then
+            echo "Restoring skills from R2 ($REMOTE_SK_COUNT files)..."
+            mkdir -p "$SKILLS_DIR"
+            rclone copy "r2:${R2_BUCKET}/openclaw/skills/" "$SKILLS_DIR/" $RCLONE_FLAGS 2>&1 || echo "WARNING: skills restore failed"
+            echo "Skills restored"
+        fi
+    ) &
+    echo "Workspace/skills restore started in background"
 
     # One-time migration: move top-level skills/workspace into openclaw/ prefix
     # Use rclone cat (not lsf) to check marker — lsf treats file paths as directory prefixes
