@@ -1479,22 +1479,40 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 // Mark as failed if no valid PR URL — the model claimed success but didn't create a PR
                 const hasValidPr = orchestraResult.prUrl.startsWith('https://');
 
-                // Detect incomplete refactor: new module files created but source file not updated
-                // Check if the github_create_pr tool result contained an INCOMPLETE REFACTOR warning
+                // Detect guardrail violations in tool results
                 const hasIncompleteRefactor = task.result.includes('INCOMPLETE REFACTOR');
+                const hasNetDeletionWarning = task.result.includes('NET DELETION WARNING');
+                const hasAuditViolation = task.result.includes('AUDIT TRAIL VIOLATION');
+                const hasRoadmapTampering = task.result.includes('ROADMAP TAMPERING');
 
                 // Determine final status and summary
                 let taskStatus: 'completed' | 'failed';
-                let taskSummary: string;
+                let taskSummary = orchestraResult.summary || '';
+                let failureReason = '';
+
                 if (!hasValidPr) {
                   taskStatus = 'failed';
-                  taskSummary = `FAILED: No PR created. ${orchestraResult.summary || ''}`.trim();
+                  failureReason = 'No PR created';
                 } else if (hasIncompleteRefactor) {
                   taskStatus = 'failed';
-                  taskSummary = `FAILED: Incomplete refactor — new modules created but source file not updated (dead code). ${orchestraResult.summary || ''}`.trim();
+                  failureReason = 'Incomplete refactor — new modules created but source file not updated (dead code)';
+                } else if (hasAuditViolation) {
+                  taskStatus = 'failed';
+                  failureReason = 'Audit trail violation — attempted to delete work log entries';
+                } else if (hasRoadmapTampering) {
+                  taskStatus = 'failed';
+                  failureReason = 'Roadmap tampering — attempted to silently delete roadmap tasks';
+                } else if (hasNetDeletionWarning) {
+                  // Net deletion warning doesn't auto-fail but is flagged prominently
+                  taskStatus = 'completed';
+                  taskSummary = `⚠️ NET DELETION WARNING — review carefully. ${orchestraResult.summary || ''}`.trim();
                 } else {
                   taskStatus = 'completed';
                   taskSummary = orchestraResult.summary;
+                }
+
+                if (failureReason) {
+                  taskSummary = `FAILED: ${failureReason}. ${orchestraResult.summary || ''}`.trim();
                 }
 
                 const completedTask: OrchestraTask = {
@@ -1511,7 +1529,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   summary: taskSummary,
                 };
                 await storeOrchestraTask(this.r2, task.userId, completedTask);
-                const statusLabel = taskStatus === 'completed' ? 'completed' : hasIncompleteRefactor ? 'FAILED (incomplete refactor)' : 'FAILED (no PR)';
+                const statusLabel = taskStatus === 'completed'
+                  ? (hasNetDeletionWarning ? 'completed (⚠️ net deletion)' : 'completed')
+                  : `FAILED (${failureReason})`;
                 console.log(`[TaskProcessor] Orchestra task ${statusLabel}: ${orchestraResult.branch} → ${orchestraResult.prUrl || 'none'}`);
               }
             }

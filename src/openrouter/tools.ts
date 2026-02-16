@@ -961,7 +961,10 @@ async function githubCreatePr(
       if (fetchErr instanceof Error && (
         fetchErr.message.startsWith('Destructive update blocked') ||
         fetchErr.message.startsWith('Full-rewrite blocked') ||
-        fetchErr.message.startsWith('Rejecting update')
+        fetchErr.message.startsWith('Rejecting update') ||
+        fetchErr.message.startsWith('NET DELETION') ||
+        fetchErr.message.startsWith('AUDIT TRAIL') ||
+        fetchErr.message.startsWith('ROADMAP TAMPERING')
       )) {
         throw fetchErr;
       }
@@ -987,6 +990,169 @@ async function githubCreatePr(
       `These modules are likely dead code — nothing imports them. ` +
       `Did you forget to update the source file to import from the new modules?`
     );
+  }
+
+  // 6. Net deletion ratio guard: block PRs where total deleted lines vastly exceed added lines.
+  //    This catches the pattern where a bot "adds 5 destinations" but deletes 600+ lines.
+  //    Only applies when there are update actions on code files (docs are exempt).
+  {
+    let totalOriginalLines = 0;
+    let totalNewLines = 0;
+    let codeUpdateCount = 0;
+
+    for (const change of changes) {
+      if (change.action !== 'update' || !change.content) continue;
+      if (!CODE_EXTENSIONS.test(change.path)) continue;
+      // Skip pure docs (ROADMAP, WORK_LOG, README etc.)
+      const fileName = change.path.split('/').pop() || '';
+      if (NON_CODE_FILES.test(fileName)) continue;
+
+      codeUpdateCount++;
+      const newLines = change.content.split('\n').length;
+      totalNewLines += newLines;
+
+      // Fetch original line count
+      try {
+        const fileResponse = await fetch(`${apiBase}/contents/${encodeURIComponent(change.path)}?ref=${baseBranch}`, { headers });
+        if (fileResponse.ok) {
+          const fileData = await fileResponse.json() as { content?: string; encoding?: string };
+          if (fileData.content && fileData.encoding === 'base64') {
+            const originalContent = atob(fileData.content.replace(/\n/g, ''));
+            totalOriginalLines += originalContent.split('\n').length;
+          }
+        }
+      } catch {
+        // If we can't fetch, skip this check for this file
+      }
+    }
+
+    // Only apply if we have meaningful data (>50 original lines across updates)
+    if (codeUpdateCount > 0 && totalOriginalLines > 50) {
+      const netDeletion = totalOriginalLines - totalNewLines;
+      // Block if net deletion is >100 lines AND more than 40% of original
+      if (netDeletion > 100 && netDeletion > totalOriginalLines * 0.4) {
+        throw new Error(
+          `NET DELETION blocked: code file updates would delete ~${netDeletion} net lines ` +
+          `(${totalOriginalLines} original → ${totalNewLines} new, across ${codeUpdateCount} file(s)). ` +
+          `This PR removes far more code than it adds. ` +
+          `If the task is to ADD features, the line count should increase, not decrease. ` +
+          `Make SURGICAL additions that preserve existing code.`
+        );
+      }
+
+      // Warn if net deletion is >50 lines and >20% of original
+      if (netDeletion > 50 && netDeletion > totalOriginalLines * 0.2) {
+        warnings.push(
+          `⚠️ NET DELETION WARNING: code updates delete ~${netDeletion} net lines ` +
+          `(${totalOriginalLines} → ${totalNewLines}). Verify no features were accidentally removed.`
+        );
+      }
+    }
+  }
+
+  // 7. Audit trail protection: WORK_LOG.md is append-only, ROADMAP.md changes are validated.
+  //    Prevents bots from erasing work log history or falsely marking tasks as complete.
+  for (const change of changes) {
+    if (change.action !== 'update' || !change.content) continue;
+    const fileName = (change.path.split('/').pop() || '').toUpperCase();
+
+    // 7a. WORK_LOG.md — rows can be added but existing rows must not be deleted
+    if (fileName === 'WORK_LOG.MD') {
+      try {
+        const fileResponse = await fetch(`${apiBase}/contents/${encodeURIComponent(change.path)}?ref=${baseBranch}`, { headers });
+        if (fileResponse.ok) {
+          const fileData = await fileResponse.json() as { content?: string; encoding?: string };
+          if (fileData.content && fileData.encoding === 'base64') {
+            const originalContent = atob(fileData.content.replace(/\n/g, ''));
+            // Extract table rows (lines starting with |) that have actual data (not just header/separator)
+            const extractDataRows = (text: string): string[] =>
+              text.split('\n')
+                .filter(l => l.trim().startsWith('|') && !l.trim().match(/^\|[-\s|]+\|$/) && !l.includes('Date'))
+                .map(l => l.trim());
+
+            const originalRows = extractDataRows(originalContent);
+            const newRows = extractDataRows(change.content);
+
+            // Check that all original rows still exist in the new content
+            const missingRows = originalRows.filter(row => {
+              // Normalize whitespace for comparison
+              const normalized = row.replace(/\s+/g, ' ');
+              return !newRows.some(nr => nr.replace(/\s+/g, ' ') === normalized);
+            });
+
+            if (missingRows.length > 0) {
+              throw new Error(
+                `AUDIT TRAIL VIOLATION: WORK_LOG.md update would delete ${missingRows.length} existing row(s). ` +
+                `Work log entries are APPEND-ONLY — you may add new rows but NEVER delete or modify existing ones. ` +
+                `Deleted rows: ${missingRows.slice(0, 3).map(r => `"${r.substring(0, 80)}"`).join(', ')}` +
+                `${missingRows.length > 3 ? ` ... and ${missingRows.length - 3} more` : ''}`
+              );
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith('AUDIT TRAIL VIOLATION')) {
+          throw err;
+        }
+        // If we can't fetch original, skip this check
+      }
+    }
+
+    // 7b. ROADMAP.md — block unchecking tasks ([ ] ← [x]) and deleting task lines
+    if (fileName === 'ROADMAP.MD') {
+      try {
+        const fileResponse = await fetch(`${apiBase}/contents/${encodeURIComponent(change.path)}?ref=${baseBranch}`, { headers });
+        if (fileResponse.ok) {
+          const fileData = await fileResponse.json() as { content?: string; encoding?: string };
+          if (fileData.content && fileData.encoding === 'base64') {
+            const originalContent = atob(fileData.content.replace(/\n/g, ''));
+
+            // Extract task lines: "- [ ] **Task..." or "- [x] **Task..."
+            const extractTasks = (text: string): { title: string; done: boolean }[] =>
+              text.split('\n')
+                .filter(l => l.match(/^[-*]\s+\[([ xX])\]/))
+                .map(l => {
+                  const m = l.match(/^[-*]\s+\[([ xX])\]\s+(.+)/);
+                  return m ? { title: m[2].trim(), done: m[1].toLowerCase() === 'x' } : null;
+                })
+                .filter((t): t is { title: string; done: boolean } => t !== null);
+
+            const originalTasks = extractTasks(originalContent);
+            const newTasks = extractTasks(change.content);
+
+            // Check for deleted tasks: tasks that existed in original but are completely gone
+            const newTaskTitles = newTasks.map(t => t.title.toLowerCase().replace(/\s+/g, ' '));
+            const deletedTasks = originalTasks.filter(ot =>
+              !newTaskTitles.some(nt => nt.includes(ot.title.toLowerCase().replace(/\s+/g, ' ').substring(0, 30)))
+            );
+
+            if (deletedTasks.length > 2) {
+              throw new Error(
+                `ROADMAP TAMPERING blocked: ${deletedTasks.length} tasks would be silently deleted from ROADMAP.md. ` +
+                `Roadmap tasks must NEVER be deleted — mark them as completed [x] or add notes, but don't remove them. ` +
+                `Missing tasks: ${deletedTasks.slice(0, 5).map(t => `"${t.title.substring(0, 60)}"`).join(', ')}` +
+                `${deletedTasks.length > 5 ? ` ... and ${deletedTasks.length - 5} more` : ''}`
+              );
+            }
+
+            // Warn if tasks are deleted (1-2 tasks might be legitimate consolidation)
+            if (deletedTasks.length > 0) {
+              warnings.push(
+                `⚠️ ROADMAP: ${deletedTasks.length} task(s) removed: ` +
+                `${deletedTasks.map(t => `"${t.title.substring(0, 40)}"`).join(', ')}. Verify this is intentional.`
+              );
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && (
+          err.message.startsWith('ROADMAP TAMPERING') ||
+          err.message.startsWith('AUDIT TRAIL')
+        )) {
+          throw err;
+        }
+      }
+    }
   }
 
   console.log(`[github_create_pr] Creating PR: ${owner}/${repo} "${title}" (${changes.length} files)${warnings.length > 0 ? ` [${warnings.length} warnings]` : ''}`);

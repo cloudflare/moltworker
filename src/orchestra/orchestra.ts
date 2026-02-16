@@ -299,12 +299,18 @@ This health check prevents failed or broken implementations caused by editing fi
 In the SAME PR, also include:
 
 **ROADMAP.md update:**
-- Change the completed task from \`- [ ]\` to \`- [x]\`
+- Change ONLY the task you just completed from \`- [ ]\` to \`- [x]\`
 - Add completion note if relevant
+- **NEVER delete existing tasks** — the tool will BLOCK this as ROADMAP TAMPERING
+- **NEVER modify other tasks' status** — only change the one you implemented
+- **Preserve ALL existing content** — notes, phases, other tasks must remain unchanged
 
 **WORK_LOG.md update:**
 - Append a new row to the table:
   \`| {date} | {task title} | ${modelAlias} | {branch} | {pr-url} | ✅ |\`
+- **APPEND ONLY** — the tool will BLOCK deletion of existing work log rows
+- **NEVER delete, modify, or rewrite existing rows** — they are an immutable audit trail
+- **NEVER erase Notes sections** — existing notes document important context
 
 ## Step 6: CREATE PR
 - Branch: \`{task-slug}-${modelAlias}\` (bot/ prefix added automatically)
@@ -341,6 +347,9 @@ The \`pr:\` field MUST be a real GitHub URL. If PR creation failed, set \`pr: FA
 - Do NOT skip ahead — respect task dependencies in the roadmap
 - Do NOT modify unrelated files
 - **NEVER regenerate entire files** — make surgical, targeted edits only. Preserve all existing functions, exports, and business logic.
+- **NEVER delete work log entries** — WORK_LOG.md is append-only. The \`github_create_pr\` tool will BLOCK any update that removes existing rows.
+- **NEVER delete roadmap tasks** — mark them [x] when done, but NEVER remove them. The tool will BLOCK deletion of >2 tasks.
+- **Your PR should ADD more lines than it deletes** — if your task is to add features, the codebase should grow. Massive net deletions will be BLOCKED.
 ${historyContext}`;
 }
 
@@ -964,6 +973,7 @@ In the SAME PR:
 
 **WORK_LOG.md update:**
 - Append: \`| {date} | REDO: {task title} | ${modelAlias} | {branch} | {pr-url} | ✅ |\`
+- **APPEND ONLY** — NEVER delete or modify existing work log rows (immutable audit trail)
 
 ## Step 5: CREATE PR
 - Branch: \`redo-{task-slug}-${modelAlias}\` (bot/ prefix added automatically)
@@ -994,5 +1004,7 @@ The \`pr:\` field MUST be a real GitHub URL. If PR creation failed, set \`pr: FA
 - ALWAYS update ROADMAP.md and WORK_LOG.md in the same PR
 - Do NOT modify unrelated files
 - **NEVER regenerate entire files** — make surgical, targeted edits only. Preserve all existing functions, exports, and business logic.
+- **NEVER delete work log entries** — WORK_LOG.md is append-only. The tool will BLOCK deletion of existing rows.
+- **NEVER delete roadmap tasks** — mark them [x] or add notes, but never remove entries. The tool will BLOCK this.
 ${historyContext}`;
 }
