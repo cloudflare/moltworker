@@ -51,14 +51,14 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
       'ls /root/.openclaw/openclaw.json 2>/dev/null && echo FOUND || echo NOTFOUND',
       5000,
     );
-    const newFound = checkNew.stdout.trim() === 'FOUND';
+    const newFound = checkNew.stdout.includes('FOUND') && !checkNew.stdout.includes('NOTFOUND');
     if (!newFound) {
       const checkLegacy = await runCommandWithCleanup(
         sandbox,
         'ls /root/.clawdbot/clawdbot.json 2>/dev/null && echo FOUND || echo NOTFOUND',
         5000,
       );
-      if (checkLegacy.stdout.trim() === 'FOUND') {
+      if (checkLegacy.stdout.includes('FOUND') && !checkLegacy.stdout.includes('NOTFOUND')) {
         configDir = '/root/.clawdbot';
       } else {
         return {
