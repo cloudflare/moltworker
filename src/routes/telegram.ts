@@ -112,6 +112,7 @@ telegram.get('/setup', async (c) => {
     { command: 'status', description: 'Bot status & info' },
     { command: 'saves', description: 'List saved checkpoints' },
     { command: 'ar', description: 'Toggle auto-resume' },
+    { command: 'resume', description: 'Resume task with optional model override' },
     { command: 'credits', description: 'OpenRouter balance' },
   ]);
 

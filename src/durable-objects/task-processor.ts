@@ -18,6 +18,7 @@ export type TaskPhase = 'plan' | 'work' | 'review';
 // Phase-aware prompts injected at each stage
 const PLAN_PHASE_PROMPT = 'Before starting, briefly outline your approach (2-3 bullet points): what tools you\'ll use and in what order. Then proceed immediately with execution.';
 const REVIEW_PHASE_PROMPT = 'Before delivering your final answer, briefly verify: (1) Did you answer the complete question? (2) Are all data points current and accurate? (3) Is anything missing?';
+const CODING_REVIEW_PROMPT = 'Before delivering your final answer, verify with evidence:\n(1) Did you answer the complete question? Cite specific tool outputs or file contents that support your answer.\n(2) If you made code changes, did you verify them with the relevant tool (github_read_file, web_fetch, etc.)? Do NOT claim changes were made unless a tool confirmed it.\n(3) If you ran commands or created PRs, check the tool result — did it actually succeed? If a tool returned an error, say so.\n(4) For any claim about repository state (files exist, code works, tests pass), you MUST have observed it from a tool output in this session. Do not assert repo state from memory.\n(5) If you could not fully complete the task, say what remains and why — do not claim completion.\nLabel your confidence: High (tool-verified), Medium (partially verified), or Low (inferred without tool confirmation).';
 const ORCHESTRA_REVIEW_PROMPT = 'CRITICAL REVIEW — verify before reporting:\n(1) Did github_create_pr SUCCEED? Check the tool result — if it returned an error (422, 403, etc.), you MUST retry with a different branch name or fix the issue. Do NOT claim success if the PR was not created.\n(2) Does your ORCHESTRA_RESULT block contain a REAL PR URL (https://github.com/...)? If not, the task is NOT complete.\n(3) Did you update ROADMAP.md and WORK_LOG.md in the same PR?\n(4) INCOMPLETE REFACTOR CHECK: If you created new module files (extracted code into separate files), did you ALSO update the SOURCE file to import from the new modules and remove the duplicated code? Creating new files without updating the original is dead code and the task is NOT complete. Check the github_create_pr tool result for "INCOMPLETE REFACTOR" warnings.\nIf any of these fail, fix the issue NOW before reporting.';
 
 // Max characters for a single tool result before truncation
@@ -399,7 +400,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     taskPrompt?: string,
     slotName: string = 'latest',
     completed: boolean = false,
-    phase?: TaskPhase
+    phase?: TaskPhase,
+    modelAlias?: string
   ): Promise<void> {
     const checkpoint = {
       taskId,
@@ -410,6 +412,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       taskPrompt: taskPrompt?.substring(0, 200), // Store first 200 chars for display
       completed, // If true, this checkpoint won't be used for auto-resume
       phase, // Structured task phase for resume
+      modelAlias, // Model used at checkpoint time (for resume escalation)
     };
     const key = `checkpoints/${userId}/${slotName}.json`;
     await r2.put(key, JSON.stringify(checkpoint));
@@ -1244,7 +1247,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               request.prompt,
               'latest',
               false,
-              task.phase
+              task.phase,
+              request.modelAlias
             );
           }
 
@@ -1378,11 +1382,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           await this.doState.storage.put('task', task);
           console.log(`[TaskProcessor] Phase transition: work → review (iteration ${task.iterations})`);
 
-          // Detect orchestra tasks for a stricter review prompt
+          // Select review prompt: orchestra > coding > general
           const systemMsg = request.messages.find(m => m.role === 'system');
           const sysContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
           const isOrchestraTask = sysContent.includes('Orchestra INIT Mode') || sysContent.includes('Orchestra RUN Mode') || sysContent.includes('Orchestra REDO Mode');
-          const reviewPrompt = isOrchestraTask ? ORCHESTRA_REVIEW_PROMPT : REVIEW_PHASE_PROMPT;
+          const taskCategory = detectTaskCategory(request.messages);
+          const reviewPrompt = isOrchestraTask ? ORCHESTRA_REVIEW_PROMPT
+            : taskCategory === 'coding' ? CODING_REVIEW_PROMPT
+            : REVIEW_PHASE_PROMPT;
 
           // Add the model's current response and inject review prompt
           conversationMessages.push({
@@ -1424,7 +1431,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             request.prompt,
             'latest',
             true, // completed flag
-            task.phase
+            task.phase,
+            request.modelAlias
           );
         }
 
@@ -1551,7 +1559,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           request.prompt,
           'latest',
           false, // NOT completed — allow resume to pick this up
-          task.phase
+          task.phase,
+          request.modelAlias
         );
       }
 
@@ -1614,7 +1623,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           request.prompt,
           'latest',
           false,
-          task.phase
+          task.phase,
+          request.modelAlias
         );
       }
 

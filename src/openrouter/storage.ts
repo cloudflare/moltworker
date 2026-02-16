@@ -40,6 +40,7 @@ export interface CheckpointInfo {
   savedAt: number;
   taskPrompt?: string;
   completed?: boolean; // True if this was a successfully completed task
+  modelAlias?: string; // Model used at checkpoint time (for resume escalation)
 }
 
 /**
@@ -277,6 +278,7 @@ export class UserStorage {
         savedAt: number;
         taskPrompt?: string;
         completed?: boolean;
+        modelAlias?: string;
       };
       return {
         slotName,
@@ -285,6 +287,7 @@ export class UserStorage {
         savedAt: data.savedAt,
         taskPrompt: data.taskPrompt,
         completed: data.completed,
+        modelAlias: data.modelAlias,
       };
     } catch {
       return null;

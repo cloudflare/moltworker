@@ -754,7 +754,7 @@ export class TelegramHandler {
           `📊 Bot Status\n\n` +
           `Model: ${statusModelInfo?.name || statusModel}\n` +
           `Conversation: ${statusHistory.length} messages\n` +
-          `Auto-resume: ${statusAutoResume ? `✓ Enabled (${statusModelInfo?.isFree ? '50x free' : '10x paid'})` : '✗ Disabled'}\n` +
+          `Auto-resume: ${statusAutoResume ? `✓ Enabled (${statusModelInfo?.isFree ? '15x free' : '10x paid'})` : '✗ Disabled'}\n` +
           `GitHub Tools: ${hasGithub ? '✓ Configured (read + PR creation)' : '✗ Not configured'}\n` +
           `Browser Tools: ${hasBrowser ? '✓ Configured' : '✗ Not configured'}\n` +
           `Sandbox: ${hasSandbox ? '✓ Available (code execution)' : '✗ Not available'}\n` +
@@ -781,9 +781,18 @@ export class TelegramHandler {
         await this.bot.sendMessage(
           chatId,
           newAutoResume
-            ? '✓ Auto-resume enabled. Tasks will automatically retry on timeout (10x paid, 50x free models).'
+            ? '✓ Auto-resume enabled. Tasks will automatically retry on timeout (10x paid, 15x free models).'
             : '✗ Auto-resume disabled. You will need to manually tap Resume when tasks timeout.'
         );
+        break;
+
+      case '/resume':
+        // Resume from checkpoint with optional model override
+        if (!this.taskProcessor) {
+          await this.bot.sendMessage(chatId, '⚠️ Task processor not available.');
+          break;
+        }
+        await this.handleResumeCommand(chatId, userId, args);
         break;
 
       case '/pick':
@@ -826,7 +835,8 @@ export class TelegramHandler {
           const age = this.formatAge(cp.savedAt);
           const status = cp.completed ? '✅' : '⏸️';
           const prompt = cp.taskPrompt ? `\n   _${this.escapeMarkdown(cp.taskPrompt.substring(0, 50))}${cp.taskPrompt.length > 50 ? '...' : ''}_` : '';
-          msg += `${status} \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools (${age})${prompt}\n`;
+          const modelTag = cp.modelAlias ? ` [${cp.modelAlias}]` : '';
+          msg += `${status} \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools${modelTag} (${age})${prompt}\n`;
         }
         msg += '\n✅=completed ⏸️=interrupted\n_Use /delsave <name> to delete, /saveas <name> to backup_';
         await this.bot.sendMessage(chatId, msg, { parseMode: 'Markdown' });
@@ -1844,6 +1854,58 @@ export class TelegramHandler {
   }
 
   /**
+   * Resolve the model to use for resume, with escalation logic.
+   * If the last checkpoint was on a weak free model and the task is coding-related,
+   * suggest (or auto-switch to) a stronger model.
+   * @param overrideAlias - User-specified model override from /resume <model>
+   * @returns { modelAlias, escalationMsg } - resolved model + optional user message
+   */
+  private async resolveResumeModel(
+    userId: string,
+    overrideAlias?: string
+  ): Promise<{ modelAlias: string; escalationMsg?: string }> {
+    // If user explicitly specified a model, use it directly
+    if (overrideAlias) {
+      const model = getModel(overrideAlias);
+      if (model) {
+        return { modelAlias: overrideAlias, escalationMsg: `🔄 Resuming with /${overrideAlias} (${model.name})` };
+      }
+    }
+
+    // Get the user's current model
+    const userModel = await this.storage.getUserModel(userId);
+
+    // Check the last checkpoint for stall signals
+    const cpInfo = await this.storage.getCheckpointInfo(userId, 'latest');
+    if (!cpInfo || cpInfo.completed) {
+      return { modelAlias: userModel };
+    }
+
+    // Determine if the checkpoint model was a free model
+    const cpModelAlias = cpInfo.modelAlias || userModel;
+    const cpModel = getModel(cpModelAlias);
+    if (!cpModel?.isFree) {
+      return { modelAlias: userModel };
+    }
+
+    // Detect if this is a coding task from the checkpoint prompt
+    const prompt = cpInfo.taskPrompt?.toLowerCase() || '';
+    const isCodingTask = /\b(code|implement|debug|fix|refactor|function|class|script|deploy|build|test|pr\b|pull.?request|repo\b|commit|merge|branch)\b/.test(prompt);
+
+    // If it's a coding task on a free model with many iterations but few tools, suggest escalation
+    const lowToolRatio = cpInfo.toolsUsed < Math.max(1, cpInfo.iterations / 3);
+    if (isCodingTask && lowToolRatio) {
+      return {
+        modelAlias: userModel,
+        escalationMsg: `💡 Previous run on /${cpModelAlias} (free) had low progress (${cpInfo.iterations} iters, ${cpInfo.toolsUsed} tools). Consider switching to a stronger model:\n` +
+          `  /resume deep — DeepSeek V3.2\n  /resume sonnet — Claude Sonnet\n  /resume grok — Grok\n\nResuming with /${userModel}...`,
+      };
+    }
+
+    return { modelAlias: userModel };
+  }
+
+  /**
    * Handle "continue" keyword by resuming from checkpoint.
    * Mirrors the resume button callback logic but triggered by text message.
    */
@@ -1871,7 +1933,10 @@ export class TelegramHandler {
       { role: 'user', content: lastUserMessage.content },
     ];
 
-    const modelAlias = await this.storage.getUserModel(userId);
+    const { modelAlias, escalationMsg } = await this.resolveResumeModel(userId);
+    if (escalationMsg) {
+      await this.bot.sendMessage(chatId, escalationMsg);
+    }
     const autoResume = await this.storage.getUserAutoResume(userId);
     const taskId = `${userId}-${Date.now()}`;
     const taskRequest: TaskRequest = {
@@ -1897,6 +1962,65 @@ export class TelegramHandler {
     }));
 
     // Don't add "continue" to conversation history — it's a control command, not content
+  }
+
+  /**
+   * Handle /resume [model] command — resume from checkpoint with optional model override.
+   */
+  private async handleResumeCommand(chatId: number, userId: string, args: string[]): Promise<void> {
+    if (!this.taskProcessor) return;
+
+    await this.bot.sendChatAction(chatId, 'typing');
+
+    const history = await this.storage.getConversation(userId, 1);
+    const lastUserMessage = history.find(m => m.role === 'user');
+
+    if (!lastUserMessage) {
+      await this.bot.sendMessage(chatId, 'No previous task found to resume.\n\nUsage: /resume [model]\nExample: /resume deep');
+      return;
+    }
+
+    // Validate optional model override
+    const overrideAlias = args[0]?.toLowerCase();
+    if (overrideAlias && !getModel(overrideAlias)) {
+      await this.bot.sendMessage(chatId, `Unknown model: ${overrideAlias}\nType /models to see available models.\n\nUsage: /resume [model]`);
+      return;
+    }
+
+    const { modelAlias, escalationMsg } = await this.resolveResumeModel(userId, overrideAlias);
+    if (escalationMsg) {
+      await this.bot.sendMessage(chatId, escalationMsg);
+    }
+
+    const systemPrompt = await this.getSystemPrompt();
+    const messages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: lastUserMessage.content },
+    ];
+
+    const autoResume = await this.storage.getUserAutoResume(userId);
+    const taskId = `${userId}-${Date.now()}`;
+    const taskRequest: TaskRequest = {
+      taskId,
+      chatId,
+      userId,
+      modelAlias,
+      messages,
+      telegramToken: this.telegramToken,
+      openrouterKey: this.openrouterKey,
+      githubToken: this.githubToken,
+      dashscopeKey: this.dashscopeKey,
+      moonshotKey: this.moonshotKey,
+      deepseekKey: this.deepseekKey,
+      autoResume,
+    };
+
+    const doId = this.taskProcessor.idFromName(userId);
+    const doStub = this.taskProcessor.get(doId);
+    await doStub.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(taskRequest),
+    }));
   }
 
   /**
@@ -2290,7 +2414,11 @@ export class TelegramHandler {
               { role: 'user', content: lastUserMessage.content },
             ];
 
-            const modelAlias = await this.storage.getUserModel(userId);
+            // Check for model escalation (e.g., stalled on weak free model)
+            const { modelAlias, escalationMsg } = await this.resolveResumeModel(userId);
+            if (escalationMsg) {
+              await this.bot.sendMessage(chatId, escalationMsg);
+            }
             const autoResume = await this.storage.getUserAutoResume(userId);
             const taskId = `${userId}-${Date.now()}`;
             const taskRequest: TaskRequest = {
@@ -3131,6 +3259,7 @@ Available: fluxklein, fluxpro, fluxflex, fluxmax
 /load <name> — Restore state
 /delsave <name> — Delete slot
 /ar — Toggle auto-resume
+/resume [model] — Resume with optional model override
 
 ━━━ Models (quick switch) ━━━
 Paid:  /deep /grok /gpt /sonnet /haiku /flash /mimo
