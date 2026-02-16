@@ -161,6 +161,63 @@
   color: var(--text-muted);
 }
 
+.section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.gateway-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.gateway-status-badge .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.gateway-status-badge.running {
+  background-color: rgba(74, 222, 128, 0.15);
+  color: var(--success-color);
+}
+
+.gateway-status-badge.running .status-dot {
+  background-color: var(--success-color);
+}
+
+.gateway-status-badge.starting {
+  background-color: rgba(251, 191, 36, 0.15);
+  color: var(--warning-color);
+}
+
+.gateway-status-badge.starting .status-dot {
+  background-color: var(--warning-color);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+.gateway-status-badge.stopped {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: var(--error-color);
+}
+
+.gateway-status-badge.stopped .status-dot {
+  background-color: var(--error-color);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;

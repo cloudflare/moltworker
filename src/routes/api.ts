@@ -7,6 +7,7 @@ import {
   syncToR2,
   waitForProcess,
 } from '../gateway';
+import { MOLTBOT_PORT } from '../config';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -254,6 +255,36 @@ adminApi.post('/storage/sync', async (c) => {
       },
       status,
     );
+  }
+});
+
+// GET /api/admin/gateway/status - Check gateway process status
+adminApi.get('/gateway/status', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    const process = await findExistingMoltbotProcess(sandbox);
+
+    if (!process) {
+      return c.json({ status: 'stopped' as const });
+    }
+
+    // Process exists — check if port is responding
+    try {
+      const url = `http://localhost:${MOLTBOT_PORT}/`;
+      const response = await sandbox.containerFetch(new Request(url), MOLTBOT_PORT);
+      // Any response (even 404) means the port is up
+      if (response) {
+        return c.json({ status: 'running' as const, processId: process.id });
+      }
+    } catch {
+      // Port not responding — process is still starting
+    }
+
+    return c.json({ status: 'starting' as const, processId: process.id });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
   }
 });
 
