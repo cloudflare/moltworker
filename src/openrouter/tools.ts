@@ -544,9 +544,10 @@ async function fetchUrl(url: string): Promise<string> {
     }
   }
 
-  // Truncate very long responses
-  if (text.length > 50000) {
-    return text.slice(0, 50000) + '\n\n[Content truncated - exceeded 50KB]';
+  // Truncate long responses — 20KB is enough for useful text content
+  // and avoids overwhelming model context or triggering content filters
+  if (text.length > 20000) {
+    return text.slice(0, 20000) + '\n\n[Content truncated - exceeded 20KB]';
   }
 
   return text;

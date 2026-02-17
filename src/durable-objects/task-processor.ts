@@ -775,6 +775,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Restore phase from checkpoint, or default to 'work' (plan is already done)
         task.phase = checkpoint.phase || 'work';
         task.phaseStartIteration = 0;
+        // Sync stall tracking to checkpoint state — prevents negative tool counts
+        // when checkpoint has fewer tools than the pre-resume toolCountAtLastResume
+        task.toolCountAtLastResume = checkpoint.toolsUsed.length;
         resumedFromCheckpoint = true;
         await this.doState.storage.put('task', task);
 
@@ -1049,6 +1052,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               break;
             }
 
+            // 400 content filter (DashScope/Alibaba) — deterministic, don't retry
+            if (/\b400\b/.test(lastError.message) && /inappropriate.?content|data_inspection_failed/i.test(lastError.message)) {
+              console.log('[TaskProcessor] Content filter 400 — failing fast (will try rotation)');
+              break;
+            }
+
             if (attempt < MAX_API_RETRIES) {
               console.log(`[TaskProcessor] Retrying in 2 seconds...`);
               await new Promise(r => setTimeout(r, 2000));
@@ -1063,9 +1072,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           const isRateLimited = /429|503|rate.?limit|overloaded|capacity|busy/i.test(lastError.message);
           const isQuotaExceeded = /\b402\b/.test(lastError.message);
           const isModelGone = /\b404\b/.test(lastError.message);
+          const isContentFilter = /inappropriate.?content|data_inspection_failed/i.test(lastError.message);
           const currentIsFree = getModel(task.modelAlias)?.isFree === true;
 
-          if ((isRateLimited || isQuotaExceeded || isModelGone) && currentIsFree && rotationIndex < MAX_FREE_ROTATIONS) {
+          if ((isRateLimited || isQuotaExceeded || isModelGone || isContentFilter) && currentIsFree && rotationIndex < MAX_FREE_ROTATIONS) {
             // Use capability-aware rotation order (preferred category first, emergency core last)
             const nextAlias = rotationOrder[rotationIndex];
             rotationIndex++;
@@ -1075,7 +1085,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             task.lastUpdate = Date.now();
             await this.doState.storage.put('task', task);
 
-            const reason = isModelGone ? 'unavailable (404)' : 'busy';
+            const reason = isContentFilter ? 'content filtered' : isModelGone ? 'unavailable (404)' : 'busy';
             const isEmergency = EMERGENCY_CORE_ALIASES.includes(nextAlias) && rotationIndex > MAX_FREE_ROTATIONS - EMERGENCY_CORE_ALIASES.length;
             console.log(`[TaskProcessor] Rotating from /${prevAlias} to /${nextAlias} — ${reason} (${rotationIndex}/${MAX_FREE_ROTATIONS}${isEmergency ? ', emergency core' : ''}, task: ${taskCategory})`);
 
@@ -1084,7 +1094,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               try {
                 await this.editTelegramMessage(
                   request.telegramToken, request.chatId, statusMessageId,
-                  `🔄 /${prevAlias} is ${reason}. Switching to /${nextAlias}... (${task.iterations} iter)`
+                  `🔄 /${prevAlias} ${reason}. Switching to /${nextAlias}... (${task.iterations} iter)`
                 );
               } catch { /* non-fatal */ }
             }
