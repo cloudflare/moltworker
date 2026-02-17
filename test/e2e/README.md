@@ -50,7 +50,7 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 1. **Terraform** creates isolated resources: service token + R2 bucket
 2. **Wrangler** deploys worker with unique name (timestamp + random suffix)
 3. **Access API** creates Access application (must be after worker exists—workers.dev domains require the worker to exist first)
-4. **Playwright** opens browser with Access headers, navigates to worker
+4. **plwr** opens browser with Access headers, navigates to worker
 5. **Tests run** with video recording capturing the full UI flow
 6. **Teardown** deletes everything: Access app → worker → R2 bucket → service token
 
@@ -60,13 +60,13 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 - **Access created post-deploy**: Terraform can't create Access apps for non-existent domains
 - **Container names**: Derived from worker name as `{worker-name}-sandbox`
 
-## Test framework: cctr + playwright-cli
+## Test framework: cctr + plwr
 
 Tests use two complementary tools:
 
 ### [cctr](https://github.com/andreasjansson/cctr) - CLI Corpus Test Runner
 
-cctr runs test where each test case is a command line script, e.g.
+cctr runs tests where each test case is a command line script, e.g.
 
 ```
 ===
@@ -75,7 +75,7 @@ navigate to admin page to approve device
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-./pw --session=moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN"
+plwr -S moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN"
 ---
 ```
 
@@ -86,25 +86,20 @@ Key features:
 - **Fixtures**: `fixture/` directory copied to temp dir for each suite
 - **Setup/teardown**: `_setup.txt` and `_teardown.txt` run before/after tests
 
-### [playwright-cli](https://github.com/microsoft/playwright-cli) - Browser automation CLI
+### [plwr](https://github.com/andreasjansson/plwr) - Browser automation CLI
 
-playwright-cli provides shell-friendly browser automation. Instead of writing JavaScript test files, you control the browser with CLI commands:
+plwr provides shell-friendly browser automation with CSS selectors:
 
 ```bash
-# Open a page
-playwright-cli --session=test open "https://example.com"
-
-# Run arbitrary Playwright code
-playwright-cli --session=test run-code "async page => {
-  await page.waitForSelector('text=Hello');
-}"
-
-# Take screenshots, record video
-playwright-cli --session=test video-start
-playwright-cli --session=test screenshot
+plwr -S test start
+plwr -S test open "https://example.com"
+plwr -S test wait 'text=Hello'
+plwr -S test click 'button:has-text("Submit")'
+plwr -S test fill textarea 'Hello world'
+plwr -S test video-start
+plwr -S test screenshot
+plwr -S test stop
 ```
-
-The `./pw` wrapper in our fixture works around a playwright-cli bug where errors don't set a non-zero exit code. It detects `### Error` in the output and exits with code 1, making errors fail the test properly.
 
 ## Example test
 
@@ -115,37 +110,27 @@ Here's a complete test that approves a device and sends a chat message:
 wait for Approve All button and click it
 %require
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  const btn = await page.waitForSelector('button:has-text(\"Approve All\")', { timeout: 120000 });
-  await btn.click();
-}"
+plwr -S moltworker-e2e click 'button:has-text("Approve All")' -T 120000
 ---
 
 ===
 wait for approval to complete
 %require
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=No pending pairing requests', { timeout: 120000 });
-}"
+plwr -S moltworker-e2e wait 'text=No pending pairing requests' -T 120000
 ---
 
 ===
 type math question into chat
 %require
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  const textarea = await page.waitForSelector('textarea');
-  await textarea.fill('What is 847293 + 651824? Reply with just the number.');
-}"
+plwr -S moltworker-e2e fill textarea 'What is 847293 + 651824? Reply with just the number.'
 ---
 
 ===
 wait for response containing the correct answer
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=1499117', { timeout: 120000 });
-}"
+plwr -S moltworker-e2e wait 'text=1499117' -T 120000
 ---
 ```
 
@@ -156,7 +141,8 @@ wait for response containing the correct answer
 1. Copy `.dev.vars.example` to `.dev.vars` and fill in credentials (see file for detailed instructions)
 2. Install dependencies: `npm install`
 3. Install cctr: `brew install andreasjansson/tap/cctr` or `cargo install cctr`
-4. Install playwright-cli: `npm install -g playwright-cli`
+4. Install plwr: see [plwr install instructions](https://github.com/andreasjansson/plwr)
+5. Install Playwright browsers: `npx playwright install chromium`
 
 ### Run tests
 

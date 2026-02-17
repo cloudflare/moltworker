@@ -19,33 +19,13 @@ where
 * strip(output) endswith "ready"
 
 ===
-start video recording
-===
-./pw --session=moltworker-e2e video-start
----
-{{ output }}
----
-where
-* output contains "Video recording started"
-
-===
 navigate to main page and wait for worker to be ready
 %require
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-# Use page.goto() instead of 'open' — 'open' creates a new browser process,
-# which loses the CF-Access headers set via setExtraHTTPHeaders in start-browser.
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.goto('$WORKER_URL/?token=$TOKEN');
-}"
-# Wait for pairing required message (worker shows loading screen first, then UI loads)
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=Pairing required', { timeout: 480000 });
-}"
-echo "Worker is ready"
+plwr -S moltworker-e2e open "$WORKER_URL/?token=$TOKEN" -T 480000
+# Wait for "Pairing required" — this ensures the WS connection has been
+# attempted and the gateway has registered a pending pairing request.
+plwr -S moltworker-e2e wait 'text=Pairing required' -T 480000
 ---
-{{ output }}
----
-where
-* output contains "Worker is ready"

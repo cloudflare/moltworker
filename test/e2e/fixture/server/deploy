@@ -8,8 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -n "$CCTR_TEST_PATH" ]; then
     PROJECT_DIR="$(cd "$CCTR_TEST_PATH/../.." && pwd)"
 else
-    FIXTURE_DIR="$(dirname "$SCRIPT_DIR")"
-    PROJECT_DIR="$(cd "$FIXTURE_DIR/../.." && pwd)"
+    # Running directly: SCRIPT_DIR is fixture/server/, project root is 4 levels up
+    # fixture/server/ -> fixture/ -> test/e2e/ -> test/ -> moltworker/
+    PROJECT_DIR="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 fi
 
 # Required environment variables
