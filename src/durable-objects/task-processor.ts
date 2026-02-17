@@ -892,6 +892,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               role: string;
               content: string | null;
               tool_calls?: ToolCall[];
+              reasoning_content?: string;
             };
             finish_reason: string;
           }>;
@@ -1170,12 +1171,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
           consecutiveNoToolIterations = 0; // Reset stall counter — model is working
 
-          // Add assistant message with tool calls
-          conversationMessages.push({
+          // Add assistant message with tool calls (preserve reasoning_content for Moonshot thinking mode)
+          const assistantMsg: ChatMessage = {
             role: 'assistant',
             content: choice.message.content,
             tool_calls: choice.message.tool_calls,
-          });
+          };
+          if (choice.message.reasoning_content) {
+            assistantMsg.reasoning_content = choice.message.reasoning_content;
+          }
+          conversationMessages.push(assistantMsg);
 
           // Execute all tools in parallel for faster execution
           const toolNames = choice.message.tool_calls.map(tc => tc.function.name);

@@ -13,6 +13,8 @@ export interface ChatMessage {
   content: string | ContentPart[] | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  /** Chain-of-thought from providers with thinking mode (e.g. Moonshot Kimi) */
+  reasoning_content?: string;
 }
 
 export interface ContentPart {
@@ -50,6 +52,7 @@ export interface ChatCompletionResponse {
       role: string;
       content: string | null;
       tool_calls?: ToolCall[];
+      reasoning_content?: string;
     };
     finish_reason: string;
   }>;
@@ -255,11 +258,15 @@ export class OpenRouterClient {
         }
 
         // Add assistant message with tool calls to conversation
-        conversationMessages.push({
+        const assistantMsg: ChatMessage = {
           role: 'assistant',
           content: choice.message.content,
           tool_calls: choice.message.tool_calls,
-        });
+        };
+        if (choice.message.reasoning_content) {
+          assistantMsg.reasoning_content = choice.message.reasoning_content;
+        }
+        conversationMessages.push(assistantMsg);
 
         // Collect tool names and notify caller
         for (const toolCall of choice.message.tool_calls) {
