@@ -179,6 +179,8 @@ const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
 const MAX_NO_PROGRESS_RESUMES = 3;
 // Max consecutive iterations with no tool calls in main loop before stopping
 const MAX_STALL_ITERATIONS = 5;
+// Max times the model can call the exact same tool with the same args before we break the loop
+const MAX_SAME_TOOL_REPEATS = 3;
 
 /** Get the auto-resume limit based on model cost */
 function getAutoResumeLimit(modelAlias: string): number {
@@ -749,6 +751,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     const MAX_EMPTY_RETRIES = 2;
     // Stall detection: consecutive iterations where model produces no tool calls
     let consecutiveNoToolIterations = 0;
+    // Same-tool loop detection: track recent tool call signatures (name+args)
+    const recentToolSignatures: string[] = [];
 
     let conversationMessages: ChatMessage[] = [...request.messages];
     const maxIterations = 100; // Very high limit for complex tasks
@@ -1227,6 +1231,30 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               content: truncatedContent,
               tool_call_id: toolResult.tool_call_id,
             });
+          }
+
+          // Same-tool loop detection: check if model is calling identical tools repeatedly
+          for (const tc of choice.message.tool_calls!) {
+            const sig = `${tc.function.name}:${tc.function.arguments}`;
+            recentToolSignatures.push(sig);
+          }
+          // Keep only last 20 signatures to avoid unbounded growth
+          while (recentToolSignatures.length > 20) {
+            recentToolSignatures.shift();
+          }
+          // Check for repeats: count how many times the most recent signature appears
+          const lastSig = recentToolSignatures[recentToolSignatures.length - 1];
+          const repeatCount = recentToolSignatures.filter(s => s === lastSig).length;
+          if (repeatCount >= MAX_SAME_TOOL_REPEATS) {
+            const toolName = choice.message.tool_calls![choice.message.tool_calls!.length - 1].function.name;
+            console.log(`[TaskProcessor] Same-tool loop detected: ${toolName} called ${repeatCount} times with identical args`);
+            // Inject a nudge to break the loop instead of hard-failing
+            conversationMessages.push({
+              role: 'user',
+              content: `[SYSTEM] You have called ${toolName} ${repeatCount} times with the same arguments and gotten the same result. This approach is not working. Try a DIFFERENT tool or a DIFFERENT approach to accomplish your task. If you cannot proceed, provide your best answer with the information you have.`,
+            });
+            // Clear signatures so we give the model a fresh chance
+            recentToolSignatures.length = 0;
           }
 
           // Compress context if it's getting too large
