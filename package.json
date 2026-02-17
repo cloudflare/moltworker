@@ -10,7 +10,7 @@
     "dev": "vite dev",
     "start": "wrangler dev",
     "types": "wrangler types",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "wrangler types && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

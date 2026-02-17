@@ -44,6 +44,7 @@ vi.mock('../openrouter/models', () => ({
   getFreeToolModels: vi.fn(() => ['free1', 'free2']),
   categorizeModel: vi.fn(() => 'general'),
   clampMaxTokens: vi.fn((_, requested: number) => Math.min(requested, 8192)),
+  getTemperature: vi.fn(() => 0.7),
   modelSupportsTools: vi.fn(() => true),
 }));
 

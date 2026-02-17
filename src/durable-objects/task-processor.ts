@@ -7,7 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
-import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
+import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { extractLearning, storeLearning, storeLastTaskSummary } from '../openrouter/learnings';
 import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
@@ -923,7 +923,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 conversationMessages,
                 {
                   maxTokens: 16384,
-                  temperature: 0.7,
+                  temperature: getTemperature(task.modelAlias),
                   tools: useTools ? TOOLS_WITHOUT_BROWSER : undefined,
                   toolChoice: useTools ? 'auto' : undefined,
                   idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
@@ -963,7 +963,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                     model: getModelId(task.modelAlias),
                     messages: conversationMessages,
                     max_tokens: clampMaxTokens(task.modelAlias, 16384),
-                    temperature: 0.7,
+                    temperature: getTemperature(task.modelAlias),
                   };
                 if (useTools) {
                   requestBody.tools = TOOLS_WITHOUT_BROWSER;

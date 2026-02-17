@@ -2,7 +2,11 @@ import type { Sandbox } from '@cloudflare/sandbox';
 import type { TaskProcessor } from './durable-objects/task-processor';
 
 /**
- * Environment bindings for the Moltbot Worker
+ * Environment bindings for the Moltbot Worker.
+ *
+ * Binding types should match the auto-generated Cloudflare.Env in
+ * worker-configuration.d.ts (run `npm run types` to regenerate).
+ * Secrets and vars are declared manually since wrangler can't infer them.
  */
 export interface MoltbotEnv {
   Sandbox: DurableObjectNamespace<Sandbox>;

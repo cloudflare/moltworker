@@ -26,6 +26,7 @@ import {
   type OrchestraTask,
 } from '../orchestra/orchestra';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
+import { fetchDOWithRetry } from '../utils/do-retry';
 import {
   MODELS,
   getModel,
@@ -806,7 +807,7 @@ export class TelegramHandler {
           try {
             const doId = this.taskProcessor.idFromName(userId);
             const doStub = this.taskProcessor.get(doId);
-            const response = await doStub.fetch(new Request('https://do/cancel', { method: 'POST' }));
+            const response = await fetchDOWithRetry(doStub, new Request('https://do/cancel', { method: 'POST' }));
             const result = await response.json() as { status: string };
             if (result.status === 'cancelled') {
               // Message already sent by DO
@@ -1582,7 +1583,7 @@ export class TelegramHandler {
 
     const doId = this.taskProcessor.idFromName(userId);
     const doStub = this.taskProcessor.get(doId);
-    await doStub.fetch(new Request('https://do/process', {
+    await fetchDOWithRetry(doStub, new Request('https://do/process', {
       method: 'POST',
       body: JSON.stringify(taskRequest),
     }));
@@ -1811,7 +1812,7 @@ export class TelegramHandler {
 
           const doId = this.taskProcessor.idFromName(userId);
           const doStub = this.taskProcessor.get(doId);
-          await doStub.fetch(new Request('https://do/process', {
+          await fetchDOWithRetry(doStub, new Request('https://do/process', {
             method: 'POST',
             body: JSON.stringify(taskRequest),
           }));
@@ -1956,7 +1957,7 @@ export class TelegramHandler {
 
     const doId = this.taskProcessor.idFromName(userId);
     const doStub = this.taskProcessor.get(doId);
-    await doStub.fetch(new Request('https://do/process', {
+    await fetchDOWithRetry(doStub, new Request('https://do/process', {
       method: 'POST',
       body: JSON.stringify(taskRequest),
     }));
@@ -2017,7 +2018,7 @@ export class TelegramHandler {
 
     const doId = this.taskProcessor.idFromName(userId);
     const doStub = this.taskProcessor.get(doId);
-    await doStub.fetch(new Request('https://do/process', {
+    await fetchDOWithRetry(doStub, new Request('https://do/process', {
       method: 'POST',
       body: JSON.stringify(taskRequest),
     }));
@@ -2126,7 +2127,7 @@ export class TelegramHandler {
 
         const doId = this.taskProcessor.idFromName(userId);
         const doStub = this.taskProcessor.get(doId);
-        await doStub.fetch(new Request('https://do/process', {
+        await fetchDOWithRetry(doStub, new Request('https://do/process', {
           method: 'POST',
           body: JSON.stringify(taskRequest),
         }));
@@ -2438,7 +2439,7 @@ export class TelegramHandler {
 
             const doId = this.taskProcessor.idFromName(userId);
             const doStub = this.taskProcessor.get(doId);
-            await doStub.fetch(new Request('https://do/process', {
+            await fetchDOWithRetry(doStub, new Request('https://do/process', {
               method: 'POST',
               body: JSON.stringify(taskRequest),
             }));

@@ -182,11 +182,13 @@ cdp.get('/', async (c) => {
   // Accept the WebSocket
   server.accept();
 
-  // Initialize CDP session asynchronously
-  initCDPSession(server, c.env).catch((err) => {
-    console.error('[CDP] Failed to initialize session:', err);
-    server.close(1011, 'Failed to initialize browser session');
-  });
+  // Initialize CDP session asynchronously — use waitUntil to keep the Worker alive
+  c.executionCtx.waitUntil(
+    initCDPSession(server, c.env).catch((err) => {
+      console.error('[CDP] Failed to initialize session:', err);
+      server.close(1011, 'Failed to initialize browser session');
+    })
+  );
 
   return new Response(null, {
     status: 101,

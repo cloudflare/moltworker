@@ -51,6 +51,7 @@ export interface ModelInfo {
   structuredOutput?: boolean;    // Supports response_format JSON schema
   reasoning?: ReasoningCapability; // Reasoning control capability
   maxContext?: number;           // Context window in tokens
+  fixedTemperature?: number;    // Model requires this exact temperature (e.g. Kimi K2.5 = 1)
 }
 
 /**
@@ -596,6 +597,7 @@ export const MODELS: Record<string, ModelInfo> = {
     provider: 'moonshot',
     parallelCalls: true,
     maxContext: 262144,
+    fixedTemperature: 1,
   },
 };
 
@@ -716,6 +718,16 @@ export function clampMaxTokens(alias: string, requested: number): number {
     return config.maxOutputTokens;
   }
   return requested;
+}
+
+/**
+ * Get the temperature for a model.
+ * Some models require a fixed temperature (e.g. Kimi K2.5 direct API requires exactly 1).
+ * Returns the fixed temperature if set, otherwise the provided default.
+ */
+export function getTemperature(alias: string, defaultTemp: number = 0.7): number {
+  const model = getModel(alias);
+  return model?.fixedTemperature ?? defaultTemp;
 }
 
 /**
