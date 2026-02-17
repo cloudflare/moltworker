@@ -522,7 +522,27 @@ async function fetchUrl(url: string): Promise<string> {
   }
 
   const contentType = response.headers.get('content-type') || '';
-  const text = await response.text();
+  let text = await response.text();
+
+  // Strip HTML to extract readable text content
+  if (contentType.includes('text/html') || text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')) {
+    // Remove script and style blocks entirely
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, '');
+    // Replace block elements with newlines
+    text = text.replace(/<\/(p|div|h[1-6]|li|tr|br\s*\/?)>/gi, '\n');
+    text = text.replace(/<br\s*\/?>/gi, '\n');
+    // Strip remaining tags
+    text = text.replace(/<[^>]+>/g, '');
+    // Decode common HTML entities
+    text = text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+    // Collapse whitespace
+    text = text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+
+    if (!text) {
+      return '[HTML page returned no readable text content]';
+    }
+  }
 
   // Truncate very long responses
   if (text.length > 50000) {
@@ -665,8 +685,16 @@ async function githubApi(
   // Try to format JSON response
   try {
     const json = JSON.parse(responseText);
-    return JSON.stringify(json, null, 2);
+    const formatted = JSON.stringify(json, null, 2);
+    // Truncate large responses (e.g. full issue/PR listings)
+    if (formatted.length > 50000) {
+      return formatted.slice(0, 50000) + '\n\n[GitHub API response truncated - exceeded 50KB]';
+    }
+    return formatted;
   } catch {
+    if (responseText.length > 50000) {
+      return responseText.slice(0, 50000) + '\n\n[GitHub API response truncated - exceeded 50KB]';
+    }
     return responseText;
   }
 }
