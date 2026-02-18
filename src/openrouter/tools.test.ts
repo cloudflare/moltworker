@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, geocodeCity, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache, extractCodeIdentifiers, type SandboxLike, type SandboxProcess } from './tools';
+import { AVAILABLE_TOOLS, TOOLS_WITHOUT_BROWSER, executeTool, generateDailyBriefing, geocodeCity, clearBriefingCache, clearExchangeRateCache, clearCryptoCache, clearGeoCache, extractCodeIdentifiers, fetchBriefingHolidays, type SandboxLike, type SandboxProcess } from './tools';
 
 describe('url_metadata tool', () => {
   beforeEach(() => {
@@ -1217,6 +1217,251 @@ describe('geocodeCity', () => {
     const result = await geocodeCity('  London  ');
     expect(result).not.toBeNull();
     expect(result!.displayName).toContain('London');
+  });
+});
+
+describe('fetchBriefingHolidays', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function todayStr(): string {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+
+  it('should return holiday names for today', async () => {
+    const today = todayStr();
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('nominatim.openstreetmap.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ address: { country_code: 'cz' } }),
+        });
+      }
+      if (url.includes('date.nager.at')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { date: today, localName: 'Nový rok', name: "New Year's Day", countryCode: 'CZ', global: true, types: ['Public'] },
+            { date: '2026-12-25', localName: 'Vánoce', name: 'Christmas Day', countryCode: 'CZ', global: true, types: ['Public'] },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await fetchBriefingHolidays('50.08', '14.44');
+    expect(result).toContain("New Year's Day");
+    expect(result).toContain('Nový rok');
+    expect(result).toContain('🎉');
+    // Should NOT include Christmas (not today)
+    expect(result).not.toContain('Christmas');
+  });
+
+  it('should return empty string when no holidays today', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('nominatim.openstreetmap.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ address: { country_code: 'us' } }),
+        });
+      }
+      if (url.includes('date.nager.at')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { date: '2026-07-04', localName: 'Independence Day', name: 'Independence Day', countryCode: 'US', global: true, types: ['Public'] },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await fetchBriefingHolidays('40.71', '-74.01');
+    expect(result).toBe('');
+  });
+
+  it('should throw on geocode failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+
+    await expect(fetchBriefingHolidays('50.08', '14.44')).rejects.toThrow('Geocode failed');
+  });
+
+  it('should throw when no country code in geocode response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ address: {} }),
+    }));
+
+    await expect(fetchBriefingHolidays('0', '0')).rejects.toThrow('No country code');
+  });
+
+  it('should throw on Nager.Date API failure', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('nominatim.openstreetmap.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ address: { country_code: 'xx' } }),
+        });
+      }
+      if (url.includes('date.nager.at')) {
+        return Promise.resolve({ ok: false, status: 404 });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await expect(fetchBriefingHolidays('50', '14')).rejects.toThrow('Nager.Date API HTTP 404');
+  });
+
+  it('should skip local name when same as English name', async () => {
+    const today = todayStr();
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('nominatim.openstreetmap.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ address: { country_code: 'us' } }),
+        });
+      }
+      if (url.includes('date.nager.at')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { date: today, localName: 'Independence Day', name: 'Independence Day', countryCode: 'US', global: true, types: ['Public'] },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await fetchBriefingHolidays('40.71', '-74.01');
+    expect(result).toBe('🎉 Independence Day');
+    // Should NOT have the duplicate local name in parentheses
+    expect(result).not.toContain('(Independence Day)');
+  });
+
+  it('should handle multiple holidays on the same day', async () => {
+    const today = todayStr();
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('nominatim.openstreetmap.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ address: { country_code: 'de' } }),
+        });
+      }
+      if (url.includes('date.nager.at')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { date: today, localName: 'Erster Feiertag', name: 'Holiday One', countryCode: 'DE', global: true, types: ['Public'] },
+            { date: today, localName: 'Zweiter Feiertag', name: 'Holiday Two', countryCode: 'DE', global: true, types: ['Public'] },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await fetchBriefingHolidays('52.52', '13.41');
+    expect(result).toContain('Holiday One');
+    expect(result).toContain('Holiday Two');
+    expect(result).toContain('Erster Feiertag');
+    expect(result).toContain('Zweiter Feiertag');
+  });
+});
+
+describe('generateDailyBriefing holiday integration', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    clearBriefingCache();
+  });
+
+  it('should include holiday banner when holidays exist', async () => {
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('open-meteo.com')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            current_weather: { temperature: 22.5, windspeed: 12.3, weathercode: 2, time: '2026-02-18T14:00' },
+            daily: { time: ['2026-02-18'], temperature_2m_max: [24.0], temperature_2m_min: [18.0], weathercode: [2] },
+          }),
+        });
+      }
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([1]) });
+      }
+      if (url.includes('hacker-news.firebaseio.com/v0/item/')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: 1, title: 'Story', score: 10 }) });
+      }
+      if (url.includes('reddit.com')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { children: [] } }) });
+      }
+      if (url.includes('arxiv.org')) {
+        return Promise.resolve({ ok: true, text: () => Promise.resolve('<feed></feed>') });
+      }
+      if (url.includes('nominatim.openstreetmap.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ address: { country_code: 'cz', city: 'Prague', country: 'Czech Republic' } }),
+        });
+      }
+      if (url.includes('date.nager.at')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([
+            { date: todayStr, localName: 'Svátek', name: 'National Holiday', countryCode: 'CZ', global: true, types: ['Public'] },
+          ]),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await generateDailyBriefing('50.08', '14.44');
+    expect(result).toContain('🎉 National Holiday');
+    expect(result).toContain('Svátek');
+    // Holiday should appear before the Weather section
+    const holidayIdx = result.indexOf('🎉 National Holiday');
+    const weatherIdx = result.indexOf('Weather');
+    expect(holidayIdx).toBeLessThan(weatherIdx);
+  });
+
+  it('should not include holiday section when no holidays or API fails', async () => {
+    // All APIs return 404 for holiday-related URLs
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('open-meteo.com')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            current_weather: { temperature: 20, windspeed: 10, weathercode: 0, time: '2026-02-18T14:00' },
+            daily: { time: ['2026-02-18'], temperature_2m_max: [22], temperature_2m_min: [16], weathercode: [0] },
+          }),
+        });
+      }
+      if (url.includes('topstories.json')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+      }
+      if (url.includes('reddit.com')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ data: { children: [] } }) });
+      }
+      if (url.includes('arxiv.org')) {
+        return Promise.resolve({ ok: true, text: () => Promise.resolve('<feed></feed>') });
+      }
+      // Nominatim and Nager.Date will fail → holiday section gracefully skipped
+      return Promise.resolve({ ok: false, status: 404 });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await generateDailyBriefing('50.08', '14.44');
+    expect(result).toContain('Daily Briefing');
+    expect(result).not.toContain('🎉');
   });
 });
 

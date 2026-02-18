@@ -4,6 +4,35 @@
 
 ---
 
+## Session: 2026-02-18 | Phase 2.5.9 Holiday Awareness (Session: 01SE5WrUuc6LWTmZC8WBXKY4)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/implement-p1-guardrails-DcOgI`
+**Status:** Completed
+
+### Summary
+Implemented Phase 2.5.9 — Holiday Awareness using the Nager.Date API. Added a `fetchBriefingHolidays` function that reverse-geocodes the user's location to determine the country code, queries Nager.Date for public holidays, and displays a holiday banner in the daily briefing. Supports 100+ countries with local name display.
+
+### Changes Made
+1. **`fetchBriefingHolidays()`** — reverse geocode → country code → Nager.Date API → filter today's holidays → format with local names
+2. **`generateDailyBriefing`** — added holiday fetch to parallel Promise.allSettled, holiday banner inserted before Weather section
+3. **9 new tests** — 7 unit tests for fetchBriefingHolidays (success, empty, geocode failure, no country, API error, local name skip, multiple holidays) + 2 integration tests for briefing with/without holidays
+
+### Files Modified
+- `src/openrouter/tools.ts` — fetchBriefingHolidays + NagerHoliday type + briefing integration
+- `src/openrouter/tools.test.ts` — 9 new tests
+
+### Tests
+- [x] Tests pass (689 total, 0 failures)
+- [x] Typecheck passes
+
+### Notes for Next Session
+- Holiday data cached implicitly via the briefing cache (15-minute TTL)
+- Non-blocking: if Nager.Date or reverse geocode fails, holiday section is simply omitted
+- Next: Phase 4.1 (token-budgeted retrieval) or Phase 2.4 (Acontext dashboard link)
+
+---
+
 ## Session: 2026-02-18 | Phase 2.3 Acontext Observability (Session: 01SE5WrUuc6LWTmZC8WBXKY4)
 
 **AI:** Claude Opus 4.6

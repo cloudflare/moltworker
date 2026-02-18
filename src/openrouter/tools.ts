@@ -2421,6 +2421,64 @@ interface BriefingSection {
 }
 
 /**
+ * Nager.Date API holiday response
+ */
+interface NagerHoliday {
+  date: string;        // "2026-01-01"
+  localName: string;   // "Neujahr"
+  name: string;        // "New Year's Day"
+  countryCode: string; // "AT"
+  global: boolean;     // true if nationwide
+  types: string[];     // ["Public"]
+}
+
+/**
+ * Fetch today's public holidays for the user's location via Nager.Date API.
+ * Steps: (1) Reverse geocode lat/lon → country code, (2) Fetch holidays for that country, (3) Filter for today.
+ * Returns empty string if no holidays or on any failure.
+ */
+export async function fetchBriefingHolidays(latitude: string, longitude: string): Promise<string> {
+  const lat = parseFloat(latitude);
+  const lon = parseFloat(longitude);
+
+  // Step 1: Reverse geocode to get country code
+  const geoRes = await fetch(
+    `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=3&accept-language=en`,
+    { headers: { 'User-Agent': 'MoltworkerBot/1.0' } }
+  );
+  if (!geoRes.ok) throw new Error('Geocode failed');
+
+  const geo = await geoRes.json() as { address?: { country_code?: string } };
+  const countryCode = geo.address?.country_code?.toUpperCase();
+  if (!countryCode || countryCode.length !== 2) throw new Error('No country code');
+
+  // Step 2: Fetch public holidays for the year
+  const now = new Date();
+  const year = now.getFullYear();
+  const todayStr = `${year}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const holidayRes = await fetch(
+    `https://date.nager.at/api/v3/PublicHolidays/${year}/${countryCode}`,
+    { headers: { 'User-Agent': 'MoltworkerBot/1.0' } }
+  );
+  if (!holidayRes.ok) throw new Error(`Nager.Date API HTTP ${holidayRes.status}`);
+
+  const holidays = await holidayRes.json() as NagerHoliday[];
+
+  // Step 3: Filter for today's holidays
+  const todayHolidays = holidays.filter(h => h.date === todayStr);
+  if (todayHolidays.length === 0) return '';
+
+  // Format: list holiday names with local name in parentheses if different
+  const lines = todayHolidays.map(h => {
+    const localSuffix = h.localName && h.localName !== h.name ? ` (${h.localName})` : '';
+    return `🎉 ${h.name}${localSuffix}`;
+  });
+
+  return lines.join('\n');
+}
+
+/**
  * Forward geocode a city/place name to coordinates using Nominatim.
  * Returns { lat, lon, displayName } or null if not found.
  */
@@ -2460,19 +2518,20 @@ export async function generateDailyBriefing(
     return briefingCache.result;
   }
 
-  // Fetch all sections in parallel
-  const [weatherResult, hnResult, redditResult, arxivResult] = await Promise.allSettled([
+  // Fetch all sections in parallel (holiday lookup is non-blocking alongside others)
+  const [weatherResult, hnResult, redditResult, arxivResult, holidayResult] = await Promise.allSettled([
     fetchBriefingWeather(latitude, longitude),
     fetchBriefingHN(),
     fetchBriefingReddit(subreddit),
     fetchBriefingArxiv(arxivCategory),
+    fetchBriefingHolidays(latitude, longitude),
   ]);
 
   const sections: BriefingSection[] = [
-    extractSection(weatherResult, '\u2600\uFE0F Weather'),
-    extractSection(hnResult, '\uD83D\uDD25 HackerNews Top 5'),
-    extractSection(redditResult, `\uD83D\uDCAC Reddit r/${subreddit}`),
-    extractSection(arxivResult, `\uD83D\uDCDA arXiv ${arxivCategory}`),
+    extractSection(weatherResult, '☀️ Weather'),
+    extractSection(hnResult, '🔥 HackerNews Top 5'),
+    extractSection(redditResult, `💬 Reddit r/${subreddit}`),
+    extractSection(arxivResult, `📚 arXiv ${arxivCategory}`),
   ];
 
   const date = new Date().toLocaleDateString('en-US', {
@@ -2482,15 +2541,20 @@ export async function generateDailyBriefing(
     day: 'numeric',
   });
 
-  let output = `\uD83D\uDCCB Daily Briefing \u2014 ${date}\n`;
-  output += '\u2500'.repeat(30) + '\n\n';
+  let output = `📋 Daily Briefing — ${date}\n`;
+  output += '─'.repeat(30) + '\n\n';
+
+  // Insert holiday banner at the top if there are holidays today
+  if (holidayResult.status === 'fulfilled' && holidayResult.value) {
+    output += `${holidayResult.value}\n\n`;
+  }
 
   for (const section of sections) {
     output += `${section.header}\n`;
     if (section.ok) {
       output += `${section.content}\n\n`;
     } else {
-      output += `\u26A0\uFE0F Unavailable: ${section.content}\n\n`;
+      output += `⚠️ Unavailable: ${section.content}\n\n`;
     }
   }
 
