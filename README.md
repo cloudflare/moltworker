@@ -351,7 +351,7 @@ See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
 You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. OpenClaw has native support for Cloudflare AI Gateway as a first-class provider.
 
-AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropic). Requests are sent to `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic` instead of directly to `api.anthropic.com`, giving you Cloudflare's analytics, caching, and rate limiting. You still need a provider API key (e.g., your Anthropic API key) — the gateway forwards it to the upstream provider.
+AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropic). Requests are sent to `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic` instead of directly to `api.anthropic.com`, giving you Cloudflare's analytics, caching, and rate limiting. With [Unified Billing](https://developers.cloudflare.com/ai-gateway/configuration/billing/), you can use supported providers (Anthropic, OpenAI, etc.) without a separate provider API key — Cloudflare bills you directly.
 
 ### Setup
 
@@ -359,8 +359,8 @@ AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropi
 2. Set the three required secrets:
 
 ```bash
-# Your AI provider's API key (e.g., your Anthropic API key).
-# This is passed through the gateway to the upstream provider.
+# Your AI Gateway authentication token (for Unified Billing)
+# Create this in the AI Gateway settings under "Authentication"
 npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY
 
 # Your Cloudflare account ID
@@ -370,7 +370,7 @@ npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID
 npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID
 ```
 
-All three are required. OpenClaw constructs the gateway URL from the account ID and gateway ID, and passes the API key to the upstream provider through the gateway.
+All three are required. OpenClaw constructs the gateway URL from the account ID and gateway ID. With Unified Billing enabled, the API key is your AI Gateway authentication token (not a provider API key).
 
 3. Redeploy:
 
@@ -412,7 +412,7 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `CLOUDFLARE_AI_GATEWAY_API_KEY` | Yes* | Your AI provider's API key, passed through the gateway (e.g., your Anthropic API key). Requires `CF_AI_GATEWAY_ACCOUNT_ID` and `CF_AI_GATEWAY_GATEWAY_ID` |
+| `CLOUDFLARE_AI_GATEWAY_API_KEY` | Yes* | Your AI Gateway authentication token (for Unified Billing). Requires `CF_AI_GATEWAY_ACCOUNT_ID` and `CF_AI_GATEWAY_GATEWAY_ID` |
 | `CF_AI_GATEWAY_ACCOUNT_ID` | Yes* | Your Cloudflare account ID (used to construct the gateway URL) |
 | `CF_AI_GATEWAY_GATEWAY_ID` | Yes* | Your AI Gateway ID (used to construct the gateway URL) |
 | `CF_AI_GATEWAY_MODEL` | No | Override default model: `provider/model-id` (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`). See [Choosing a Model](#choosing-a-model) |
