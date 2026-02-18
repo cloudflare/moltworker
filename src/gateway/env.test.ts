@@ -130,12 +130,20 @@ describe('buildEnvVars', () => {
   });
 
   // AI Gateway model override
-  it('passes CF_AI_GATEWAY_MODEL to container', () => {
+  it('passes CF_AI_GATEWAY_MODELS to container', () => {
+    const env = createMockEnv({
+      CF_AI_GATEWAY_MODELS: 'google-ai-studio/gemini-3-flash-preview,anthropic/claude-sonnet-4-5',
+    });
+    const result = buildEnvVars(env);
+    expect(result.CF_AI_GATEWAY_MODELS).toBe('google-ai-studio/gemini-3-flash-preview,anthropic/claude-sonnet-4-5');
+  });
+
+  it('falls back from CF_AI_GATEWAY_MODEL to CF_AI_GATEWAY_MODELS', () => {
     const env = createMockEnv({
       CF_AI_GATEWAY_MODEL: 'workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast',
     });
     const result = buildEnvVars(env);
-    expect(result.CF_AI_GATEWAY_MODEL).toBe('workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast');
+    expect(result.CF_AI_GATEWAY_MODELS).toBe('workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast');
   });
 
   it('passes CF_ACCOUNT_ID to container', () => {

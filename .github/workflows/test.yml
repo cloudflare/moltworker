@@ -58,7 +58,7 @@ jobs:
               DISCORD_DM_POLICY: "pairing"
           - name: workers-ai
             env:
-              CF_AI_GATEWAY_MODEL: "workers-ai/@cf/openai/gpt-oss-120b"
+              CF_AI_GATEWAY_MODELS: "workers-ai/@cf/openai/gpt-oss-120b"
 
     name: e2e (${{ matrix.config.name }})
 
@@ -120,7 +120,7 @@ jobs:
           TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
           DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}
           DISCORD_DM_POLICY: ${{ matrix.config.env.DISCORD_DM_POLICY }}
-          CF_AI_GATEWAY_MODEL: ${{ matrix.config.env.CF_AI_GATEWAY_MODEL }}
+          CF_AI_GATEWAY_MODELS: ${{ matrix.config.env.CF_AI_GATEWAY_MODELS }}
         run: cctr -vv test/e2e
 
       - name: Generate video thumbnail
