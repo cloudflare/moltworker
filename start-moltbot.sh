@@ -314,6 +314,21 @@ if [ -n "${GOOGLE_AI_API_KEY:-}" ]; then
   echo "Google AI auth: GEMINI_API_KEY exported for embeddings"
 fi
 
+# Git credential helper: use GITHUB_PAT for all github.com push/pull operations
+# This ensures /root/clawd (workspace) and any sub-repos can push without embedding tokens in URLs
+if [ -n "${GITHUB_PAT:-}" ]; then
+  cat > /usr/local/bin/git-credential-pat << CREDEOF
+#!/bin/sh
+echo "protocol=https"
+echo "host=github.com"
+echo "username=x-access-token"
+echo "password=${GITHUB_PAT}"
+CREDEOF
+  chmod +x /usr/local/bin/git-credential-pat
+  git config --global credential.helper "/usr/local/bin/git-credential-pat"
+  echo "Git credential helper configured (GITHUB_PAT for github.com)"
+fi
+
 # Clean up stale session lock files from previous gateway runs
 find /root/.openclaw -name "*.lock" -delete 2>/dev/null || true
 echo "Stale lock files cleaned"
