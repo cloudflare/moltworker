@@ -1,0 +1,26 @@
+#!/bin/bash
+# Start plwr browser session for E2E testing with Access headers
+
+set -e
+
+SESSION_NAME="moltworker-e2e"
+
+if [ -z "$CCTR_FIXTURE_DIR" ]; then
+    CCTR_FIXTURE_DIR="/tmp/e2e-cloud-manual"
+fi
+
+mkdir -p /tmp/moltworker-e2e-videos
+VIDEO_PATH="/tmp/moltworker-e2e-videos/$(date +%Y%m%d-%H%M%S).mp4"
+echo "$VIDEO_PATH" > "$CCTR_FIXTURE_DIR/video-path.txt"
+
+plwr -S "$SESSION_NAME" start --video "$VIDEO_PATH" >&2
+
+CF_ACCESS_CLIENT_ID=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-id.txt" 2>/dev/null || echo "")
+CF_ACCESS_CLIENT_SECRET=$(cat "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt" 2>/dev/null || echo "")
+
+if [ -n "$CF_ACCESS_CLIENT_ID" ] && [ -n "$CF_ACCESS_CLIENT_SECRET" ]; then
+    plwr -S "$SESSION_NAME" header CF-Access-Client-Id "$CF_ACCESS_CLIENT_ID" >&2
+    plwr -S "$SESSION_NAME" header CF-Access-Client-Secret "$CF_ACCESS_CLIENT_SECRET" >&2
+fi
+
+echo "ready"

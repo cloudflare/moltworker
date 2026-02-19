@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import { MOLTBOT_PORT, R2_MOUNT_PATH } from '../config';
+import { MOLTBOT_PORT } from '../config';
 import { findExistingMoltbotProcess } from '../gateway';
 import { waitForProcess, runCommand } from '../gateway/utils';
 
 /**
  * Public routes - NO Cloudflare Access authentication required
- * 
+ *
  * These routes are mounted BEFORE the auth middleware is applied.
  * Includes: health checks, static assets, and public API endpoints.
  */
@@ -34,13 +34,13 @@ publicRoutes.get('/logo-small.png', (c) => {
 // GET /api/status - Public health check for gateway status (no auth required)
 publicRoutes.get('/api/status', async (c) => {
   const sandbox = c.get('sandbox');
-  
+
   try {
     const process = await findExistingMoltbotProcess(sandbox);
     if (!process) {
       return c.json({ ok: false, status: 'not_running' });
     }
-    
+
     // Process exists, check if it's actually responding
     // Try to reach the gateway with a short timeout
     try {
@@ -50,7 +50,11 @@ publicRoutes.get('/api/status', async (c) => {
       return c.json({ ok: false, status: 'not_responding', processId: process.id });
     }
   } catch (err) {
-    return c.json({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'Unknown error' });
+    return c.json({
+      ok: false,
+      status: 'error',
+      error: err instanceof Error ? err.message : 'Unknown error',
+    });
   }
 });
 
@@ -96,13 +100,13 @@ publicRoutes.get('/api/liveness', async (c) => {
   }
   health.checks.gateway.latency = Date.now() - gwStart;
 
-  // Check R2 mount
+  // Check R2 (rclone) configuration
   const r2Start = Date.now();
   try {
-    const proc = await sandbox.startProcess(`test -d ${R2_MOUNT_PATH} && echo "mounted"`);
+    const proc = await sandbox.startProcess(`test -f /tmp/.rclone-configured && echo "configured"`);
     await waitForProcess(proc, 5000);
     const logs = await proc.getLogs();
-    health.checks.r2.status = logs.stdout?.includes('mounted') ? 'mounted' : 'not_mounted';
+    health.checks.r2.status = logs.stdout?.includes('configured') ? 'configured' : 'not_configured';
   } catch {
     health.checks.r2.status = 'error';
   }
@@ -156,7 +160,7 @@ publicRoutes.get('/api/liveness', async (c) => {
   // Check last R2 sync time
   const syncStart = Date.now();
   try {
-    const result = await runCommand(sandbox, `cat ${R2_MOUNT_PATH}/.last-sync 2>/dev/null || echo ""`, 5000);
+    const result = await runCommand(sandbox, `cat /tmp/.last-sync 2>/dev/null || echo ""`, 5000);
     health.checks.lastSync = {
       timestamp: result.stdout.trim() || null,
       latency: Date.now() - syncStart,

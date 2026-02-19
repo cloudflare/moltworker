@@ -19,6 +19,25 @@ The following Cloudflare features used by this project have free tiers:
 - AI Gateway (optional, for API routing/analytics)
 - R2 Storage (optional, for persistence)
 
+## Container Cost Estimate
+
+This project uses a `standard-1` Cloudflare Container instance (1/2 vCPU, 4 GiB memory, 8 GB disk). Below are approximate monthly costs assuming the container runs 24/7, based on [Cloudflare Containers pricing](https://developers.cloudflare.com/containers/pricing/):
+
+| Resource | Provisioned | Monthly Usage | Included Free | Overage | Approx. Cost |
+|----------|-------------|---------------|---------------|---------|--------------|
+| Memory | 4 GiB | 2,920 GiB-hrs | 25 GiB-hrs | 2,895 GiB-hrs | ~$26/mo |
+| CPU (at ~10% utilization) | 1/2 vCPU | ~2,190 vCPU-min | 375 vCPU-min | ~1,815 vCPU-min | ~$2/mo |
+| Disk | 8 GB | 5,840 GB-hrs | 200 GB-hrs | 5,640 GB-hrs | ~$1.50/mo |
+| Workers Paid plan | | | | | $5/mo |
+| **Total** | | | | | **~$34.50/mo** |
+
+Notes:
+- CPU is billed on **active usage only**, not provisioned capacity. The 10% utilization estimate is a rough baseline for a lightly-used personal assistant; your actual cost will vary with usage.
+- Memory and disk are billed on **provisioned capacity** for the full time the container is running.
+- To reduce costs, configure `SANDBOX_SLEEP_AFTER` (e.g., `10m`) so the container sleeps when idle. A container that only runs 4 hours/day would cost roughly ~$5-6/mo in compute on top of the $5 plan fee.
+- Network egress, Workers/Durable Objects requests, and logs are additional but typically minimal for personal use.
+- See the [instance types table](https://developers.cloudflare.com/containers/pricing/) for other options (e.g., `lite` at 256 MiB/$0.50/mo memory or `standard-4` at 12 GiB for heavier workloads).
+
 ## What is OpenClaw?
 
 [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot, formerly Clawdbot) is a personal AI assistant with a gateway architecture that connects to multiple chat platforms. Key features:
@@ -46,9 +65,10 @@ npm install
 # Set your API key (direct Anthropic access)
 npx wrangler secret put ANTHROPIC_API_KEY
 
-# Or use AI Gateway instead (see "Optional: Cloudflare AI Gateway" below)
-# npx wrangler secret put AI_GATEWAY_API_KEY
-# npx wrangler secret put AI_GATEWAY_BASE_URL
+# Or use Cloudflare AI Gateway instead (see "Optional: Cloudflare AI Gateway" below)
+# npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY
+# npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID
+# npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID
 
 # Generate and set a gateway token (required for remote access)
 # Save this token - you'll need it to access the Control UI
@@ -90,10 +110,11 @@ The easiest way to protect your worker is using the built-in Cloudflare Access i
 2. Select your Worker (e.g., `moltbot-sandbox`)
 3. In **Settings**, under **Domains & Routes**, in the `workers.dev` row, click the meatballs menu (`...`)
 4. Click **Enable Cloudflare Access**
-5. Click **Manage Cloudflare Access** to configure who can access:
+5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 — ignore it.
+6. To configure who can access, go to **Zero Trust** in the Cloudflare dashboard sidebar → **Access** → **Applications**, and find your worker's application:
    - Add your email address to the allow list
    - Or configure other identity providers (Google, GitHub, etc.)
-6. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
+7. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
 
 ### 2. Set Access Secrets
 
@@ -300,7 +321,7 @@ npm run deploy
 | `GET /cdp/json/new` | Create a new browser target |
 | `WS /cdp/devtools/browser/{id}` | WebSocket connection for CDP commands |
 
-All endpoints require the `CDP_SECRET` header for authentication.
+All endpoints require authentication via the `?secret=<CDP_SECRET>` query parameter.
 
 ## Built-in Skills
 
@@ -328,42 +349,78 @@ See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
 ## Optional: Cloudflare AI Gateway
 
-You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. AI Gateway supports multiple providers — configure your preferred provider in the gateway and use these env vars:
+You can route API requests through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) for caching, rate limiting, analytics, and cost tracking. OpenClaw has native support for Cloudflare AI Gateway as a first-class provider.
+
+AI Gateway acts as a proxy between OpenClaw and your AI provider (e.g., Anthropic). Requests are sent to `https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic` instead of directly to `api.anthropic.com`, giving you Cloudflare's analytics, caching, and rate limiting. You still need a provider API key (e.g., your Anthropic API key) — the gateway forwards it to the upstream provider.
 
 ### Setup
 
 1. Create an AI Gateway in the [AI Gateway section](https://dash.cloudflare.com/?to=/:account/ai/ai-gateway/create-gateway) of the Cloudflare Dashboard.
-2. Add a provider (e.g., Anthropic) to your gateway
-3. Set the gateway secrets:
-
-You'll find the base URL on the Overview tab of your newly created gateway. At the bottom of the page, expand the **Native API/SDK Examples** section and select "Anthropic".
+2. Set the three required secrets:
 
 ```bash
-# Your provider's API key (e.g., Anthropic API key)
-npx wrangler secret put AI_GATEWAY_API_KEY
+# Your AI provider's API key (e.g., your Anthropic API key).
+# This is passed through the gateway to the upstream provider.
+npx wrangler secret put CLOUDFLARE_AI_GATEWAY_API_KEY
 
-# Your AI Gateway endpoint URL
-npx wrangler secret put AI_GATEWAY_BASE_URL
-# Enter: https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
+# Your Cloudflare account ID
+npx wrangler secret put CF_AI_GATEWAY_ACCOUNT_ID
+
+# Your AI Gateway ID (from the gateway overview page)
+npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID
 ```
 
-4. Redeploy:
+All three are required. OpenClaw constructs the gateway URL from the account ID and gateway ID, and passes the API key to the upstream provider through the gateway.
+
+3. Redeploy:
 
 ```bash
 npm run deploy
 ```
 
-The `AI_GATEWAY_*` variables take precedence over `ANTHROPIC_*` if both are set.
+When Cloudflare AI Gateway is configured, it takes precedence over direct `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+
+### Choosing a Model
+
+By default, AI Gateway uses Anthropic's Claude Sonnet 4.5. To use a different model or provider, set `CF_AI_GATEWAY_MODEL` with the format `provider/model-id`:
+
+```bash
+npx wrangler secret put CF_AI_GATEWAY_MODEL
+# Enter: workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+```
+
+This works with any [AI Gateway provider](https://developers.cloudflare.com/ai-gateway/usage/providers/):
+
+| Provider | Example `CF_AI_GATEWAY_MODEL` value | API key is... |
+|----------|-------------------------------------|---------------|
+| Workers AI | `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Cloudflare API token |
+| OpenAI | `openai/gpt-4o` | OpenAI API key |
+| Anthropic | `anthropic/claude-sonnet-4-5` | Anthropic API key |
+| Groq | `groq/llama-3.3-70b` | Groq API key |
+
+**Note:** `CLOUDFLARE_AI_GATEWAY_API_KEY` must match the provider you're using — it's your provider's API key, forwarded through the gateway. You can only use one provider at a time through the gateway. For multiple providers, use direct keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) alongside the gateway config.
+
+#### Workers AI with Unified Billing
+
+With [Unified Billing](https://developers.cloudflare.com/ai-gateway/features/unified-billing/), you can use Workers AI models without a separate provider API key — Cloudflare bills you directly. Set `CLOUDFLARE_AI_GATEWAY_API_KEY` to your [AI Gateway authentication token](https://developers.cloudflare.com/ai-gateway/configuration/authentication/) (the `cf-aig-authorization` token).
+
+### Legacy AI Gateway Configuration
+
+The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supported for backward compatibility but is deprecated in favor of the native configuration above.
 
 ## All Secrets Reference
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `AI_GATEWAY_API_KEY` | Yes* | API key for your AI Gateway provider (requires `AI_GATEWAY_BASE_URL`) |
-| `AI_GATEWAY_BASE_URL` | Yes* | AI Gateway endpoint URL (required when using `AI_GATEWAY_API_KEY`) |
-| `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (fallback if AI Gateway not configured) |
-| `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL (fallback) |
+| `CLOUDFLARE_AI_GATEWAY_API_KEY` | Yes* | Your AI provider's API key, passed through the gateway (e.g., your Anthropic API key). Requires `CF_AI_GATEWAY_ACCOUNT_ID` and `CF_AI_GATEWAY_GATEWAY_ID` |
+| `CF_AI_GATEWAY_ACCOUNT_ID` | Yes* | Your Cloudflare account ID (used to construct the gateway URL) |
+| `CF_AI_GATEWAY_GATEWAY_ID` | Yes* | Your AI Gateway ID (used to construct the gateway URL) |
+| `CF_AI_GATEWAY_MODEL` | No | Override default model: `provider/model-id` (e.g. `workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast`). See [Choosing a Model](#choosing-a-model) |
+| `ANTHROPIC_API_KEY` | Yes* | Direct Anthropic API key (alternative to AI Gateway) |
+| `ANTHROPIC_BASE_URL` | No | Direct Anthropic API base URL |
 | `OPENAI_API_KEY` | No | OpenAI API key (alternative provider) |
+| `AI_GATEWAY_API_KEY` | No | Legacy AI Gateway API key (deprecated, use `CLOUDFLARE_AI_GATEWAY_API_KEY` instead) |
+| `AI_GATEWAY_BASE_URL` | No | Legacy AI Gateway endpoint URL (deprecated) |
 | `CF_ACCESS_TEAM_DOMAIN` | Yes* | Cloudflare Access team domain (required for admin UI) |
 | `CF_ACCESS_AUD` | Yes* | Cloudflare Access application audience (required for admin UI) |
 | `MOLTBOT_GATEWAY_TOKEN` | Yes | Gateway token for authentication (pass via `?token=` query param) |
@@ -411,6 +468,12 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 **Devices not appearing in admin UI:** Device list commands take 10-15 seconds due to WebSocket connection overhead. Wait and refresh.
 
 **WebSocket issues in local development:** `wrangler dev` has known limitations with WebSocket proxying through the sandbox. HTTP requests work but WebSocket connections may fail. Deploy to Cloudflare for full functionality.
+
+## Known Issues
+
+### Windows: Gateway fails to start with exit code 126 (permission denied)
+
+On Windows, Git may check out shell scripts with CRLF line endings instead of LF. This causes `start-openclaw.sh` to fail with exit code 126 inside the Linux container. Ensure your repository uses LF line endings — configure Git with `git config --global core.autocrlf input` or add a `.gitattributes` file with `* text=auto eol=lf`. See [#64](https://github.com/cloudflare/moltworker/issues/64) for details.
 
 ## Links
 

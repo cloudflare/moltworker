@@ -1,4 +1,4 @@
-import { jwtVerify, createRemoteJWKSet, type JWTPayload as JoseJWTPayload } from 'jose';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import type { JWTPayload } from '../types';
 
 /**
@@ -16,12 +16,10 @@ import type { JWTPayload } from '../types';
 export async function verifyAccessJWT(
   token: string,
   teamDomain: string,
-  expectedAud: string
+  expectedAud: string,
 ): Promise<JWTPayload> {
   // Ensure teamDomain has https:// prefix for issuer check
-  const issuer = teamDomain.startsWith('https://')
-    ? teamDomain
-    : `https://${teamDomain}`;
+  const issuer = teamDomain.startsWith('https://') ? teamDomain : `https://${teamDomain}`;
 
   // Create JWKS from the team domain
   const JWKS = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));

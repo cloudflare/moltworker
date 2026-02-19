@@ -1,0 +1,122 @@
+#!/bin/bash
+# Start cloud e2e infrastructure and deploy worker
+#
+# This script:
+# 1. Creates Access application, service token, and R2 bucket via terraform
+# 2. Deploys the worker with appropriate secrets
+# 3. Waits for the worker to be ready
+# 4. Outputs connection info for tests
+set -e
+
+VERBOSE=false
+if [ "$1" = "-v" ] || [ "$1" = "--verbose" ]; then
+    VERBOSE=true
+fi
+
+log() {
+    if [ "$VERBOSE" = true ]; then
+        echo "[cloud-e2e] $*" >&2
+    fi
+}
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FIXTURE_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Support running directly (not via cctr) for manual debugging
+if [ -z "$CCTR_TEST_PATH" ]; then
+    # Running directly - E2E_DIR is parent of fixture dir
+    E2E_DIR="$(dirname "$FIXTURE_DIR")"
+    log "CCTR_TEST_PATH not set, using E2E_DIR: $E2E_DIR"
+else
+    # Running via cctr - CCTR_TEST_PATH points to original test dir
+    E2E_DIR="$CCTR_TEST_PATH"
+fi
+
+if [ -z "$CCTR_FIXTURE_DIR" ]; then
+    CCTR_FIXTURE_DIR="/tmp/e2e-cloud-manual"
+    mkdir -p "$CCTR_FIXTURE_DIR"
+    log "CCTR_FIXTURE_DIR not set, using: $CCTR_FIXTURE_DIR"
+fi
+
+# Source .dev.vars if it exists (for local development)
+if [ -f "$E2E_DIR/.dev.vars" ]; then
+    log "Loading credentials from $E2E_DIR/.dev.vars"
+    set -a
+    source "$E2E_DIR/.dev.vars"
+    set +a
+fi
+
+# Check required environment variables
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${WORKERS_SUBDOMAIN:?WORKERS_SUBDOMAIN is required}"
+: "${CF_ACCESS_TEAM_DOMAIN:?CF_ACCESS_TEAM_DOMAIN is required}"
+: "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID is required}"
+: "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY is required}"
+
+# Use timestamp + random suffix for truly unique IDs (avoids conflicts from stale resources)
+export E2E_TEST_RUN_ID="${E2E_TEST_RUN_ID:-$(date +%s)-$(openssl rand -hex 4)}"
+
+# Generate a gateway token for this test run
+GATEWAY_TOKEN="${MOLTBOT_GATEWAY_TOKEN:-e2e-cloud-$(openssl rand -hex 16)}"
+export MOLTBOT_GATEWAY_TOKEN="$GATEWAY_TOKEN"
+
+log "Starting cloud e2e infrastructure..."
+log "Test run ID: $E2E_TEST_RUN_ID"
+
+# Clean up any stale terraform state from previous runs
+rm -rf "$SCRIPT_DIR/.terraform" "$SCRIPT_DIR/terraform.tfstate"* "$SCRIPT_DIR/.terraform.lock.hcl"
+
+# Step 1: Apply terraform to create Access app, service token, R2 bucket
+log "Step 1: Creating cloud infrastructure with terraform..."
+cd "$SCRIPT_DIR"
+TERRAFORM_OUTPUT=$("$SCRIPT_DIR/terraform-apply")
+log "Terraform output: $TERRAFORM_OUTPUT"
+
+# Parse terraform outputs
+WORKER_URL=$(echo "$TERRAFORM_OUTPUT" | jq -r '.worker_url.value')
+WORKER_NAME=$(echo "$TERRAFORM_OUTPUT" | jq -r '.worker_name.value')
+ACCESS_AUD=$(echo "$TERRAFORM_OUTPUT" | jq -r '.access_application_aud.value')
+SERVICE_TOKEN_CLIENT_ID=$(echo "$TERRAFORM_OUTPUT" | jq -r '.service_token_client_id.value')
+SERVICE_TOKEN_CLIENT_SECRET=$(echo "$TERRAFORM_OUTPUT" | jq -r '.service_token_client_secret.value')
+R2_BUCKET=$(echo "$TERRAFORM_OUTPUT" | jq -r '.r2_bucket_name.value')
+
+log "Worker URL: $WORKER_URL"
+log "Worker name: $WORKER_NAME"
+log "Access AUD: $ACCESS_AUD"
+log "Service token client ID: $SERVICE_TOKEN_CLIENT_ID"
+log "R2 bucket: $R2_BUCKET"
+
+# Save outputs for other scripts
+echo "$TERRAFORM_OUTPUT" > "$CCTR_FIXTURE_DIR/terraform-output.json"
+echo "$WORKER_URL" > "$CCTR_FIXTURE_DIR/worker-url.txt"
+echo "$WORKER_NAME" > "$CCTR_FIXTURE_DIR/worker-name.txt"
+echo "$GATEWAY_TOKEN" > "$CCTR_FIXTURE_DIR/gateway-token.txt"
+echo "$SERVICE_TOKEN_CLIENT_ID" > "$CCTR_FIXTURE_DIR/cf-access-client-id.txt"
+echo "$SERVICE_TOKEN_CLIENT_SECRET" > "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt"
+echo "$E2E_TEST_RUN_ID" > "$CCTR_FIXTURE_DIR/test-run-id.txt"
+echo "$R2_BUCKET" > "$CCTR_FIXTURE_DIR/r2-bucket-name.txt"
+echo "${WORKER_NAME}-sandbox" > "$CCTR_FIXTURE_DIR/container-name.txt"
+
+# Step 2: Deploy the worker
+log "Step 2: Deploying worker..."
+"$SCRIPT_DIR/deploy" "$TERRAFORM_OUTPUT"
+
+# Step 3: Create Access application (must be after worker exists)
+log "Step 3: Creating Access application..."
+SERVICE_TOKEN_ID=$(echo "$TERRAFORM_OUTPUT" | jq -r '.service_token_id.value')
+export CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT_ID"
+ACCESS_OUTPUT=$("$SCRIPT_DIR/create-access-app" "$WORKER_NAME" "$SERVICE_TOKEN_ID")
+ACCESS_APP_ID=$(echo "$ACCESS_OUTPUT" | head -1)
+ACCESS_AUD=$(echo "$ACCESS_OUTPUT" | tail -1)
+echo "$ACCESS_APP_ID" > "$CCTR_FIXTURE_DIR/access-app-id.txt"
+echo "$ACCESS_AUD" > "$CCTR_FIXTURE_DIR/access-aud.txt"
+log "Access app ID: $ACCESS_APP_ID"
+log "Access AUD: $ACCESS_AUD"
+
+log "Cloud e2e infrastructure deployed!"
+log "Worker URL: $WORKER_URL"
+log "Gateway token: $GATEWAY_TOKEN"
+log "Note: Worker may still be starting - browser will wait for it"
+sleep 1  # Let stderr flush before stdout
+echo "ready"

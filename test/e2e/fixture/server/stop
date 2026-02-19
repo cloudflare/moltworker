@@ -1,0 +1,125 @@
+#!/bin/bash
+# Stop and clean up ALL cloud e2e infrastructure
+#
+# This script:
+# 1. Deletes the deployed worker
+# 2. Deletes the R2 bucket (may fail if not empty - requires manual cleanup)
+# 3. Deletes the service token
+# 4. Cleans up local state files
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Find E2E_DIR for .dev.vars
+if [ -n "$CCTR_TEST_PATH" ]; then
+    E2E_DIR="$CCTR_TEST_PATH"
+else
+    FIXTURE_DIR="$(dirname "$SCRIPT_DIR")"
+    E2E_DIR="$(dirname "$FIXTURE_DIR")"
+fi
+
+# Source .dev.vars if it exists
+if [ -f "$E2E_DIR/.dev.vars" ]; then
+    set -a
+    source "$E2E_DIR/.dev.vars"
+    set +a
+fi
+
+# Export CLOUDFLARE_ACCOUNT_ID (wrangler prefers this over CF_ACCOUNT_ID)
+export CLOUDFLARE_ACCOUNT_ID="${CF_ACCOUNT_ID:-}"
+
+# Support running directly (not via cctr)
+if [ -z "$CCTR_FIXTURE_DIR" ]; then
+    CCTR_FIXTURE_DIR="/tmp/e2e-cloud-manual"
+fi
+
+echo "Stopping cloud e2e infrastructure..." >&2
+
+# Read saved values from fixture dir
+WORKER_NAME=$(cat "$CCTR_FIXTURE_DIR/worker-name.txt" 2>/dev/null || echo "")
+R2_BUCKET=$(cat "$CCTR_FIXTURE_DIR/r2-bucket-name.txt" 2>/dev/null || echo "")
+TEST_RUN_ID=$(cat "$CCTR_FIXTURE_DIR/test-run-id.txt" 2>/dev/null || echo "")
+ACCESS_APP_ID=$(cat "$CCTR_FIXTURE_DIR/access-app-id.txt" 2>/dev/null || echo "")
+
+# Step 0: Delete the Access application first (so it stops protecting the worker)
+if [ -n "$ACCESS_APP_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+    echo "Deleting Access application: $ACCESS_APP_ID" >&2
+    curl -s -X DELETE \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/$ACCESS_APP_ID" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" >/dev/null 2>&1 || true
+    echo "Access application deleted" >&2
+fi
+
+# Step 1: Delete the deployed worker
+if [ -n "$WORKER_NAME" ]; then
+    echo "Deleting worker: $WORKER_NAME" >&2
+    "$SCRIPT_DIR/delete-worker" "$WORKER_NAME" 2>&1 || true
+fi
+
+# Step 1b: Delete the container application
+CONTAINER_NAME=$(cat "$CCTR_FIXTURE_DIR/container-name.txt" 2>/dev/null || echo "${WORKER_NAME}-sandbox")
+if [ -n "$WORKER_NAME" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+    echo "Deleting container: $CONTAINER_NAME" >&2
+    # Find the container ID
+    CONTAINER_ID=$(curl -s -X GET \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/containers/applications" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+        -H "Content-Type: application/json" | \
+        jq -r ".result[] | select(.name == \"$CONTAINER_NAME\") | .id" 2>/dev/null || echo "")
+    
+    if [ -n "$CONTAINER_ID" ]; then
+        curl -s -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/containers/applications/$CONTAINER_ID" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" >/dev/null 2>&1 || true
+        echo "Container deleted" >&2
+    fi
+fi
+
+# Step 2: Delete R2 bucket
+# Note: wrangler doesn't have a command to list/delete objects, so if the bucket
+# has objects it will fail. Use the dashboard or aws cli for manual cleanup.
+if [ -n "$R2_BUCKET" ]; then
+    echo "Deleting R2 bucket: $R2_BUCKET" >&2
+    if ! npx wrangler r2 bucket delete "$R2_BUCKET" 2>&1; then
+        echo "Warning: Failed to delete R2 bucket (may not be empty). Manual cleanup required." >&2
+    fi
+fi
+
+# Step 3: Delete service token via API
+if [ -n "$TEST_RUN_ID" ] && [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+    echo "Deleting service token: moltbot-e2e-$TEST_RUN_ID" >&2
+    # Find and delete the service token
+    TOKEN_ID=$(curl -s -X GET \
+        "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+        -H "Content-Type: application/json" | \
+        jq -r ".result[] | select(.name == \"moltbot-e2e-$TEST_RUN_ID\") | .id" 2>/dev/null || echo "")
+    
+    if [ -n "$TOKEN_ID" ]; then
+        curl -s -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens/$TOKEN_ID" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: application/json" >/dev/null 2>&1 || true
+        echo "Service token deleted" >&2
+    fi
+fi
+
+# Step 4: Clean up local files
+echo "Cleaning up local files..." >&2
+rm -f "$CCTR_FIXTURE_DIR/terraform-output.json"
+rm -f "$CCTR_FIXTURE_DIR/worker-url.txt"
+rm -f "$CCTR_FIXTURE_DIR/worker-name.txt"
+rm -f "$CCTR_FIXTURE_DIR/gateway-token.txt"
+rm -f "$CCTR_FIXTURE_DIR/cf-access-client-id.txt"
+rm -f "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt"
+rm -f "$CCTR_FIXTURE_DIR/test-run-id.txt"
+rm -f "$CCTR_FIXTURE_DIR/r2-bucket-name.txt"
+rm -f "$CCTR_FIXTURE_DIR/container-name.txt"
+rm -f "$CCTR_FIXTURE_DIR/access-app-id.txt"
+rm -f "$CCTR_FIXTURE_DIR/access-aud.txt"
+rm -rf "$SCRIPT_DIR/.terraform" "$SCRIPT_DIR/terraform.tfstate"* "$SCRIPT_DIR/.terraform.lock.hcl"
+
+echo "Cloud e2e infrastructure stopped and cleaned up" >&2
+sleep 1  # Let stderr flush before stdout
+echo "stopped"

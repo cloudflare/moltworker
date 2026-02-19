@@ -1,0 +1,46 @@
+===
+navigate to admin page
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+plwr -S moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN" -T 120000
+---
+
+===
+wait for pending devices and approve
+%require
+===
+plwr -S moltworker-e2e wait 'button:has-text("Approve All")' -T 120000
+plwr -S moltworker-e2e click 'button:has-text("Approve All")' -T 10000
+---
+
+===
+navigate to chat page
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+plwr -S moltworker-e2e open "$WORKER_URL/?token=$TOKEN" -T 120000
+---
+
+===
+wait for chat interface to load
+%require
+===
+plwr -S moltworker-e2e wait 'textarea:not([disabled])' -T 120000
+---
+
+===
+send math question
+%require
+===
+plwr -S moltworker-e2e fill textarea 'What is 847293 + 651824? Reply with just the number.'
+plwr -S moltworker-e2e click 'button:has-text("Send")'
+---
+
+===
+wait for correct answer
+===
+plwr -S moltworker-e2e wait 'text=1499117' -T 120000
+---

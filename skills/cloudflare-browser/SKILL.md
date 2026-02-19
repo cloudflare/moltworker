@@ -3,6 +3,27 @@ name: cloudflare-browser
 description: Headless Chrome via CDP WebSocket. Requires CDP_SECRET.
 ---
 
+# Cloudflare Browser Rendering
+
+Control headless browsers via Cloudflare's Browser Rendering service using CDP (Chrome DevTools Protocol) over WebSocket.
+
+## Prerequisites
+
+- `CDP_SECRET` environment variable set
+- Browser profile configured in openclaw.json with `cdpUrl` pointing to the worker endpoint:
+  ```json
+  "browser": {
+    "profiles": {
+      "cloudflare": {
+        "cdpUrl": "https://your-worker.workers.dev/cdp?secret=..."
+      }
+    }
+  }
+  ```
+
+## Quick Start
+
+### Screenshot
 ```bash
 # Screenshot
 node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js URL output.png

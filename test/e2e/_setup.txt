@@ -1,0 +1,31 @@
+===
+start moltworker server
+===
+./start-server -v
+---
+{{ s }}
+---
+where
+* strip(s) endswith "ready"
+
+===
+start playwright browser
+===
+./start-browser
+---
+{{ output }}
+---
+where
+* strip(output) endswith "ready"
+
+===
+navigate to main page and wait for worker to be ready
+%require
+===
+TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
+WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
+plwr -S moltworker-e2e open "$WORKER_URL/?token=$TOKEN" -T 480000
+# Wait for "Pairing required" — this ensures the WS connection has been
+# attempted and the gateway has registered a pending pairing request.
+plwr -S moltworker-e2e wait 'text=Pairing required' -T 480000
+---

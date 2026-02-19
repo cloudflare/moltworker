@@ -2,10 +2,10 @@ import type { Sandbox, Process } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
-import { mountR2Storage } from './r2';
+import { ensureRcloneConfig } from './r2';
 
 /** Commands that identify a gateway process (vs CLI commands) */
-export const GATEWAY_COMMANDS = ['start-moltbot.sh', 'clawdbot gateway', 'openclaw gateway'];
+export const GATEWAY_COMMANDS = ['start-openclaw.sh', 'start-moltbot.sh', 'clawdbot gateway', 'openclaw gateway'];
 
 /** Check if a command string is a gateway process */
 export function isGatewayProcess(command: string): boolean {
@@ -27,8 +27,8 @@ export function getLastGatewayStartTime(): number {
 }
 
 /**
- * Find an existing Moltbot gateway process
- * 
+ * Find an existing OpenClaw gateway process
+ *
  * @param sandbox - The sandbox instance
  * @returns The process if found and running/starting, null otherwise
  */
@@ -37,6 +37,9 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
       const isCliCommand =
+        proc.command.includes('openclaw devices') ||
+        proc.command.includes('openclaw --version') ||
+        proc.command.includes('openclaw onboard') ||
         proc.command.includes('clawdbot devices') ||
         proc.command.includes('clawdbot --version');
 
@@ -53,36 +56,42 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
 }
 
 /**
- * Ensure the Moltbot gateway is running
- * 
+ * Ensure the OpenClaw gateway is running
+ *
  * This will:
  * 1. Mount R2 storage if configured
  * 2. Check for an existing gateway process
  * 3. Wait for it to be ready, or start a new one
- * 
+ *
  * @param sandbox - The sandbox instance
  * @param env - Worker environment bindings
  * @returns The running gateway process
  */
 export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): Promise<Process> {
-  // Mount R2 storage for persistent data (non-blocking if not configured)
-  // R2 is used as a backup - the startup script will restore from it on boot
-  await mountR2Storage(sandbox, env);
+  // Configure rclone for R2 persistence (non-blocking if not configured).
+  // The startup script uses rclone to restore data from R2 on boot.
+  await ensureRcloneConfig(sandbox, env);
 
-  // Check if Moltbot is already running or starting
+  // Check if gateway is already running or starting
   const existingProcess = await findExistingMoltbotProcess(sandbox);
   if (existingProcess) {
-    console.log('Found existing Moltbot process:', existingProcess.id, 'status:', existingProcess.status);
+    console.log(
+      'Found existing gateway process:',
+      existingProcess.id,
+      'status:',
+      existingProcess.status,
+    );
 
     // Always use full startup timeout - a process can be "running" but not ready yet
     // (e.g., just started by another concurrent request). Using a shorter timeout
     // causes race conditions where we kill processes that are still initializing.
     try {
-      console.log('Waiting for Moltbot gateway on port', MOLTBOT_PORT, 'timeout:', STARTUP_TIMEOUT_MS);
+      console.log('Waiting for gateway on port', MOLTBOT_PORT, 'timeout:', STARTUP_TIMEOUT_MS);
       await existingProcess.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS });
-      console.log('Moltbot gateway is reachable');
+      console.log('Gateway is reachable');
       return existingProcess;
-    } catch (e) {
+      // eslint-disable-next-line no-unused-vars
+    } catch (_e) {
       // Timeout waiting for port - process is likely dead or stuck, kill and restart
       console.log('Existing process not reachable after full timeout, killing and restarting...');
       try {
@@ -93,11 +102,11 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     }
   }
 
-  // Start a new Moltbot gateway
-  console.log('Starting new Moltbot gateway...');
+  // Start a new OpenClaw gateway
+  console.log('Starting new OpenClaw gateway...');
   lastGatewayStartTime = Date.now();
   const envVars = buildEnvVars(env);
-  const command = '/usr/local/bin/start-moltbot.sh';
+  const command = '/usr/local/bin/start-openclaw.sh';
 
   console.log('Starting process with command:', command);
   console.log('Environment vars being passed:', Object.keys(envVars));
@@ -115,9 +124,9 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
 
   // Wait for the gateway to be ready
   try {
-    console.log('[Gateway] Waiting for Moltbot gateway to be ready on port', MOLTBOT_PORT);
+    console.log('[Gateway] Waiting for OpenClaw gateway to be ready on port', MOLTBOT_PORT);
     await process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS });
-    console.log('[Gateway] Moltbot gateway is ready!');
+    console.log('[Gateway] OpenClaw gateway is ready!');
 
     const logs = await process.getLogs();
     if (logs.stdout) console.log('[Gateway] stdout:', logs.stdout);
@@ -128,7 +137,9 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
       const logs = await process.getLogs();
       console.error('[Gateway] startup failed. Stderr:', logs.stderr);
       console.error('[Gateway] startup failed. Stdout:', logs.stdout);
-      throw new Error(`Moltbot gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`);
+      throw new Error(`OpenClaw gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`, {
+        cause: e,
+      });
     } catch (logErr) {
       console.error('[Gateway] Failed to get logs:', logErr);
       throw e;

@@ -1,67 +1,44 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
-import { R2_MOUNT_PATH, R2_BUCKET_NAME } from '../config';
-import { runCommand } from './utils';
+import { getR2BucketName } from '../config';
+
+const RCLONE_CONF_PATH = '/root/.config/rclone/rclone.conf';
+const CONFIGURED_FLAG = '/tmp/.rclone-configured';
 
 /**
- * Check if R2 is already mounted by looking at the mount table
+ * Ensure rclone is configured in the container for R2 access.
+ * Idempotent -- checks for a flag file to skip re-configuration.
+ *
+ * @returns true if rclone is configured, false if credentials are missing
  */
-async function isR2Mounted(sandbox: Sandbox): Promise<boolean> {
-  try {
-    const result = await runCommand(sandbox, `mount | grep "s3fs on ${R2_MOUNT_PATH}"`, 5000);
-    const mounted = result.stdout.includes('s3fs');
-    console.log('isR2Mounted check:', mounted);
-    return mounted;
-  } catch (err) {
-    console.log('isR2Mounted error:', err);
-    return false;
-  }
-}
-
-/**
- * Mount R2 bucket for persistent storage
- * 
- * @param sandbox - The sandbox instance
- * @param env - Worker environment bindings
- * @returns true if mounted successfully, false otherwise
- */
-export async function mountR2Storage(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
-  // Skip if R2 credentials are not configured
+export async function ensureRcloneConfig(sandbox: Sandbox, env: MoltbotEnv): Promise<boolean> {
   if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
-    console.log('R2 storage not configured (missing R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, or CF_ACCOUNT_ID)');
+    console.log(
+      'R2 storage not configured (missing R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, or CF_ACCOUNT_ID)',
+    );
     return false;
   }
 
-  // Check if already mounted first - this avoids errors and is faster
-  if (await isR2Mounted(sandbox)) {
-    console.log('R2 bucket already mounted at', R2_MOUNT_PATH);
+  const check = await sandbox.exec(`test -f ${CONFIGURED_FLAG} && echo yes || echo no`);
+  if (check.stdout?.trim() === 'yes') {
     return true;
   }
 
-  try {
-    console.log('Mounting R2 bucket at', R2_MOUNT_PATH);
-    await sandbox.mountBucket(R2_BUCKET_NAME, R2_MOUNT_PATH, {
-      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      // Pass credentials explicitly since we use R2_* naming instead of AWS_*
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      },
-    });
-    console.log('R2 bucket mounted successfully - moltbot data will persist across sessions');
-    return true;
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.log('R2 mount error:', errorMessage);
-    
-    // Check again if it's mounted - the error might be misleading
-    if (await isR2Mounted(sandbox)) {
-      console.log('R2 bucket is mounted despite error');
-      return true;
-    }
-    
-    // Don't fail if mounting fails - moltbot can still run without persistent storage
-    console.error('Failed to mount R2 bucket:', err);
-    return false;
-  }
+  const rcloneConfig = [
+    '[r2]',
+    'type = s3',
+    'provider = Cloudflare',
+    `access_key_id = ${env.R2_ACCESS_KEY_ID}`,
+    `secret_access_key = ${env.R2_SECRET_ACCESS_KEY}`,
+    `endpoint = https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    'acl = private',
+    'no_check_bucket = true',
+  ].join('\n');
+
+  await sandbox.exec(`mkdir -p $(dirname ${RCLONE_CONF_PATH})`);
+  await sandbox.writeFile(RCLONE_CONF_PATH, rcloneConfig);
+  await sandbox.exec(`touch ${CONFIGURED_FLAG}`);
+
+  console.log('Rclone configured for R2 bucket:', getR2BucketName(env));
+  return true;
 }

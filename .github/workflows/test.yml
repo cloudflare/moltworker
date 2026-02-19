@@ -5,9 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
+  unit:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,8 +23,203 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
       - name: Type check
         run: npm run typecheck
 
       - name: Run tests
         run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - name: base
+            env: {}
+          - name: telegram
+            env:
+              TELEGRAM_BOT_TOKEN: "fake-telegram-bot-token-for-e2e"
+              TELEGRAM_DM_POLICY: "pairing"
+          - name: discord
+            env:
+              DISCORD_BOT_TOKEN: "fake-discord-bot-token-for-e2e"
+              DISCORD_DM_POLICY: "pairing"
+          - name: workers-ai
+            env:
+              CF_AI_GATEWAY_MODEL: "workers-ai/@cf/openai/gpt-oss-120b"
+
+    name: e2e (${{ matrix.config.name }})
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg imagemagick bc
+
+      - name: Install cctr
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cctr
+
+      - name: Install plwr
+        uses: taiki-e/install-action@v2
+        with:
+          tool: plwr@0.7.2
+
+      - name: Install Playwright browsers
+        run: npm install -g playwright && npx playwright install --with-deps chromium
+
+      - name: Run E2E tests (${{ matrix.config.name }})
+        id: e2e
+        continue-on-error: true
+        env:
+          # Cloud infrastructure credentials (from repo secrets with E2E_ prefix)
+          CLOUDFLARE_API_TOKEN: ${{ secrets.E2E_CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.E2E_CF_ACCOUNT_ID }}
+          WORKERS_SUBDOMAIN: ${{ secrets.E2E_WORKERS_SUBDOMAIN }}
+          CF_ACCESS_TEAM_DOMAIN: ${{ secrets.E2E_CF_ACCESS_TEAM_DOMAIN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.E2E_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.E2E_R2_SECRET_ACCESS_KEY }}
+          # AI provider — Cloudflare AI Gateway (preferred)
+          CLOUDFLARE_AI_GATEWAY_API_KEY: ${{ secrets.CLOUDFLARE_AI_GATEWAY_API_KEY }}
+          CF_AI_GATEWAY_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
+          CF_AI_GATEWAY_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_GATEWAY_ID }}
+          # AI provider — legacy (still supported)
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          AI_GATEWAY_BASE_URL: ${{ secrets.AI_GATEWAY_BASE_URL }}
+          # Unique test run ID for parallel isolation
+          E2E_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.config.name }}
+          # Matrix-specific config
+          TELEGRAM_BOT_TOKEN: ${{ matrix.config.env.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
+          DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}
+          DISCORD_DM_POLICY: ${{ matrix.config.env.DISCORD_DM_POLICY }}
+          CF_AI_GATEWAY_MODEL: ${{ matrix.config.env.CF_AI_GATEWAY_MODEL }}
+        run: cctr -vv test/e2e
+
+      - name: Generate video thumbnail
+        id: video
+        if: always()
+        run: |
+          if ls /tmp/moltworker-e2e-videos/*.mp4 1>/dev/null 2>&1; then
+            for mp4 in /tmp/moltworker-e2e-videos/*.mp4; do
+              thumb="${mp4%.mp4}.png"
+
+              # Extract middle frame as thumbnail
+              duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")
+              midpoint=$(echo "$duration / 2" | bc -l)
+              ffmpeg -y -ss "$midpoint" -i "$mp4" -vframes 1 -update 1 -q:v 2 "$thumb"
+
+              # Add play button overlay
+              width=$(identify -format '%w' "$thumb")
+              height=$(identify -format '%h' "$thumb")
+              cx=$((width / 2))
+              cy=$((height / 2))
+              convert "$thumb" \
+                -fill 'rgba(0,0,0,0.6)' -draw "circle ${cx},${cy} $((cx+50)),${cy}" \
+                -fill 'white' -draw "polygon $((cx-15)),$((cy-25)) $((cx-15)),$((cy+25)) $((cx+30)),${cy}" \
+                "$thumb"
+
+              echo "video_path=$mp4" >> $GITHUB_OUTPUT
+              echo "video_name=$(basename $mp4)" >> $GITHUB_OUTPUT
+              echo "thumb_path=$thumb" >> $GITHUB_OUTPUT
+              echo "thumb_name=$(basename $thumb)" >> $GITHUB_OUTPUT
+            done
+            echo "has_video=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_video=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare video for upload
+        id: prepare
+        if: always() && steps.video.outputs.has_video == 'true'
+        run: |
+          mkdir -p /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}
+          cp "${{ steps.video.outputs.video_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
+          cp "${{ steps.video.outputs.thumb_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
+          echo "video_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts-${{ matrix.config.name }}/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.video.outputs.video_name }}" >> $GITHUB_OUTPUT
+          echo "thumb_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts-${{ matrix.config.name }}/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.video.outputs.thumb_name }}" >> $GITHUB_OUTPUT
+
+      - name: Upload video to e2e-artifacts branch
+        if: always() && steps.video.outputs.has_video == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: /tmp/e2e-video-upload
+          publish_branch: e2e-artifacts-${{ matrix.config.name }}
+          keep_files: true
+
+      - name: Delete old video comments
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- e2e-video-${{ matrix.config.name }} -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            for (const comment of comments) {
+              if (comment.body.includes(marker)) {
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id,
+                });
+              }
+            }
+
+      - name: Comment on PR with video
+        if: always() && github.event_name == 'pull_request' && steps.prepare.outputs.video_url
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            <!-- e2e-video-${{ matrix.config.name }} -->
+            ## E2E Test Recording (${{ matrix.config.name }})
+
+            ${{ steps.e2e.outcome == 'success' && '✅ Tests passed' || '❌ Tests failed' }}
+
+            [![E2E Test Video](${{ steps.prepare.outputs.thumb_url }})](${{ steps.prepare.outputs.video_url }})
+
+      - name: Add video link to summary
+        if: always()
+        run: |
+          echo "## E2E Test Recording" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.video.outputs.has_video }}" == "true" ]; then
+            echo "📹 [Download video](${{ steps.prepare.outputs.video_url }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ No video recording found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail if E2E tests failed
+        if: steps.e2e.outcome == 'failure'
+        run: exit 1

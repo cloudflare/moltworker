@@ -1,178 +1,180 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Configuration Error - Moltworker</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-      color: #e0e0e0;
-      padding: 20px;
-    }
-    
-    .container {
-      text-align: center;
-      max-width: 600px;
-    }
-    
-    .logo {
-      width: 200px;
-      height: auto;
-      margin-bottom: 40px;
-    }
-    
-    .icon {
-      font-size: 4rem;
-      margin-bottom: 20px;
-    }
-    
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 500;
-      margin-bottom: 16px;
-      color: #f87171;
-    }
-    
-    .message {
-      font-size: 1rem;
-      color: #a0a0a0;
-      margin-bottom: 30px;
-      line-height: 1.6;
-    }
-    
-    .error-box {
-      background: rgba(248, 113, 113, 0.1);
-      border: 1px solid rgba(248, 113, 113, 0.3);
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 30px;
-      text-align: left;
-    }
-    
-    .error-box h2 {
-      font-size: 0.9rem;
-      color: #f87171;
-      margin-bottom: 12px;
-      font-weight: 500;
-    }
-    
-    .missing-vars {
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-      font-size: 0.85rem;
-      color: #fbbf24;
-      background: rgba(0, 0, 0, 0.3);
-      padding: 12px 16px;
-      border-radius: 4px;
-      word-break: break-all;
-    }
-    
-    .instructions {
-      background: rgba(96, 165, 250, 0.1);
-      border: 1px solid rgba(96, 165, 250, 0.3);
-      border-radius: 8px;
-      padding: 20px;
-      text-align: left;
-    }
-    
-    .instructions h2 {
-      font-size: 0.9rem;
-      color: #60a5fa;
-      margin-bottom: 12px;
-      font-weight: 500;
-    }
-    
-    .instructions p {
-      font-size: 0.85rem;
-      color: #a0a0a0;
-      margin-bottom: 12px;
-      line-height: 1.5;
-    }
-    
-    .instructions code {
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-      font-size: 0.8rem;
-      background: rgba(0, 0, 0, 0.3);
-      padding: 2px 6px;
-      border-radius: 3px;
-      color: #4ade80;
-    }
-    
-    .instructions pre {
-      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-      font-size: 0.8rem;
-      background: rgba(0, 0, 0, 0.3);
-      padding: 12px 16px;
-      border-radius: 4px;
-      color: #4ade80;
-      overflow-x: auto;
-      margin-top: 8px;
-    }
-    
-    .instructions a {
-      color: rgb(244, 129, 32);
-      text-decoration: none;
-    }
-    
-    .instructions a:hover {
-      text-decoration: underline;
-    }
-    
-    .info {
-      font-size: 0.8rem;
-      color: #707070;
-      margin-top: 30px;
-    }
-    
-    .info a {
-      color: rgb(244, 129, 32);
-      text-decoration: none;
-    }
-    
-    .info a:hover {
-      text-decoration: underline;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <img src="/logo.png" alt="Moltworker" class="logo">
-    
-    <h1>Configuration Required</h1>
-    
-    <p class="message">
-      Moltworker cannot start because required environment variables are not configured.
-    </p>
-    
-    <div class="error-box">
-      <h2>Missing Variables</h2>
-      <div class="missing-vars">{{MISSING_VARS}}</div>
-    </div>
-    
-    <div class="instructions">
-      <h2>How to Fix</h2>
-      <p>Set the missing secrets using the Wrangler CLI:</p>
-      <pre>wrangler secret put &lt;VARIABLE_NAME&gt;</pre>
-      <p style="margin-top: 16px;">
-        For example: <code>wrangler secret put ANTHROPIC_API_KEY</code>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Configuration Error - Moltworker</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        color: #e0e0e0;
+        padding: 20px;
+      }
+
+      .container {
+        text-align: center;
+        max-width: 600px;
+      }
+
+      .logo {
+        width: 200px;
+        height: auto;
+        margin-bottom: 40px;
+      }
+
+      .icon {
+        font-size: 4rem;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 500;
+        margin-bottom: 16px;
+        color: #f87171;
+      }
+
+      .message {
+        font-size: 1rem;
+        color: #a0a0a0;
+        margin-bottom: 30px;
+        line-height: 1.6;
+      }
+
+      .error-box {
+        background: rgba(248, 113, 113, 0.1);
+        border: 1px solid rgba(248, 113, 113, 0.3);
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 30px;
+        text-align: left;
+      }
+
+      .error-box h2 {
+        font-size: 0.9rem;
+        color: #f87171;
+        margin-bottom: 12px;
+        font-weight: 500;
+      }
+
+      .missing-vars {
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 0.85rem;
+        color: #fbbf24;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 12px 16px;
+        border-radius: 4px;
+        word-break: break-all;
+      }
+
+      .instructions {
+        background: rgba(96, 165, 250, 0.1);
+        border: 1px solid rgba(96, 165, 250, 0.3);
+        border-radius: 8px;
+        padding: 20px;
+        text-align: left;
+      }
+
+      .instructions h2 {
+        font-size: 0.9rem;
+        color: #60a5fa;
+        margin-bottom: 12px;
+        font-weight: 500;
+      }
+
+      .instructions p {
+        font-size: 0.85rem;
+        color: #a0a0a0;
+        margin-bottom: 12px;
+        line-height: 1.5;
+      }
+
+      .instructions code {
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 0.8rem;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 2px 6px;
+        border-radius: 3px;
+        color: #4ade80;
+      }
+
+      .instructions pre {
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 0.8rem;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 12px 16px;
+        border-radius: 4px;
+        color: #4ade80;
+        overflow-x: auto;
+        margin-top: 8px;
+      }
+
+      .instructions a {
+        color: rgb(244, 129, 32);
+        text-decoration: none;
+      }
+
+      .instructions a:hover {
+        text-decoration: underline;
+      }
+
+      .info {
+        font-size: 0.8rem;
+        color: #707070;
+        margin-top: 30px;
+      }
+
+      .info a {
+        color: rgb(244, 129, 32);
+        text-decoration: none;
+      }
+
+      .info a:hover {
+        text-decoration: underline;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <img src="/logo.png" alt="Moltworker" class="logo" />
+
+      <h1>Configuration Required</h1>
+
+      <p class="message">
+        Moltworker cannot start because required environment variables are not configured.
       </p>
-      <p style="margin-bottom: 0;">
-        After setting the secrets, refresh this page to continue.
-        See the <a href="https://github.com/cloudflare/moltworker" target="_blank">README</a> for full setup instructions.
-      </p>
+
+      <div class="error-box">
+        <h2>Missing Variables</h2>
+        <div class="missing-vars">{{MISSING_VARS}}</div>
+      </div>
+
+      <div class="instructions">
+        <h2>How to Fix</h2>
+        <p>Set the missing secrets using the Wrangler CLI:</p>
+        <pre>wrangler secret put &lt;VARIABLE_NAME&gt;</pre>
+        <p style="margin-top: 16px">
+          For example: <code>wrangler secret put ANTHROPIC_API_KEY</code>
+        </p>
+        <p style="margin-bottom: 0">
+          After setting the secrets, refresh this page to continue. See the
+          <a href="https://github.com/cloudflare/moltworker" target="_blank">README</a> for full
+          setup instructions.
+        </p>
+      </div>
     </div>
-  </div>
-</body>
+  </body>
 </html>

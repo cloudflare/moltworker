@@ -32,11 +32,11 @@ describe('verifyAccessJWT', () => {
     const result = await verifyAccessJWT(
       'test.jwt.token',
       'myteam.cloudflareaccess.com',
-      'test-aud'
+      'test-aud',
     );
 
     expect(createRemoteJWKSet).toHaveBeenCalledWith(
-      new URL('https://myteam.cloudflareaccess.com/cdn-cgi/access/certs')
+      new URL('https://myteam.cloudflareaccess.com/cdn-cgi/access/certs'),
     );
 
     expect(jwtVerify).toHaveBeenCalledWith('test.jwt.token', 'mock-jwks', {
@@ -64,14 +64,10 @@ describe('verifyAccessJWT', () => {
       protectedHeader: { alg: 'RS256' },
     } as never);
 
-    await verifyAccessJWT(
-      'test.jwt.token',
-      'https://myteam.cloudflareaccess.com',
-      'test-aud'
-    );
+    await verifyAccessJWT('test.jwt.token', 'https://myteam.cloudflareaccess.com', 'test-aud');
 
     expect(createRemoteJWKSet).toHaveBeenCalledWith(
-      new URL('https://myteam.cloudflareaccess.com/cdn-cgi/access/certs')
+      new URL('https://myteam.cloudflareaccess.com/cdn-cgi/access/certs'),
     );
 
     expect(jwtVerify).toHaveBeenCalledWith('test.jwt.token', 'mock-jwks', {
@@ -86,7 +82,7 @@ describe('verifyAccessJWT', () => {
     vi.mocked(jwtVerify).mockRejectedValue(new Error('Invalid signature'));
 
     await expect(
-      verifyAccessJWT('invalid.jwt.token', 'myteam.cloudflareaccess.com', 'test-aud')
+      verifyAccessJWT('invalid.jwt.token', 'myteam.cloudflareaccess.com', 'test-aud'),
     ).rejects.toThrow('Invalid signature');
   });
 
@@ -96,31 +92,27 @@ describe('verifyAccessJWT', () => {
     vi.mocked(jwtVerify).mockRejectedValue(new Error('"exp" claim timestamp check failed'));
 
     await expect(
-      verifyAccessJWT('expired.jwt.token', 'myteam.cloudflareaccess.com', 'test-aud')
+      verifyAccessJWT('expired.jwt.token', 'myteam.cloudflareaccess.com', 'test-aud'),
     ).rejects.toThrow('"exp" claim timestamp check failed');
   });
 
   it('throws error for invalid audience', async () => {
     const { jwtVerify } = await import('jose');
 
-    vi.mocked(jwtVerify).mockRejectedValue(
-      new Error('"aud" claim check failed')
-    );
+    vi.mocked(jwtVerify).mockRejectedValue(new Error('"aud" claim check failed'));
 
     await expect(
-      verifyAccessJWT('token.with.wrong-aud', 'myteam.cloudflareaccess.com', 'wrong-aud')
+      verifyAccessJWT('token.with.wrong-aud', 'myteam.cloudflareaccess.com', 'wrong-aud'),
     ).rejects.toThrow('"aud" claim check failed');
   });
 
   it('throws error for invalid issuer', async () => {
     const { jwtVerify } = await import('jose');
 
-    vi.mocked(jwtVerify).mockRejectedValue(
-      new Error('"iss" claim check failed')
-    );
+    vi.mocked(jwtVerify).mockRejectedValue(new Error('"iss" claim check failed'));
 
     await expect(
-      verifyAccessJWT('token.with.wrong-issuer', 'myteam.cloudflareaccess.com', 'test-aud')
+      verifyAccessJWT('token.with.wrong-issuer', 'myteam.cloudflareaccess.com', 'test-aud'),
     ).rejects.toThrow('"iss" claim check failed');
   });
 
@@ -145,7 +137,7 @@ describe('verifyAccessJWT', () => {
     const result = await verifyAccessJWT(
       'valid.jwt.token',
       'company.cloudflareaccess.com',
-      'app-aud-123'
+      'app-aud-123',
     );
 
     expect(result).toEqual(mockPayload);

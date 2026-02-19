@@ -1,0 +1,8 @@
+#!/bin/bash
+# Stop plwr browser session
+
+SESSION_NAME="moltworker-e2e"
+
+plwr -S "$SESSION_NAME" stop 2>/dev/null || true
+
+echo "stopped"

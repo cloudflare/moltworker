@@ -1,0 +1,9 @@
+#!/bin/bash
+# Stop the moltworker and clean up ALL cloud resources
+#
+# This will:
+# 1. Delete the deployed worker
+# 2. Destroy terraform resources (Access app, service token, R2 bucket)
+# 3. Clean up local state files
+
+exec "$(dirname "$0")/server/stop" "$@"

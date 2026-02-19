@@ -1,10 +1,26 @@
 # Copy this to .dev.vars and fill in your values
 # .dev.vars is gitignored and used by wrangler dev
 
+# AI Provider (at least one required)
 ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+
+# Cloudflare AI Gateway (alternative to direct provider keys)
+# CLOUDFLARE_AI_GATEWAY_API_KEY=your-provider-api-key
+# CF_AI_GATEWAY_ACCOUNT_ID=your-account-id
+# CF_AI_GATEWAY_GATEWAY_ID=your-gateway-id
+# CF_AI_GATEWAY_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+
+# Legacy AI Gateway (still supported)
+# AI_GATEWAY_API_KEY=your-key
+# AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 
 # Local development mode - skips Cloudflare Access auth and bypasses device pairing
 # DEV_MODE=true
+
+# E2E test mode - skips Cloudflare Access auth but keeps device pairing enabled
+# Use this for automated tests that need to test the real pairing flow
+# E2E_TEST_MODE=true
 
 # Enable debug routes at /debug/* (optional)
 # DEBUG_ROUTES=true

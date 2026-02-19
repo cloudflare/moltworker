@@ -26,8 +26,9 @@ import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 import type { AppEnv, MoltbotEnv } from './types';
 import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, ensureCronJobs, cleanupExitedProcesses, getLastGatewayStartTime } from './gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, cleanupExitedProcesses, getLastGatewayStartTime } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
+import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 
@@ -38,11 +39,11 @@ function transformErrorMessage(message: string, host: string): string {
   if (message.includes('gateway token missing') || message.includes('gateway token mismatch')) {
     return `Invalid or missing token. Visit https://${host}?token={REPLACE_WITH_YOUR_TOKEN}`;
   }
-  
+
   if (message.includes('pairing required')) {
     return `Pairing required. Visit https://${host}/_admin/`;
   }
-  
+
   return message;
 }
 
@@ -54,28 +55,39 @@ export { Sandbox };
  */
 function validateRequiredEnv(env: MoltbotEnv): string[] {
   const missing: string[] = [];
+  const isTestMode = env.DEV_MODE === 'true' || env.E2E_TEST_MODE === 'true';
 
   if (!env.MOLTBOT_GATEWAY_TOKEN) {
     missing.push('MOLTBOT_GATEWAY_TOKEN');
   }
 
-  if (!env.CF_ACCESS_TEAM_DOMAIN) {
-    missing.push('CF_ACCESS_TEAM_DOMAIN');
-  }
-
-  if (!env.CF_ACCESS_AUD) {
-    missing.push('CF_ACCESS_AUD');
-  }
-
-  // Check for AI Gateway, Claude Max OAuth, or direct Anthropic configuration
-  if (env.AI_GATEWAY_API_KEY) {
-    // AI Gateway requires both API key and base URL
-    if (!env.AI_GATEWAY_BASE_URL) {
-      missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
+  // CF Access vars not required in dev/test mode since auth is skipped
+  if (!isTestMode) {
+    if (!env.CF_ACCESS_TEAM_DOMAIN) {
+      missing.push('CF_ACCESS_TEAM_DOMAIN');
     }
-  } else if (!env.ANTHROPIC_API_KEY && !env.CLAUDE_ACCESS_TOKEN && !env.GITHUB_COPILOT_TOKEN) {
-    // Requires at least one AI provider key
-    missing.push('ANTHROPIC_API_KEY, AI_GATEWAY_API_KEY, CLAUDE_ACCESS_TOKEN, or GITHUB_COPILOT_TOKEN');
+
+    if (!env.CF_ACCESS_AUD) {
+      missing.push('CF_ACCESS_AUD');
+    }
+  }
+
+  // Check for AI provider configuration (at least one must be set)
+  const hasCloudflareGateway = !!(
+    env.CLOUDFLARE_AI_GATEWAY_API_KEY &&
+    env.CF_AI_GATEWAY_ACCOUNT_ID &&
+    env.CF_AI_GATEWAY_GATEWAY_ID
+  );
+  const hasLegacyGateway = !!(env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL);
+  const hasAnthropicKey = !!env.ANTHROPIC_API_KEY;
+  const hasOpenAIKey = !!env.OPENAI_API_KEY;
+  const hasClaudeToken = !!env.CLAUDE_ACCESS_TOKEN;
+  const hasCopilotToken = !!env.GITHUB_COPILOT_TOKEN;
+
+  if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey && !hasClaudeToken && !hasCopilotToken) {
+    missing.push(
+      'ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_ACCESS_TOKEN, GITHUB_COPILOT_TOKEN, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
+    );
   }
 
   return missing;
@@ -83,23 +95,23 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
 
 /**
  * Build sandbox options based on environment configuration.
- * 
+ *
  * SANDBOX_SLEEP_AFTER controls how long the container stays alive after inactivity:
  * - 'never' (default): Container stays alive indefinitely (recommended due to long cold starts)
  * - Duration string: e.g., '10m', '1h', '30s' - container sleeps after this period of inactivity
- * 
+ *
  * To reduce costs at the expense of cold start latency, set SANDBOX_SLEEP_AFTER to a duration:
  *   npx wrangler secret put SANDBOX_SLEEP_AFTER
  *   # Enter: 10m (or 1h, 30m, etc.)
  */
 function buildSandboxOptions(env: MoltbotEnv): SandboxOptions {
   const sleepAfter = env.SANDBOX_SLEEP_AFTER?.toLowerCase() || 'never';
-  
+
   // 'never' means keep the container alive indefinitely
   if (sleepAfter === 'never') {
     return { keepAlive: true };
   }
-  
+
   // Otherwise, use the specified duration
   return { sleepAfter };
 }
@@ -114,7 +126,11 @@ const app = new Hono<AppEnv>();
 // Middleware: Log every request (compact)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
-  console.log(`[REQ] ${c.req.method} ${url.pathname}`);
+  const redactedSearch = redactSensitiveParams(url);
+  console.log(`[REQ] ${c.req.method} ${url.pathname}${redactedSearch}`);
+  console.log(`[REQ] Has ANTHROPIC_API_KEY: ${!!c.env.ANTHROPIC_API_KEY}`);
+  console.log(`[REQ] DEV_MODE: ${c.env.DEV_MODE}`);
+  console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
   await next();
 });
 
@@ -144,37 +160,40 @@ app.route('/cdp', cdp);
 // Middleware: Validate required environment variables (skip in dev mode and for debug routes)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
-  
+
   // Skip validation for debug routes (they have their own enable check)
   if (url.pathname.startsWith('/debug')) {
     return next();
   }
-  
+
   // Skip validation in dev mode
   if (c.env.DEV_MODE === 'true') {
     return next();
   }
-  
+
   const missingVars = validateRequiredEnv(c.env);
   if (missingVars.length > 0) {
     console.error('[CONFIG] Missing required environment variables:', missingVars.join(', '));
-    
+
     const acceptsHtml = c.req.header('Accept')?.includes('text/html');
     if (acceptsHtml) {
       // Return a user-friendly HTML error page
       const html = configErrorHtml.replace('{{MISSING_VARS}}', missingVars.join(', '));
       return c.html(html, 503);
     }
-    
+
     // Return JSON error for API requests
-    return c.json({
-      error: 'Configuration error',
-      message: 'Required environment variables are not configured',
-      missing: missingVars,
-      hint: 'Set these using: wrangler secret put <VARIABLE_NAME>',
-    }, 503);
+    return c.json(
+      {
+        error: 'Configuration error',
+        message: 'Required environment variables are not configured',
+        missing: missingVars,
+        hint: 'Set these using: wrangler secret put <VARIABLE_NAME>',
+      },
+      503,
+    );
   }
-  
+
   return next();
 });
 
@@ -191,7 +210,7 @@ app.use('*', async (c, next) => {
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
     type: acceptsHtml ? 'html' : 'json',
-    redirectOnMissing: acceptsHtml
+    redirectOnMissing: acceptsHtml,
   });
 
   return middleware(c, next);
@@ -226,21 +245,21 @@ app.all('*', async (c) => {
   // Check if gateway is already running
   const existingProcess = await findExistingMoltbotProcess(sandbox);
   const isGatewayReady = existingProcess !== null && existingProcess.status === 'running';
-  
+
   // For browser requests (non-WebSocket, non-API), show loading page if gateway isn't ready
   const isWebSocketRequest = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
   const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
-  
+
   if (!isGatewayReady && !isWebSocketRequest && acceptsHtml) {
     console.log('[PROXY] Gateway not ready, serving loading page');
-    
+
     // Start the gateway in the background (don't await)
     c.executionCtx.waitUntil(
       ensureMoltbotGateway(sandbox, c.env).catch((err: Error) => {
         console.error('[PROXY] Background gateway start failed:', err);
-      })
+      }),
     );
-    
+
     // Return the loading page immediately
     return c.html(loadingPageHtml);
   }
@@ -275,192 +294,147 @@ app.all('*', async (c) => {
 
   // Proxy to Moltbot with WebSocket message interception
   if (isWebSocketRequest) {
-    console.log('[WS] Proxying WebSocket connection');
+    const debugLogs = c.env.DEBUG_ROUTES === 'true';
+    const redactedSearch = redactSensitiveParams(url);
 
-    // Create a WebSocket pair for the client — accept immediately so client isn't left hanging
+    console.log('[WS] Proxying WebSocket connection to Moltbot');
+    if (debugLogs) {
+      console.log('[WS] URL:', url.pathname + redactedSearch);
+    }
+
+    // Inject gateway token into WebSocket request if not already present.
+    // CF Access redirects strip query params, so authenticated users lose ?token=.
+    // Since the user already passed CF Access auth, we inject the token server-side.
+    let wsRequest = request;
+    if (c.env.MOLTBOT_GATEWAY_TOKEN && !url.searchParams.has('token')) {
+      const tokenUrl = new URL(url.toString());
+      tokenUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
+      wsRequest = new Request(tokenUrl.toString(), request);
+    }
+
+    // Get WebSocket connection to the container
+    const containerResponse = await sandbox.wsConnect(wsRequest, MOLTBOT_PORT);
+    console.log('[WS] wsConnect response status:', containerResponse.status);
+
+    // Get the container-side WebSocket
+    const containerWs = containerResponse.webSocket;
+    if (!containerWs) {
+      console.error('[WS] No WebSocket in container response - falling back to direct proxy');
+      return containerResponse;
+    }
+
+    if (debugLogs) {
+      console.log('[WS] Got container WebSocket, setting up interception');
+    }
+
+    // Create a WebSocket pair for the client
     const [clientWs, serverWs] = Object.values(new WebSocketPair());
+
+    // Accept both WebSockets
     serverWs.accept();
+    containerWs.accept();
 
-    // Mutable reference to the active container WebSocket (updated on reconnect)
-    let activeContainerWs: WebSocket | null = null;
-    let reconnectCount = 0;
-    const MAX_WS_RECONNECTS = 3;
+    if (debugLogs) {
+      console.log('[WS] Both WebSockets accepted');
+      console.log('[WS] containerWs.readyState:', containerWs.readyState);
+      console.log('[WS] serverWs.readyState:', serverWs.readyState);
+    }
 
-    // Buffer client messages until container WebSocket is established (prevents race condition
-    // where the node's connect/auth message arrives before sandbox.wsConnect completes)
-    let pendingMessages: (string | ArrayBuffer)[] = [];
-
-    // Client → container: buffer if container WS isn't ready yet, otherwise relay directly
+    // Relay messages from client to container
     serverWs.addEventListener('message', (event) => {
-      let preview = typeof event.data === 'string' ? event.data.slice(0, 500) : `[binary ${(event.data as ArrayBuffer).byteLength}B]`;
-      // Log auth token presence (first/last 4 chars only for security)
-      if (typeof event.data === 'string') {
+      if (debugLogs) {
+        console.log(
+          '[WS] Client -> Container:',
+          typeof event.data,
+          typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)',
+        );
+      }
+      if (containerWs.readyState === WebSocket.OPEN) {
+        containerWs.send(event.data);
+      } else if (debugLogs) {
+        console.log('[WS] Container not open, readyState:', containerWs.readyState);
+      }
+    });
+
+    // Relay messages from container to client, with error transformation
+    containerWs.addEventListener('message', (event) => {
+      if (debugLogs) {
+        console.log(
+          '[WS] Container -> Client (raw):',
+          typeof event.data,
+          typeof event.data === 'string' ? event.data.slice(0, 500) : '(binary)',
+        );
+      }
+      let data = event.data;
+
+      // Try to intercept and transform error messages
+      if (typeof data === 'string') {
         try {
-          const msg = JSON.parse(event.data);
-          const authToken = msg.params?.auth?.token;
-          if (authToken) {
-            preview += ` [auth.token: ${authToken.slice(0,8)}...${authToken.slice(-4)} len=${authToken.length}]`;
-          } else {
-            preview += ' [no auth.token in params]';
+          const parsed = JSON.parse(data);
+          if (debugLogs) {
+            console.log('[WS] Parsed JSON, has error.message:', !!parsed.error?.message);
           }
-        } catch {}
-      }
-      if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
-        console.log(`[WS] Client→Container (direct): ${preview}`);
-        activeContainerWs.send(event.data);
-      } else {
-        console.log(`[WS] Client→Buffer: ${preview}`);
-        pendingMessages.push(event.data);
-      }
-    });
-
-    // Client close → close container
-    serverWs.addEventListener('close', (event) => {
-      if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
-        activeContainerWs.close(event.code, event.reason);
-      }
-    });
-
-    serverWs.addEventListener('error', () => {
-      if (activeContainerWs && activeContainerWs.readyState === WebSocket.OPEN) {
-        activeContainerWs.close(1011, 'Client error');
-      }
-    });
-
-    /**
-     * Attach event handlers to a container WebSocket for relaying messages
-     * and handling disconnections with reconnection attempts.
-     */
-    function attachContainerHandlers(cws: WebSocket) {
-      // Container → client with error message transformation
-      cws.addEventListener('message', (event) => {
-        let data = event.data;
-        if (typeof data === 'string') {
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.error?.message) {
-              parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
-              data = JSON.stringify(parsed);
+          if (parsed.error?.message) {
+            if (debugLogs) {
+              console.log('[WS] Original error.message:', parsed.error.message);
             }
-          } catch {
-            // Not JSON, pass through
-          }
-        }
-        if (serverWs.readyState === WebSocket.OPEN) {
-          serverWs.send(data);
-        }
-      });
-
-      // Container close — try to reconnect if unexpected
-      cws.addEventListener('close', async (event) => {
-        console.log(`[WS] Container closed: code=${event.code} reason=${event.reason}`);
-        // Clean close (normal or no status) — propagate to client
-        if (event.code === 1000 || event.code === 1005) {
-          let reason = transformErrorMessage(event.reason || '', url.host);
-          if (reason.length > 123) reason = reason.slice(0, 120) + '...';
-          serverWs.close(event.code, reason);
-          return;
-        }
-
-        // Unexpected close — attempt reconnection
-        if (reconnectCount < MAX_WS_RECONNECTS && serverWs.readyState === WebSocket.OPEN) {
-          reconnectCount++;
-          console.log(`[WS] Container closed unexpectedly (code: ${event.code}), reconnect attempt ${reconnectCount}/${MAX_WS_RECONNECTS}`);
-
-          try {
-            serverWs.send(JSON.stringify({ type: 'system', message: 'Gateway reconnecting...' }));
-            await new Promise(r => setTimeout(r, 2000 * reconnectCount));
-
-            // Ensure gateway is running before reconnecting
-            await ensureMoltbotGateway(sandbox, c.env);
-            const newResponse = await sandbox.wsConnect(proxyRequest, MOLTBOT_PORT);
-            const newCws = newResponse.webSocket;
-            if (newCws && serverWs.readyState === WebSocket.OPEN) {
-              newCws.accept();
-              activeContainerWs = newCws;
-              attachContainerHandlers(newCws);
-              serverWs.send(JSON.stringify({ type: 'system', message: 'Reconnected' }));
-              console.log('[WS] Reconnected to container successfully');
-              return;
+            parsed.error.message = transformErrorMessage(parsed.error.message, url.host);
+            if (debugLogs) {
+              console.log('[WS] Transformed error.message:', parsed.error.message);
             }
-          } catch (e) {
-            console.error('[WS] Reconnection attempt failed:', e);
+            data = JSON.stringify(parsed);
+          }
+        } catch (e) {
+          if (debugLogs) {
+            console.log('[WS] Not JSON or parse error:', e);
           }
         }
-
-        // All reconnection attempts exhausted — close client
-        let reason = transformErrorMessage(event.reason || '', url.host);
-        if (reason.length > 123) reason = reason.slice(0, 120) + '...';
-        if (serverWs.readyState === WebSocket.OPEN) {
-          serverWs.close(event.code || 1011, reason || 'Gateway connection lost');
-        }
-      });
-
-      cws.addEventListener('error', () => {
-        console.log('[WS] Container WebSocket error');
-        // Error will trigger the close event, which handles reconnection
-      });
-    }
-
-    // If gateway is not ready, send status messages while it starts
-    if (!isGatewayReady) {
-      console.log('[WS] Gateway not ready, sending status while starting...');
-      serverWs.send(JSON.stringify({ type: 'system', message: 'Gateway starting, please wait...' }));
-
-      try {
-        await ensureMoltbotGateway(sandbox, c.env);
-        serverWs.send(JSON.stringify({ type: 'system', message: 'Gateway ready, connecting...' }));
-      } catch (error) {
-        console.error('[WS] Gateway startup failed:', error);
-        if (serverWs.readyState === WebSocket.OPEN) {
-          serverWs.send(JSON.stringify({ type: 'error', message: 'Gateway failed to start' }));
-          serverWs.close(1011, 'Gateway failed to start');
-        }
-        return new Response(null, { status: 101, webSocket: clientWs });
-      }
-    }
-
-    // Add X-Forwarded-For: 127.0.0.1 so the gateway (with trustedProxies: ["10.0.0.0/8"])
-    // treats the Worker→Container connection as local (skips device pairing requirement).
-    // The Worker is a trusted proxy since it sits between the client and the container.
-    const proxyHeaders = new Headers(request.headers);
-    proxyHeaders.set('X-Forwarded-For', '127.0.0.1');
-    proxyHeaders.set('X-Real-IP', '127.0.0.1');
-    const proxyRequest = new Request(request.url, { headers: proxyHeaders, method: request.method });
-
-    // Connect to the container gateway
-    try {
-      const containerResponse = await sandbox.wsConnect(proxyRequest, MOLTBOT_PORT);
-      const containerWs = containerResponse.webSocket;
-      if (!containerWs) {
-        console.error('[WS] No WebSocket in container response');
-        if (serverWs.readyState === WebSocket.OPEN) {
-          serverWs.close(1011, 'Failed to connect to gateway');
-        }
-        return new Response(null, { status: 101, webSocket: clientWs });
       }
 
-      containerWs.accept();
-      activeContainerWs = containerWs;
-      console.log('[WS] Container WebSocket established');
-      attachContainerHandlers(containerWs);
-
-      // Replay any messages the client sent before the container WS was ready
-      if (pendingMessages.length > 0) {
-        console.log(`[WS] Replaying ${pendingMessages.length} buffered message(s)`);
-        for (const msg of pendingMessages) {
-          containerWs.send(msg);
-        }
-        pendingMessages = [];
-      }
-    } catch (error) {
-      console.error('[WS] Failed to connect to container:', error);
       if (serverWs.readyState === WebSocket.OPEN) {
-        serverWs.send(JSON.stringify({ type: 'error', message: 'Failed to connect to gateway' }));
-        serverWs.close(1011, 'Connection failed');
+        serverWs.send(data);
+      } else if (debugLogs) {
+        console.log('[WS] Server not open, readyState:', serverWs.readyState);
       }
-    }
+    });
 
+    // Handle close events
+    serverWs.addEventListener('close', (event) => {
+      if (debugLogs) {
+        console.log('[WS] Client closed:', event.code, event.reason);
+      }
+      containerWs.close(event.code, event.reason);
+    });
+
+    containerWs.addEventListener('close', (event) => {
+      if (debugLogs) {
+        console.log('[WS] Container closed:', event.code, event.reason);
+      }
+      // Transform the close reason (truncate to 123 bytes max for WebSocket spec)
+      let reason = transformErrorMessage(event.reason, url.host);
+      if (reason.length > 123) {
+        reason = reason.slice(0, 120) + '...';
+      }
+      if (debugLogs) {
+        console.log('[WS] Transformed close reason:', reason);
+      }
+      serverWs.close(event.code, reason);
+    });
+
+    // Handle errors
+    serverWs.addEventListener('error', (event) => {
+      console.error('[WS] Client error:', event);
+      containerWs.close(1011, 'Client error');
+    });
+
+    containerWs.addEventListener('error', (event) => {
+      console.error('[WS] Container error:', event);
+      serverWs.close(1011, 'Container error');
+    });
+
+    if (debugLogs) {
+      console.log('[WS] Returning intercepted WebSocket response');
+    }
     return new Response(null, {
       status: 101,
       webSocket: clientWs,
@@ -470,12 +444,12 @@ app.all('*', async (c) => {
   console.log('[HTTP] Proxying:', url.pathname + url.search);
   const httpResponse = await sandbox.containerFetch(request, MOLTBOT_PORT);
   console.log('[HTTP] Response status:', httpResponse.status);
-  
+
   // Add debug header to verify worker handled the request
   const newHeaders = new Headers(httpResponse.headers);
   newHeaders.set('X-Worker-Debug', 'proxy-to-moltbot');
   newHeaders.set('X-Debug-Path', url.pathname);
-  
+
   return new Response(httpResponse.body, {
     status: httpResponse.status,
     statusText: httpResponse.statusText,
@@ -518,7 +492,7 @@ async function scheduled(
       const timeSinceStart = Date.now() - getLastGatewayStartTime();
       if (process.status === 'starting' || timeSinceStart < STARTUP_TIMEOUT_MS) {
         console.log(`[cron] Gateway recently started (${Math.round(timeSinceStart / 1000)}s ago) or still starting, skipping health check`);
-        // Don't mark as healthy yet — it's still booting
+        // Don't mark as healthy yet -- it's still booting
       } else {
         // Try to ensure it's actually responding (use 30s timeout instead of 10s)
         try {
@@ -542,13 +516,7 @@ async function scheduled(
     console.error('[cron] Health check failed:', e);
   }
 
-  // Ensure cron jobs are registered (recover if lost after gateway restart)
-  if (gatewayHealthy) {
-    console.log('[cron] Checking cron jobs...');
-    await ensureCronJobs(sandbox, env);
-  }
-
-  // Backup sync to R2
+  // Backup sync to R2 (rclone handles continuous sync in container, this is a fallback)
   console.log('[cron] Starting backup sync to R2...');
   const result = await syncToR2(sandbox, env);
 
