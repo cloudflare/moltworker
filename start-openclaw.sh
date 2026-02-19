@@ -173,6 +173,12 @@ for bootstrap in HOT-MEMORY.md CLAUDE.md; do
   fi
 done
 
+# Symlink TOOLS.md from moltworker to workspace root (for agent communication instructions)
+if [ -f "/root/clawd/moltworker/TOOLS.md" ] && [ ! -f "/root/clawd/TOOLS.md" ]; then
+  ln -sf "/root/clawd/moltworker/TOOLS.md" "/root/clawd/TOOLS.md"
+  echo "Symlinked TOOLS.md -> moltworker/TOOLS.md"
+fi
+
 # Inject Google Calendar instructions into TOOLS.md
 if [ -f "/root/clawd/TOOLS.md" ]; then
   cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
@@ -654,6 +660,28 @@ echo "Cron restore scheduled in background"
   done
 ) &
 echo "[PAIRING] Auto-approve loop started in background"
+
+# ============================================================
+# CUSTOM: Agent message bus watcher (background, every 30s)
+# ============================================================
+MESSAGE_WATCHER="/root/clawd/moltworker/scripts/agent-comms/watch-messages.js"
+if [ -f "$MESSAGE_WATCHER" ]; then
+  (
+    for i in $(seq 1 60); do
+      sleep 3
+      if port_open 127.0.0.1 18789; then
+        echo "[AGENT-COMMS] Gateway ready, starting message watcher loop"
+        break
+      fi
+    done
+
+    while true; do
+      node "$MESSAGE_WATCHER" 2>&1 | head -20 || echo "[AGENT-COMMS] Watcher failed"
+      sleep 30
+    done
+  ) &
+  echo "[AGENT-COMMS] Message watcher started in background (every 30s)"
+fi
 
 # ============================================================
 # CUSTOM: Calendar sync (background, every 6h)

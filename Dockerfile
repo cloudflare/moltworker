@@ -39,12 +39,16 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/brain-memory/reflections
 
 # Copy startup script
-# Build cache bust: 2026-02-19-v74-merge-upstream
+# Build cache bust: 2026-02-19-v75-agent-comms
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
 # Copy custom skills
 COPY skills/ /root/clawd/skills/
+
+# Copy agent communication scripts
+COPY scripts/ /root/clawd/moltworker/scripts/
+COPY TOOLS.md /root/clawd/moltworker/TOOLS.md
 
 # Set working directory
 WORKDIR /root/clawd
