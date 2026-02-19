@@ -50,6 +50,12 @@ export interface MoltbotEnv {
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_REFRESH_TOKEN?: string;
   GOOGLE_CALENDAR_ID?: string; // Calendar ID (defaults to 'primary' in skill script)
+  // Node host device identity for pre-seeded pairing (workaround for openclaw#4833)
+  NODE_DEVICE_ID?: string; // Device ID from node's ~/.openclaw/identity/device.json
+  NODE_DEVICE_PUBLIC_KEY?: string; // Base64url-encoded public key from device.json
+  NODE_DEVICE_DISPLAY_NAME?: string; // Display name for the node (default: "Node Host")
+  GITHUB_COPILOT_TOKEN?: string; // GitHub Copilot OAuth token (ghu_...) for OpenClaw model auth
+  GOOGLE_AI_API_KEY?: string; // Google AI API key for embeddings (memory_search)
 }
 
 /**

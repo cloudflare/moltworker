@@ -1,6 +1,6 @@
 FROM docker.io/cloudflare/sandbox:0.7.0
 
-# Build cache bust: 2026-02-14-v44-auto-approve-pairing
+# Build cache bust: 2026-02-14-v73-browser-node-pin
 # Install Node.js 22 (required by openclaw) and rsync (for R2 backup sync)
 # The base image has Node 20, we need to replace it with Node 22
 # Using direct binary download for reliability

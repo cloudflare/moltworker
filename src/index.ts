@@ -73,9 +73,9 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
     if (!env.AI_GATEWAY_BASE_URL) {
       missing.push('AI_GATEWAY_BASE_URL (required when using AI_GATEWAY_API_KEY)');
     }
-  } else if (!env.ANTHROPIC_API_KEY && !env.CLAUDE_ACCESS_TOKEN) {
-    // Direct Anthropic access requires API key or Claude Max OAuth token
-    missing.push('ANTHROPIC_API_KEY, AI_GATEWAY_API_KEY, or CLAUDE_ACCESS_TOKEN');
+  } else if (!env.ANTHROPIC_API_KEY && !env.CLAUDE_ACCESS_TOKEN && !env.GITHUB_COPILOT_TOKEN) {
+    // Requires at least one AI provider key
+    missing.push('ANTHROPIC_API_KEY, AI_GATEWAY_API_KEY, CLAUDE_ACCESS_TOKEN, or GITHUB_COPILOT_TOKEN');
   }
 
   return missing;

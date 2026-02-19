@@ -87,5 +87,16 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.GOOGLE_REFRESH_TOKEN) envVars.GOOGLE_REFRESH_TOKEN = env.GOOGLE_REFRESH_TOKEN;
   if (env.GOOGLE_CALENDAR_ID) envVars.GOOGLE_CALENDAR_ID = env.GOOGLE_CALENDAR_ID;
 
+  // Node host device identity for pre-seeded pairing (workaround for openclaw#4833)
+  if (env.NODE_DEVICE_ID) envVars.NODE_DEVICE_ID = env.NODE_DEVICE_ID;
+  if (env.NODE_DEVICE_PUBLIC_KEY) envVars.NODE_DEVICE_PUBLIC_KEY = env.NODE_DEVICE_PUBLIC_KEY;
+  if (env.NODE_DEVICE_DISPLAY_NAME) envVars.NODE_DEVICE_DISPLAY_NAME = env.NODE_DEVICE_DISPLAY_NAME;
+
+  // GitHub Copilot token for OpenClaw model auth
+  if (env.GITHUB_COPILOT_TOKEN) envVars.GITHUB_COPILOT_TOKEN = env.GITHUB_COPILOT_TOKEN;
+
+  // Google AI API key for embeddings (memory_search)
+  if (env.GOOGLE_AI_API_KEY) envVars.GOOGLE_AI_API_KEY = env.GOOGLE_AI_API_KEY;
+
   return envVars;
 }

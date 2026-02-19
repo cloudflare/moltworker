@@ -1,6 +1,6 @@
 #!/bin/bash
 # OpenClaw Startup Script v65 - Self-modify & self-reflect
-# Cache bust: 2026-02-14-v71-auto-approve-pairing
+# Cache bust: 2026-02-14-v72-preseed-pairing
 
 set -e
 trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
@@ -195,7 +195,7 @@ cat > "$CONFIG_DIR/openclaw.json" << EOFCONFIG
       "token": "${CLAWDBOT_GATEWAY_TOKEN:-}"
     },
     "nodes": {
-      "browser": { "mode": "auto" }
+      "browser": { "mode": "auto", "node": "${NODE_DEVICE_ID:-}" }
     }
   },
   "channels": {
@@ -221,6 +221,46 @@ EOFALLOW
   echo "Telegram allowlist set for owner ID: $TELEGRAM_OWNER_ID"
 fi
 log_timing "Config file written"
+
+# Pre-seed device pairing for the node host (workaround for openclaw#4833).
+# Without this, `openclaw node run` fails with "pairing required" because the
+# CLI doesn't auto-generate a Device Identity for remote connections.
+if [ -n "${NODE_DEVICE_ID:-}" ] && [ -n "${NODE_DEVICE_PUBLIC_KEY:-}" ]; then
+  mkdir -p "$CONFIG_DIR/devices"
+  PAIRED_FILE="$CONFIG_DIR/devices/paired.json"
+  NOW_MS=$(date +%s)000
+
+  # Read existing paired.json or start fresh
+  if [ -f "$PAIRED_FILE" ]; then
+    EXISTING=$(cat "$PAIRED_FILE")
+  else
+    EXISTING="{}"
+  fi
+
+  # Add/update the node device entry using node (jq not available)
+  echo "$EXISTING" | node -e "
+    let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+      const paired=JSON.parse(d||'{}');
+      paired['${NODE_DEVICE_ID}']={
+        deviceId:'${NODE_DEVICE_ID}',
+        publicKey:'${NODE_DEVICE_PUBLIC_KEY}',
+        displayName:'${NODE_DEVICE_DISPLAY_NAME:-Node Host}',
+        platform:'darwin',
+        clientId:'node-host',
+        clientMode:'node',
+        role:'node',
+        roles:['node'],
+        scopes:[],
+        tokens:{node:{token:'${CLAWDBOT_GATEWAY_TOKEN:-}',role:'node',scopes:[],createdAtMs:${NOW_MS}}},
+        createdAtMs:${NOW_MS},
+        approvedAtMs:${NOW_MS}
+      };
+      process.stdout.write(JSON.stringify(paired,null,2));
+    });" > "${PAIRED_FILE}.tmp" && mv "${PAIRED_FILE}.tmp" "$PAIRED_FILE"
+  echo "[PAIRING] Pre-seeded device pairing for node: ${NODE_DEVICE_ID:0:16}..."
+else
+  echo "[PAIRING] NODE_DEVICE_ID or NODE_DEVICE_PUBLIC_KEY not set, skipping pre-seed"
+fi
 
 echo "Config:"
 cat "$CONFIG_DIR/openclaw.json"
@@ -259,9 +299,20 @@ wait
 log_timing "Channels configured"
 
 # Set models AFTER doctor (doctor wipes model config)
-openclaw models set anthropic/claude-sonnet-4-5 2>/dev/null || true
-openclaw models set anthropic/claude-3-5-haiku-20241022 2>/dev/null || true
-log_timing "Models set (sonnet-4-5, haiku-3-5)"
+openclaw models set github-copilot/gpt-5-mini 2>/dev/null || true
+log_timing "Models set (github-copilot/gpt-5-mini)"
+
+# GitHub Copilot auth: export GITHUB_TOKEN so OpenClaw's github-copilot provider picks it up
+if [ -n "${GITHUB_COPILOT_TOKEN:-}" ]; then
+  export GITHUB_TOKEN="$GITHUB_COPILOT_TOKEN"
+  echo "GitHub Copilot auth: GITHUB_TOKEN exported from GITHUB_COPILOT_TOKEN"
+fi
+
+# Google AI API key for embeddings (memory_search semantic search)
+if [ -n "${GOOGLE_AI_API_KEY:-}" ]; then
+  export GEMINI_API_KEY="$GOOGLE_AI_API_KEY"
+  echo "Google AI auth: GEMINI_API_KEY exported for embeddings"
+fi
 
 # Clean up stale session lock files from previous gateway runs
 find /root/.openclaw -name "*.lock" -delete 2>/dev/null || true
@@ -300,14 +351,70 @@ log_timing "Starting gateway"
       echo "[CRON] Gateway ready, starting cron restoration..."
 
       TOKEN_FLAG=""
-      if [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+      # Use operator token from device-auth.json (device pairing auth)
+      OPERATOR_TOKEN=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('/root/.openclaw/identity/device-auth.json','utf8'));console.log(d.tokens.operator.token)}catch(e){}" 2>/dev/null)
+      if [ -n "$OPERATOR_TOKEN" ]; then
+        TOKEN_FLAG="--token $OPERATOR_TOKEN"
+      elif [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
         TOKEN_FLAG="--token $CLAWDBOT_GATEWAY_TOKEN"
       fi
+
+      # Allowed models (must match what openclaw models set configures above)
+      ALLOWED_HAIKU="github-copilot/gpt-5-mini"
+      ALLOWED_SONNET="github-copilot/gpt-5-mini"
 
       # 1. Restore base crons from clawd-memory repo (if available)
       if [ -f "$CRON_SCRIPT" ]; then
         echo "[CRON] Running restore-crons.js..."
         node "$CRON_SCRIPT" 2>&1 || echo "[WARN] Cron restore script failed"
+      fi
+
+      # 1b. Validate all cron models — fix any using disallowed models
+      echo "[CRON] Validating cron model IDs..."
+      CRON_JSON=$(openclaw cron list --json $TOKEN_FLAG 2>/dev/null || echo '{"jobs":[]}')
+      BAD_CRONS=$(echo "$CRON_JSON" | node -e "
+        let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+          try{
+            const allowed=['$ALLOWED_HAIKU','$ALLOWED_SONNET'];
+            const jobs=JSON.parse(d).jobs||[];
+            jobs.forEach(j=>{
+              const m=j.payload&&j.payload.model||'';
+              if(m&&!allowed.includes(m)){
+                console.log(j.id+'|'+j.name+'|'+m);
+              }
+            });
+          }catch(e){console.error(e.message);}
+        });" 2>/dev/null)
+
+      if [ -n "$BAD_CRONS" ]; then
+        echo "[CRON] Found crons with disallowed models, fixing..."
+        echo "$BAD_CRONS" | while IFS='|' read -r cid cname cmodel; do
+          echo "[CRON] Fixing $cname (was: $cmodel -> $ALLOWED_HAIKU)"
+          # Get cron details, remove it, re-add with correct model
+          CRON_DETAIL=$(echo "$CRON_JSON" | node -e "
+            let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+              const j=JSON.parse(d).jobs.find(x=>x.id==='$cid');
+              if(!j)process.exit(1);
+              const s=j.schedule;
+              let sched='';
+              if(s.kind==='every')sched='--every '+(s.everyMs/1000)+'s';
+              else if(s.kind==='cron')sched='--cron \"'+s.expr+'\" --tz '+(s.tz||'UTC');
+              const p=j.payload||{};
+              const think=p.thinking==='off'?'--thinking off':'';
+              const tout=p.timeoutSeconds?'--timeout-seconds '+p.timeoutSeconds:'';
+              const msg=p.message||'';
+              console.log([sched,think,tout].filter(Boolean).join(' ')+'|||'+msg);
+            });" 2>/dev/null)
+          if [ -n "$CRON_DETAIL" ]; then
+            SCHED_FLAGS=$(echo "$CRON_DETAIL" | cut -d'|' -f1)
+            CRON_MSG=$(echo "$CRON_DETAIL" | cut -d'|' -f4)
+            openclaw cron remove "$cid" $TOKEN_FLAG 2>/dev/null
+            eval openclaw cron add --name "$cname" $SCHED_FLAGS --session isolated --model "$ALLOWED_HAIKU" --message "'$CRON_MSG'" --announce $TOKEN_FLAG 2>&1 || \
+              echo "[WARN] Failed to re-add $cname with correct model"
+          fi
+        done
+      else
+        echo "[CRON] All cron models are valid"
       fi
 
       # 2. auto-study (requires SERPER_API_KEY + study script)
@@ -318,7 +425,7 @@ log_timing "Starting gateway"
             --name "auto-study" \
             --every "24h" \
             --session isolated \
-            --model "anthropic/claude-3-5-haiku-20241022" \
+            --model "github-copilot/gpt-5-mini" \
             --thinking off \
             $TOKEN_FLAG \
             --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study"
@@ -335,7 +442,7 @@ log_timing "Starting gateway"
             --name "brain-memory" \
             --every "24h" \
             --session isolated \
-            --model "anthropic/claude-3-5-haiku-20241022" \
+            --model "github-copilot/gpt-5-mini" \
             --thinking off \
             $TOKEN_FLAG \
             --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update"
@@ -352,7 +459,7 @@ log_timing "Starting gateway"
             --name "self-reflect" \
             --every "168h" \
             --session isolated \
-            --model "anthropic/claude-sonnet-4-5-20250929" \
+            --model "github-copilot/gpt-5-mini" \
             --thinking off \
             $TOKEN_FLAG \
             --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md"
