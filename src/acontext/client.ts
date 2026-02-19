@@ -9,7 +9,7 @@
  * Acontext Sessions for replay, analysis, and dashboard integration.
  */
 
-const DEFAULT_BASE_URL = 'https://api.acontext.com';
+const DEFAULT_BASE_URL = 'https://api.acontext.io';
 const DEFAULT_TIMEOUT_MS = 10000; // 10s — keep it fast for non-blocking usage
 
 // --- Types ---

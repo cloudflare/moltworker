@@ -60,7 +60,7 @@ export interface MoltbotEnv {
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
   // Acontext observability
   ACONTEXT_API_KEY?: string; // Acontext API key for session storage and observability
-  ACONTEXT_BASE_URL?: string; // Acontext API base URL (default: https://api.acontext.com)
+  ACONTEXT_BASE_URL?: string; // Acontext API base URL (default: https://api.acontext.io)
 }
 
 /**
