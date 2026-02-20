@@ -1465,3 +1465,244 @@ describe('Parallel tools execution', () => {
     expect(completedTools).toContain('get_weather');
   });
 });
+
+describe('Tool result caching', () => {
+  let TaskProcessorClass: typeof import('./task-processor').TaskProcessor;
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const mod = await import('./task-processor');
+    TaskProcessorClass = mod.TaskProcessor;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('cache hit returns same result without re-executing tool', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    const callsBefore = vi.mocked(executeTool).mock.calls.length;
+    vi.mocked(executeTool).mockResolvedValue({
+      tool_call_id: 'call_1',
+      role: 'tool',
+      content: 'Weather: Sunny 21C',
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Checking weather now.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"lat":0,"lon":0}' } },
+        ],
+      },
+      {
+        content: 'Checking weather again.',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'get_weather', arguments: '{"lat":0,"lon":0}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const callsAfter = vi.mocked(executeTool).mock.calls.length;
+    expect(callsAfter - callsBefore).toBe(1);
+    expect(processor.getToolCacheStats()).toEqual({ hits: 1, misses: 1, size: 1 });
+  });
+
+  it('cache miss on different arguments', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    const callsBefore = vi.mocked(executeTool).mock.calls.length;
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => ({
+      tool_call_id: toolCall.id,
+      role: 'tool',
+      content: `Weather for ${toolCall.function.arguments}`,
+    }));
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Weather #1',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"lat":0,"lon":0}' } },
+        ],
+      },
+      {
+        content: 'Weather #2',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'get_weather', arguments: '{"lat":1,"lon":1}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const callsAfter = vi.mocked(executeTool).mock.calls.length;
+    expect(callsAfter - callsBefore).toBe(2);
+    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 2, size: 2 });
+  });
+
+  it('mutation tools bypass cache entirely', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    const callsBefore = vi.mocked(executeTool).mock.calls.length;
+    vi.mocked(executeTool).mockResolvedValue({
+      tool_call_id: 'call_1',
+      role: 'tool',
+      content: 'Mutation result',
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Mutate #1',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'github_api', arguments: '{"method":"GET","path":"/repos/test"}' } },
+        ],
+      },
+      {
+        content: 'Mutate #2',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'github_api', arguments: '{"method":"GET","path":"/repos/test"}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const callsAfter = vi.mocked(executeTool).mock.calls.length;
+    expect(callsAfter - callsBefore).toBe(2);
+    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 0, size: 0 });
+  });
+
+  it('error results are not cached', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    const callsBefore = vi.mocked(executeTool).mock.calls.length;
+    vi.mocked(executeTool).mockResolvedValue({
+      tool_call_id: 'call_1',
+      role: 'tool',
+      content: 'Error executing weather API: timeout',
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Weather #1',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"lat":5,"lon":6}' } },
+        ],
+      },
+      {
+        content: 'Weather #2',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'get_weather', arguments: '{"lat":5,"lon":6}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const callsAfter = vi.mocked(executeTool).mock.calls.length;
+    expect(callsAfter - callsBefore).toBe(2);
+    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 0, size: 0 });
+  });
+
+  it('cache stats method returns correct hit/miss counts across multiple calls', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    const callsBefore = vi.mocked(executeTool).mock.calls.length;
+    vi.mocked(executeTool).mockResolvedValue({
+      tool_call_id: 'call_1',
+      role: 'tool',
+      content: 'Reusable data',
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Tool #1 (miss)',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"lat":1,"lon":1}' } },
+        ],
+      },
+      {
+        content: 'Tool #2 (hit)',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'get_weather', arguments: '{"lat":1,"lon":1}' } },
+        ],
+      },
+      {
+        content: 'Tool #3 (miss)',
+        tool_calls: [
+          { id: 'call_3', type: 'function', function: { name: 'get_weather', arguments: '{"lat":2,"lon":2}' } },
+        ],
+      },
+      {
+        content: 'Tool #4 (hit)',
+        tool_calls: [
+          { id: 'call_4', type: 'function', function: { name: 'get_weather', arguments: '{"lat":1,"lon":1}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const callsAfter = vi.mocked(executeTool).mock.calls.length;
+    expect(callsAfter - callsBefore).toBe(2);
+    expect(processor.getToolCacheStats()).toEqual({ hits: 2, misses: 2, size: 2 });
+  });
+});
