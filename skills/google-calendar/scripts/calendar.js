@@ -9,16 +9,42 @@
  * Optional: GOOGLE_CALENDAR_ID (defaults to 'primary')
  */
 
+import { readFileSync } from 'node:fs';
+
 const TIMEZONE = 'Asia/Seoul';
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const CREDS_FILE = '/root/.google-calendar.env';
+
+// Load credentials from file if env vars are missing
+function loadCredsFromFile() {
+  try {
+    const content = readFileSync(CREDS_FILE, 'utf-8');
+    for (const line of content.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1).trim();
+        if (val && !process.env[key]) process.env[key] = val;
+      }
+    }
+  } catch {}
+}
 
 // ─── Token Management ───────────────────────────────────────────────
 
 async function getAccessToken() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  let clientId = process.env.GOOGLE_CLIENT_ID;
+  let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  let refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+  // Fallback: load from credentials file written by startup script
+  if (!clientId || !clientSecret || !refreshToken) {
+    loadCredsFromFile();
+    clientId = process.env.GOOGLE_CLIENT_ID;
+    clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  }
 
   if (!clientId || !clientSecret || !refreshToken) {
     const missing = [];

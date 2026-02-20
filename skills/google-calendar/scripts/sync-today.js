@@ -8,18 +8,40 @@
  * Usage: node sync-today.js [--days N]
  */
 
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 const TIMEZONE = 'Asia/Seoul';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CALENDAR_API = 'https://www.googleapis.com/calendar/v3';
 const OUTPUT_FILE = '/root/clawd/warm-memory/calendar.md';
+const CREDS_FILE = '/root/.google-calendar.env';
+
+function loadCredsFromFile() {
+  try {
+    const content = readFileSync(CREDS_FILE, 'utf-8');
+    for (const line of content.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1).trim();
+        if (val && !process.env[key]) process.env[key] = val;
+      }
+    }
+  } catch {}
+}
 
 async function getAccessToken() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  let clientId = process.env.GOOGLE_CLIENT_ID;
+  let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  let refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    loadCredsFromFile();
+    clientId = process.env.GOOGLE_CLIENT_ID;
+    clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
+  }
 
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error('Missing Google Calendar env vars');

@@ -179,6 +179,19 @@ if [ -f "/root/clawd/moltworker/TOOLS.md" ] && [ ! -f "/root/clawd/TOOLS.md" ]; 
   echo "Symlinked TOOLS.md -> moltworker/TOOLS.md"
 fi
 
+# Write Google Calendar credentials to a file so any process can access them
+# (sandbox.startProcess doesn't inherit env vars from parent)
+if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
+  cat > /root/.google-calendar.env << EOF
+GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+GOOGLE_REFRESH_TOKEN=$GOOGLE_REFRESH_TOKEN
+GOOGLE_CALENDAR_ID=${GOOGLE_CALENDAR_ID:-primary}
+EOF
+  chmod 600 /root/.google-calendar.env
+  echo "Google Calendar credentials written to /root/.google-calendar.env"
+fi
+
 # Inject Google Calendar instructions into TOOLS.md
 if [ -f "/root/clawd/TOOLS.md" ]; then
   cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
@@ -423,10 +436,12 @@ fi
 openclaw models set github-copilot/gpt-5-mini 2>/dev/null || true
 echo "Models set: github-copilot/gpt-5-mini"
 
-# GitHub Copilot auth: export GITHUB_TOKEN so OpenClaw's github-copilot provider picks it up
+# GitHub Copilot auth: export GITHUB_TOKEN so OpenClaw's github-copilot provider can use it
 if [ -n "${GITHUB_COPILOT_TOKEN:-}" ]; then
   export GITHUB_TOKEN="$GITHUB_COPILOT_TOKEN"
   echo "GitHub Copilot auth: GITHUB_TOKEN exported from GITHUB_COPILOT_TOKEN"
+else
+  echo "WARNING: GITHUB_COPILOT_TOKEN not set, GitHub Copilot provider may not work"
 fi
 
 # Google AI API key for embeddings (memory_search semantic search)
