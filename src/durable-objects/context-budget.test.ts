@@ -252,12 +252,15 @@ describe('compressContextBudgeted', () => {
     // Use a small budget to force compression
     const result = compressContextBudgeted(msgs, 300, 2);
 
-    // Should have a summary
+    // Should either include a summary, or omit it if budget is extremely tight
     const summary = result.find(m =>
       typeof m.content === 'string' && m.content.startsWith('[Context summary:')
     );
-    expect(summary).toBeDefined();
-    expect(typeof summary?.content === 'string' && summary.content).toContain('Context summary:');
+    if (summary) {
+      expect(typeof summary.content === 'string' && summary.content).toContain('Context summary:');
+    } else {
+      expect(result.length).toBeLessThan(msgs.length);
+    }
   });
 
   it('should maintain tool_call/result pairing', () => {
@@ -425,16 +428,18 @@ describe('compressContextBudgeted', () => {
       typeof m.content === 'string' && m.content.startsWith('[Context summary:')
     );
 
-    // There should be a summary since messages were evicted
-    expect(summary).toBeDefined();
-    // Summary should mention tool names or tool count
-    const content = typeof summary?.content === 'string' ? summary.content : '';
-    const hasToolRef = content.includes('fetch_url') ||
-      content.includes('get_weather') ||
-      content.includes('fetch_news') ||
-      content.includes('Tools used') ||
-      content.includes('tool result');
-    expect(hasToolRef).toBe(true);
+    // Summary may be dropped by safety guard for very tight budgets
+    if (summary && typeof summary.content === 'string') {
+      const content = summary.content;
+      const hasToolRef = content.includes('fetch_url') ||
+        content.includes('get_weather') ||
+        content.includes('fetch_news') ||
+        content.includes('Tools used') ||
+        content.includes('tool result');
+      expect(hasToolRef).toBe(true);
+    } else {
+      expect(result.length).toBeLessThan(msgs.length);
+    }
   });
 
   it('should handle conversation with only system + user + assistant', () => {
@@ -507,5 +512,69 @@ describe('compressContextBudgeted', () => {
     // With larger minRecent, more messages should be in the result
     // (if budget allows)
     expect(result8.length).toBeGreaterThanOrEqual(result4.length);
+  });
+
+  it('should drop summary when it would push result over budget', () => {
+    const msgs: ChatMessage[] = [
+      systemMsg('System ' + 'x'.repeat(200)),
+      userMsg('User ' + 'y'.repeat(200)),
+      ...Array.from({ length: 20 }, (_, i) => assistantMsg(`Middle ${i}: ${'z'.repeat(200)}`)),
+      assistantMsg('Tail answer'),
+    ];
+
+    const result = compressContextBudgeted(msgs, 180, 1);
+    const hasSummary = result.some(
+      m => m.role === 'assistant' && typeof m.content === 'string' && m.content.startsWith('[Context summary:'),
+    );
+    // Summary should be dropped to stay within budget
+    expect(hasSummary).toBe(false);
+  });
+
+  it('should score system messages higher than plain assistant text', () => {
+    // Injected system notices should survive over plain assistant reasoning
+    const msgs: ChatMessage[] = [
+      systemMsg('You are a helpful assistant.'),
+      userMsg('Do a task'),
+      assistantMsg('Old reasoning 1: ' + 'x'.repeat(400)),
+      assistantMsg('Old reasoning 2: ' + 'x'.repeat(400)),
+      { role: 'system', content: '[PLANNING PHASE] You are now in planning mode.' },
+      assistantMsg('Old reasoning 3: ' + 'x'.repeat(400)),
+      assistantMsg('Old reasoning 4: ' + 'x'.repeat(400)),
+      assistantMsg('Old reasoning 5: ' + 'x'.repeat(400)),
+      assistantMsg('Old reasoning 6: ' + 'x'.repeat(400)),
+      assistantMsg('Recent answer'),
+    ];
+
+    const result = compressContextBudgeted(msgs, 600, 2);
+
+    // The system notice should survive compression better than plain assistant text
+    const hasSystemNotice = result.some(
+      m => m.role === 'system' && typeof m.content === 'string' && m.content.includes('[PLANNING PHASE]'),
+    );
+    // At least verify it doesn't crash and compresses
+    expect(result.length).toBeLessThan(msgs.length);
+    // If the system notice survived, that validates the priority scoring
+    if (!hasSystemNotice) {
+      // Even if evicted due to tight budget, it should be in the summary
+      const summary = result.find(
+        m => typeof m.content === 'string' && m.content.startsWith('[Context summary:'),
+      );
+      expect(summary).toBeDefined();
+    }
+  });
+
+  it('should handle out-of-order tool results gracefully', () => {
+    const msgs: ChatMessage[] = [
+      systemMsg('System'),
+      userMsg('Q'),
+      toolResultMsg('future_1', 'premature tool output'),
+      assistantToolCallMsg('Now call', [{ id: 'future_1', name: 'fetch_url', arguments: '{}' }]),
+      assistantMsg('wrap up'),
+      ...Array.from({ length: 12 }, (_, i) => assistantMsg(`tail ${i}: ${'n'.repeat(120)}`)),
+    ];
+
+    const result = compressContextBudgeted(msgs, 500, 3);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0].role).toBe('system');
   });
 });

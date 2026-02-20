@@ -126,10 +126,11 @@ interface ScoredMessage {
  * - System message (index 0): highest priority (100) — always kept
  * - Original user message (index 1): very high (90) — always kept
  * - Recent messages (last N): high (70-80, linearly increasing toward end)
- * - Tool result messages: moderate (40-50) — they contain evidence
- * - Assistant messages with tool_calls: moderate (35-45) — they record decisions
- * - Older assistant text: lower (20-30) — intermediate reasoning can be summarized
- * - Injected system/user messages (e.g. [PLANNING PHASE]): moderate (40)
+ * - Tool result messages: high (55-85) — they contain evidence for claims
+ * - Injected system notices: moderate-high (45-75) — context/phase markers
+ * - Injected user messages (e.g. nudges): moderate (40-70)
+ * - Assistant messages with tool_calls: moderate (35-65) — they record decisions
+ * - Older assistant text: lower (18-48) — intermediate reasoning can be summarized
  */
 function scorePriority(
   msg: ChatMessage,
@@ -150,8 +151,9 @@ function scorePriority(
 
   // Role-based base scores
   if (msg.role === 'tool') {
-    // Tool results — evidence for claims
-    return 40 + positionScore;
+    // Tool results — evidence for claims; scored higher than assistant prose
+    // so older evidence survives over recent intermediate reasoning
+    return 55 + positionScore;
   }
 
   if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
@@ -160,8 +162,14 @@ function scorePriority(
   }
 
   if (msg.role === 'assistant') {
-    // Plain assistant text — intermediate reasoning
-    return 20 + positionScore;
+    // Plain assistant text — intermediate reasoning (lowest priority, easily summarized)
+    return 18 + positionScore;
+  }
+
+  if (msg.role === 'system') {
+    // Injected system notices (e.g. [PLANNING PHASE], [SYSTEM] You have called X...)
+    // should survive better than plain assistant text
+    return 45 + positionScore;
   }
 
   if (msg.role === 'user') {
@@ -488,6 +496,14 @@ export function compressContextBudgeted(
   const sortedKept = [...keepSet].filter(i => i > 1).sort((a, b) => a - b);
   for (const idx of sortedKept) {
     result.push(messages[idx]);
+  }
+
+  // Final safety check: if summary itself pushes us over budget, drop it.
+  if (summary && estimateTokens(result) > tokenBudget) {
+    const summaryIndex = result.indexOf(summary);
+    if (summaryIndex >= 0) {
+      result.splice(summaryIndex, 1);
+    }
   }
 
   return result;
