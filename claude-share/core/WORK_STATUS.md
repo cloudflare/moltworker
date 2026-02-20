@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-18 (Phase 4.1 Token-budgeted context retrieval)
+**Last Updated:** 2026-02-20 (Sprint 48h — phase budget circuit breakers + parallel tools allSettled)
 
 ---
 
@@ -38,6 +38,8 @@
 | 2.3 | Acontext observability integration | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 | 2.5.9 | Holiday awareness (Nager.Date) | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 | 4.1 | Token-budgeted context retrieval | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-NF641` |
+| S48.1 | Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
+| S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
 
 ---
 
@@ -45,7 +47,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | Phase 4.1 Token-budgeted context retrieval complete | `claude/implement-p1-guardrails-NF641` | 2026-02-18 |
+| Claude | — (awaiting next task) | — | — |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -93,7 +95,9 @@
 | 2.3 | Acontext observability integration | Claude Opus 4.6 | 2026-02-18 | `claude/implement-p1-guardrails-DcOgI` |
 | 2.5.9 | Holiday awareness (Nager.Date) | Claude Opus 4.6 | 2026-02-18 | `claude/implement-p1-guardrails-DcOgI` |
 | 4.1 | Token-budgeted context retrieval | Claude Opus 4.6 | 2026-02-18 | `claude/implement-p1-guardrails-NF641` |
-| 4.1 Audit | Review & harden token-budgeted retrieval | Codex (GPT-5.2-Codex) | 2026-02-19 | `work` |
+| 4.1 Audit | Review & harden token-budgeted retrieval | Codex (GPT-5.2-Codex) | 2026-02-19 | `codex/audit-and-improve-context-budget-implementation` |
+| S48.1 | Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | 2026-02-20 | `claude/budget-circuit-breakers-parallel-bAtHI` |
+| S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | 2026-02-20 | `claude/budget-circuit-breakers-parallel-bAtHI` |
 
 ---
 
@@ -135,4 +139,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 38 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1-2.3 complete, Phase 2.5 COMPLETE (all 8 tools + holiday awareness 2.5.9), Phase 3 COMPLETE (3.1-3.4), P1 guardrails done, Acontext observability done, ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 689 tests total |
+| Sprint 1 (current) | 8 | 40 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1-2.3 complete, Phase 2.5 COMPLETE (all 8 tools + holiday awareness 2.5.9), Phase 3 COMPLETE (3.1-3.4), Phase 4.1 done, P1 guardrails done, Acontext observability done, Sprint 48h done (phase budgets + allSettled), ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 762 tests total |

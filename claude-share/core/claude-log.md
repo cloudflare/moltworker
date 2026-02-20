@@ -4,6 +4,49 @@
 
 ---
 
+## Session: 2026-02-20 | Sprint 48h — Phase Budget Circuit Breakers + Parallel Tools Upgrade (Session: session_01AtnWsZSprM6Gjr9vjTm1xp)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/budget-circuit-breakers-parallel-bAtHI`
+**Status:** Completed (merged as PR #123)
+
+### Summary
+Sprint 48h completed both planned tasks: phase budget circuit breakers to prevent Cloudflare DO 30s CPU hard-kill, and parallel tools upgrade from `Promise.all` to `Promise.allSettled` with a safety whitelist for mutation tools.
+
+### Changes Made
+1. **`src/durable-objects/phase-budget.ts`** (NEW) — Phase budget circuit breaker module:
+   - `PHASE_BUDGETS` constants: plan=8s, work=18s, review=3s
+   - `PhaseBudgetExceededError` custom error with phase/elapsed/budget metadata
+   - `checkPhaseBudget()` — throws if elapsed exceeds phase budget
+2. **`src/durable-objects/phase-budget.test.ts`** (NEW) — 14 tests covering budget constants, error class, threshold checks, integration concepts
+3. **`src/durable-objects/task-processor.ts`** — Integrated both features:
+   - Phase budget checks before API calls and tool execution
+   - Catch block: increments `autoResumeCount`, saves checkpoint before propagating
+   - `phaseStartTime` tracked and reset at phase transitions
+   - `Promise.all` replaced with `Promise.allSettled` for parallel tool execution
+   - `PARALLEL_SAFE_TOOLS` whitelist (11 read-only tools): fetch_url, browse_url, get_weather, get_crypto, github_read_file, github_list_files, fetch_news, convert_currency, geolocate_ip, url_metadata, generate_chart
+   - Mutation tools (github_api, github_create_pr, sandbox_exec) always sequential
+   - Sequential fallback when any tool in batch is unsafe or model lacks `parallelCalls`
+4. **`src/durable-objects/task-processor.test.ts`** — 8 new tests: whitelist coverage, parallel/sequential routing, allSettled isolation, error handling
+
+### Files Modified
+- `src/durable-objects/phase-budget.ts` (new)
+- `src/durable-objects/phase-budget.test.ts` (new)
+- `src/durable-objects/task-processor.ts`
+- `src/durable-objects/task-processor.test.ts`
+
+### Tests
+- [x] Tests pass (762 total, 0 failures — 22 new)
+- [x] Typecheck passes
+
+### Audit Notes (post-merge review)
+- `client.ts` still uses `Promise.all` without whitelist (Worker path, non-DO) — not upgraded in this sprint. Roadmap corrected to reflect this.
+- `checkPhaseBudget()` does not call `saveCheckpoint` itself (deviation from sprint pseudocode); the wiring is in the task-processor catch block, which is architecturally cleaner.
+- No integration test verifying `autoResumeCount` increment in task-processor on phase budget exceeded — only a conceptual test in phase-budget.test.ts. Low risk since the catch path is straightforward.
+- GLOBAL_ROADMAP overview said "12 tools" — corrected to 14 (was missing github_create_pr, sandbox_exec).
+
+---
+
 ## Session: 2026-02-18 | Phase 4.1 Token-Budgeted Context Retrieval (Session: 018M5goT7Vhaymuo8AxXhUCg)
 
 **AI:** Claude Opus 4.6

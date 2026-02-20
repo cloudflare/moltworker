@@ -11,7 +11,7 @@
 
 **Moltworker** is a multi-platform AI assistant gateway deployed on Cloudflare Workers. It provides:
 - 30+ AI models via OpenRouter + direct provider APIs (with capability metadata)
-- 12 tools (fetch_url, github_read_file, github_list_files, github_api, url_metadata, generate_chart, get_weather, fetch_news, convert_currency, get_crypto, geolocate_ip, browse_url) — parallel execution
+- 14 tools (fetch_url, github_read_file, github_list_files, github_api, github_create_pr, url_metadata, generate_chart, get_weather, fetch_news, convert_currency, get_crypto, geolocate_ip, browse_url, sandbox_exec) — parallel execution with safety whitelist
 - Durable Objects for unlimited-time task execution
 - Multi-platform chat (Telegram, Discord, Slack)
 - Image generation (FLUX.2 models)
@@ -54,7 +54,7 @@
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
-| 1.1 | Implement parallel tool execution (`Promise.allSettled`) | ✅ | Claude | `client.ts` + `task-processor.ts` — concurrent execution with safety whitelist, allSettled isolation |
+| 1.1 | Implement parallel tool execution (`Promise.allSettled`) | ✅ | Claude | `task-processor.ts` — `Promise.allSettled` + `PARALLEL_SAFE_TOOLS` whitelist (11 read-only safe, 3 mutation sequential); `client.ts` — `Promise.all` (no whitelist, Worker path) |
 | 1.2 | Enrich model capability metadata | ✅ | Claude | `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext` for all 30+ models |
 | 1.3 | Add configurable reasoning per model | ✅ | Claude | Auto-detect + `think:LEVEL` override; DeepSeek/Grok `{enabled}`, Gemini `{effort}` |
 | 1.4 | Combine vision + tools into unified method | ✅ | Claude | Vision messages now route through tool-calling path (DO) for tool-supporting models |
@@ -127,6 +127,17 @@
 | 3.4 | Inject relevant learnings into system prompts | ✅ | Claude | Included in 3.1 — learnings injected into system prompt in handler.ts |
 
 > 🧑 HUMAN CHECK 3.5: Review learning data quality after 20+ tasks — ⏳ PENDING
+
+---
+
+### Sprint 48h: Infrastructure Guardrails (2026-02-20)
+
+| ID | Task | Status | Owner | Notes |
+|----|------|--------|-------|-------|
+| S48.1 | Phase budget circuit breakers | ✅ | Claude | `phase-budget.ts` — per-phase CPU budgets (plan=8s, work=18s, review=3s), checkpoint-save-before-crash, auto-resume on exceeded. Mitigates risk: CF DO 30s CPU hard-kill. 14 tests |
+| S48.2 | Parallel tools → allSettled + safety whitelist | ✅ | Claude | `task-processor.ts` — `Promise.allSettled` isolation, `PARALLEL_SAFE_TOOLS` (11 read-only), mutation tools sequential. 8 tests |
+
+> Risk "No phase timeouts (9x10 severity)" → mitigated by S48.1
 
 ---
 
@@ -268,7 +279,7 @@
 
 ```mermaid
 graph TD
-    P0[Phase 0: Quick Wins ✅] --> P1[Phase 1: Tool-Calling ✅/🔄]
+    P0[Phase 0: Quick Wins ✅] --> P1[Phase 1: Tool-Calling ✅]
     P0 --> P15[Phase 1.5: Upstream Sync ✅]
     P1 --> P2[Phase 2: Observability & Costs]
     P1 --> P25[Phase 2.5: Free APIs 🔲]

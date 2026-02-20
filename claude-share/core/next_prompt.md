@@ -3,7 +3,7 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-19 (Phase 4.1 audit hardening complete)
+**Last Updated:** 2026-02-20 (Sprint 48h complete — phase budgets + parallel tools upgrade)
 
 ---
 
@@ -16,7 +16,9 @@ Replace heuristic token estimation with a real tokenizer path (preferably `js-ti
 ### Context
 
 - Phase 4.1 is complete and now audited/hardened
+- Sprint 48h (Feb 20) shipped phase budget circuit breakers + parallel tools allSettled upgrade
 - `src/durable-objects/context-budget.ts` currently uses heuristic estimates
+- `src/durable-objects/phase-budget.ts` is the new phase budget module
 - Audit doc: `brainstorming/phase-4.1-audit.md`
 - Goal is tighter budget correctness with real token counts
 
@@ -42,6 +44,8 @@ Replace heuristic token estimation with a real tokenizer path (preferably `js-ti
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-20 | Sprint 48h: Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | session_01AtnWsZSprM6Gjr9vjTm1xp |
+| 2026-02-20 | Sprint 48h: Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | session_01AtnWsZSprM6Gjr9vjTm1xp |
 | 2026-02-19 | Phase 4.1 Audit: context-budget hardening + edge-case tests | Codex (GPT-5.2-Codex) | codex-phase-4-1-audit-001 |
 | 2026-02-18 | Phase 4.1: Token-budgeted context retrieval | Claude Opus 4.6 | 018M5goT7Vhaymuo8AxXhUCg |
 | 2026-02-18 | Phase 2.5.9: Holiday awareness (Nager.Date) | Claude Opus 4.6 | 01SE5WrUuc6LWTmZC8WBXKY4 |
