@@ -74,6 +74,16 @@
 	"browser": {
 		"binding": "BROWSER",
 	},
+	// Scheduled triggers for waking container before cron jobs
+	// These ensure the container is awake before OpenClaw's internal scheduler runs
+	// Times are UTC - adjust based on your timezone
+	"triggers": {
+		"crons": [
+			"25 6 * * *",   // 5 min before 06:30 daily brief
+			"55 10 * * 5",  // 5 min before 11:00 Friday brief
+			"55 19 * * 0"   // 5 min before 20:00 Sunday brief
+		]
+	},
 	// Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
 	// Secrets to configure via `wrangler secret put`:
 	//

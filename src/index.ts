@@ -31,6 +31,7 @@ import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
+import { handleScheduled } from './scheduled-handler';
 
 /**
  * Transform error messages from the gateway to be more user-friendly.
@@ -446,4 +447,5 @@ app.all('*', async (c) => {
 
 export default {
   fetch: app.fetch,
+  scheduled: handleScheduled,
 };
