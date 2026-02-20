@@ -1,5 +1,6 @@
 /**
  * Tests for TaskProcessor structured task phases (plan → work → review)
+ * and parallel tools (Promise.allSettled + safety whitelist)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -1102,5 +1103,365 @@ describe('TaskProcessor phases', () => {
       const task = mockState.storage._store.get('task') as Record<string, unknown>;
       expect(task.phase).not.toBe('review');
     });
+  });
+});
+
+describe('PARALLEL_SAFE_TOOLS whitelist', () => {
+  it('should export the set from task-processor', async () => {
+    const mod = await import('./task-processor');
+    expect(mod.PARALLEL_SAFE_TOOLS).toBeDefined();
+    expect(mod.PARALLEL_SAFE_TOOLS).toBeInstanceOf(Set);
+  });
+
+  it('should include read-only tools', async () => {
+    const { PARALLEL_SAFE_TOOLS } = await import('./task-processor');
+    expect(PARALLEL_SAFE_TOOLS.has('fetch_url')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('get_weather')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('get_crypto')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('github_read_file')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('github_list_files')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('fetch_news')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('convert_currency')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('geolocate_ip')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('url_metadata')).toBe(true);
+    expect(PARALLEL_SAFE_TOOLS.has('generate_chart')).toBe(true);
+  });
+
+  it('should NOT include mutation tools', async () => {
+    const { PARALLEL_SAFE_TOOLS } = await import('./task-processor');
+    expect(PARALLEL_SAFE_TOOLS.has('github_api')).toBe(false);
+    expect(PARALLEL_SAFE_TOOLS.has('github_create_pr')).toBe(false);
+    expect(PARALLEL_SAFE_TOOLS.has('sandbox_exec')).toBe(false);
+  });
+});
+
+describe('Parallel tools execution', () => {
+  let TaskProcessorClass: typeof import('./task-processor').TaskProcessor;
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const mod = await import('./task-processor');
+    TaskProcessorClass = mod.TaskProcessor;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should use parallel path for safe tools when model supports parallelCalls', async () => {
+    const mockState = createMockState();
+    const { getModel } = await import('../openrouter/models');
+    const { executeTool } = await import('../openrouter/tools');
+
+    // Model supports parallelCalls
+    vi.mocked(getModel).mockReturnValue({
+      id: 'deepseek-chat', alias: 'deep', isFree: false, supportsTools: true,
+      parallelCalls: true, name: 'DeepSeek', specialty: '', score: '', cost: '$0.25',
+    });
+
+    // Track tool execution order
+    const executionOrder: string[] = [];
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      const name = toolCall.function.name;
+      executionOrder.push(`start:${name}`);
+      // Small delay to allow parallel detection
+      await new Promise(r => setTimeout(r, 50));
+      executionOrder.push(`end:${name}`);
+      return { tool_call_id: toolCall.id, role: 'tool' as const, content: `Result for ${name}` };
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Fetching data.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://a.com"}' } },
+          { id: 'call_2', type: 'function', function: { name: 'get_crypto', arguments: '{"symbol":"BTC"}' } },
+        ],
+      },
+      { content: 'Here are the results.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(
+      () => {
+        const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+        if (!task || task.status !== 'completed') throw new Error('not completed yet');
+      },
+      { timeout: 10000, interval: 50 }
+    );
+
+    // Both tools should have been called
+    expect(executionOrder).toContain('start:fetch_url');
+    expect(executionOrder).toContain('start:get_crypto');
+    // In parallel execution, both starts happen before both ends
+    const startFetch = executionOrder.indexOf('start:fetch_url');
+    const startCrypto = executionOrder.indexOf('start:get_crypto');
+    const endFetch = executionOrder.indexOf('end:fetch_url');
+    const endCrypto = executionOrder.indexOf('end:get_crypto');
+    // Both should start before either ends (parallel)
+    expect(startFetch).toBeLessThan(endFetch);
+    expect(startCrypto).toBeLessThan(endCrypto);
+    expect(Math.max(startFetch, startCrypto)).toBeLessThan(Math.min(endFetch, endCrypto));
+  });
+
+  it('should use sequential path for github_api even if model supports parallel', async () => {
+    const mockState = createMockState();
+    const { getModel } = await import('../openrouter/models');
+    const { executeTool } = await import('../openrouter/tools');
+
+    vi.mocked(getModel).mockReturnValue({
+      id: 'deepseek-chat', alias: 'deep', isFree: false, supportsTools: true,
+      parallelCalls: true, name: 'DeepSeek', specialty: '', score: '', cost: '$0.25',
+    });
+
+    const executionOrder: string[] = [];
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      const name = toolCall.function.name;
+      executionOrder.push(`start:${name}`);
+      await new Promise(r => setTimeout(r, 50));
+      executionOrder.push(`end:${name}`);
+      return { tool_call_id: toolCall.id, role: 'tool' as const, content: `Result for ${name}` };
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Creating issue.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'github_api', arguments: '{"method":"POST","path":"/repos/test/issues"}' } },
+          { id: 'call_2', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://a.com"}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(
+      () => {
+        const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+        if (!task || task.status !== 'completed') throw new Error('not completed yet');
+      },
+      { timeout: 10000, interval: 50 }
+    );
+
+    // Sequential: first tool ends before second tool starts
+    const endFirst = executionOrder.indexOf('end:github_api');
+    const startSecond = executionOrder.indexOf('start:fetch_url');
+    expect(endFirst).toBeLessThan(startSecond);
+  });
+
+  it('should use sequential path for mixed safe+unsafe tools', async () => {
+    const mockState = createMockState();
+    const { getModel } = await import('../openrouter/models');
+    const { executeTool } = await import('../openrouter/tools');
+
+    vi.mocked(getModel).mockReturnValue({
+      id: 'deepseek-chat', alias: 'deep', isFree: false, supportsTools: true,
+      parallelCalls: true, name: 'DeepSeek', specialty: '', score: '', cost: '$0.25',
+    });
+
+    const executionOrder: string[] = [];
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      const name = toolCall.function.name;
+      executionOrder.push(`start:${name}`);
+      await new Promise(r => setTimeout(r, 50));
+      executionOrder.push(`end:${name}`);
+      return { tool_call_id: toolCall.id, role: 'tool' as const, content: `Result for ${name}` };
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Mixed tools.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://a.com"}' } },
+          { id: 'call_2', type: 'function', function: { name: 'sandbox_exec', arguments: '{"command":"ls"}' } },
+        ],
+      },
+      { content: 'Done.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(
+      () => {
+        const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+        if (!task || task.status !== 'completed') throw new Error('not completed yet');
+      },
+      { timeout: 10000, interval: 50 }
+    );
+
+    // Sequential: first tool ends before second tool starts
+    const endFirst = executionOrder.indexOf('end:fetch_url');
+    const startSecond = executionOrder.indexOf('start:sandbox_exec');
+    expect(endFirst).toBeLessThan(startSecond);
+  });
+
+  it('should contain error message string in failed tool results (allSettled)', async () => {
+    const mockState = createMockState();
+    const { getModel } = await import('../openrouter/models');
+    const { executeTool } = await import('../openrouter/tools');
+
+    vi.mocked(getModel).mockReturnValue({
+      id: 'deepseek-chat', alias: 'deep', isFree: false, supportsTools: true,
+      parallelCalls: true, name: 'DeepSeek', specialty: '', score: '', cost: '$0.25',
+    });
+
+    // First tool succeeds, second tool rejects
+    let callCount = 0;
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      callCount++;
+      if (callCount === 2) {
+        throw new Error('Network timeout');
+      }
+      return { tool_call_id: toolCall.id, role: 'tool' as const, content: 'Success result' };
+    });
+
+    const capturedBodies: Array<Record<string, unknown>> = [];
+    let apiCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : url.url;
+      if (urlStr.includes('api.telegram.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+          text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+        });
+      }
+
+      if (init?.body) {
+        try {
+          const parsed = JSON.parse(init.body as string);
+          if (parsed.messages) capturedBodies.push(parsed);
+        } catch { /* ignore */ }
+      }
+
+      apiCallCount++;
+      let responseData;
+      if (apiCallCount === 1) {
+        responseData = {
+          choices: [{
+            message: {
+              content: 'Using tools.',
+              tool_calls: [
+                { id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://a.com"}' } },
+                { id: 'call_2', type: 'function', function: { name: 'get_crypto', arguments: '{"symbol":"BTC"}' } },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 },
+        };
+      } else {
+        responseData = {
+          choices: [{
+            message: { content: 'Done with results.', tool_calls: undefined },
+            finish_reason: 'stop',
+          }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 },
+        };
+      }
+
+      const body = JSON.stringify(responseData);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve(body),
+        json: () => Promise.resolve(JSON.parse(body)),
+      });
+    }));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(
+      () => {
+        const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+        if (!task || task.status !== 'completed') throw new Error('not completed yet');
+      },
+      { timeout: 10000, interval: 50 }
+    );
+
+    // Task should complete successfully (one tool failed but the other succeeded)
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    expect(task.status).toBe('completed');
+
+    // The second API call should contain tool results including error message
+    expect(capturedBodies.length).toBeGreaterThanOrEqual(2);
+    const secondCallMsgs = capturedBodies[1].messages as Array<Record<string, unknown>>;
+    const toolResults = secondCallMsgs.filter(m => m.role === 'tool');
+    expect(toolResults.length).toBe(2);
+    // One should contain error message
+    const errorResult = toolResults.find(m => typeof m.content === 'string' && (m.content as string).includes('Error'));
+    expect(errorResult).toBeDefined();
+    expect((errorResult!.content as string)).toContain('Network timeout');
+  });
+
+  it('one tool failure should not cancel other tools (allSettled isolation)', async () => {
+    const mockState = createMockState();
+    const { getModel } = await import('../openrouter/models');
+    const { executeTool } = await import('../openrouter/tools');
+
+    vi.mocked(getModel).mockReturnValue({
+      id: 'deepseek-chat', alias: 'deep', isFree: false, supportsTools: true,
+      parallelCalls: true, name: 'DeepSeek', specialty: '', score: '', cost: '$0.25',
+    });
+
+    const completedTools: string[] = [];
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      const name = toolCall.function.name;
+      if (name === 'get_crypto') {
+        throw new Error('API rate limit');
+      }
+      // Other tools complete successfully
+      await new Promise(r => setTimeout(r, 20));
+      completedTools.push(name);
+      return { tool_call_id: toolCall.id, role: 'tool' as const, content: `Result for ${name}` };
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Checking multiple sources.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'fetch_url', arguments: '{"url":"https://a.com"}' } },
+          { id: 'call_2', type: 'function', function: { name: 'get_crypto', arguments: '{"symbol":"BTC"}' } },
+          { id: 'call_3', type: 'function', function: { name: 'get_weather', arguments: '{"location":"NYC"}' } },
+        ],
+      },
+      { content: 'Here are the results.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(
+      () => {
+        const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+        if (!task || task.status !== 'completed') throw new Error('not completed yet');
+      },
+      { timeout: 10000, interval: 50 }
+    );
+
+    // Both non-failing tools should have completed (not cancelled by get_crypto failure)
+    expect(completedTools).toContain('fetch_url');
+    expect(completedTools).toContain('get_weather');
   });
 });

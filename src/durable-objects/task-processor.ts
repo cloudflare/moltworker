@@ -45,6 +45,24 @@ const DEFAULT_CONTEXT_BUDGET = 60000;
 // These are hardcoded and only changed by code deploy — the unhackable fallback.
 const EMERGENCY_CORE_ALIASES = ['qwencoderfree', 'gptoss', 'devstral'];
 
+// Read-only tools that are safe to execute in parallel (no side effects).
+// Mutation tools (github_api, github_create_pr, sandbox_exec) must run sequentially.
+// Note: browse_url and sandbox_exec are already excluded from DO via TOOLS_WITHOUT_BROWSER,
+// but sandbox_exec is listed here for completeness in case the filter changes.
+export const PARALLEL_SAFE_TOOLS = new Set([
+  'fetch_url',
+  'browse_url',
+  'get_weather',
+  'get_crypto',
+  'github_read_file',
+  'github_list_files',
+  'fetch_news',
+  'convert_currency',
+  'geolocate_ip',
+  'url_metadata',
+  'generate_chart',
+]);
+
 // Task category for capability-aware model rotation
 type TaskCategory = 'coding' | 'reasoning' | 'general';
 
@@ -1197,9 +1215,52 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           const toolNames = choice.message.tool_calls.map(tc => tc.function.name);
           task.toolsUsed.push(...toolNames);
 
+          // Determine execution strategy: parallel (safe read-only tools) vs sequential (mutation tools)
+          const modelInfo = getModel(task.modelAlias);
+          const allToolsSafe = toolNames.every(name => PARALLEL_SAFE_TOOLS.has(name));
+          const useParallel = allToolsSafe && modelInfo?.parallelCalls === true && choice.message.tool_calls.length > 1;
+
           const parallelStart = Date.now();
-          const toolResults = await Promise.all(
-            choice.message.tool_calls.map(async (toolCall) => {
+          let toolResults: Array<{ toolName: string; toolResult: { tool_call_id: string; content: string } }>;
+
+          if (useParallel) {
+            // Parallel path: Promise.allSettled — one failure doesn't cancel others
+            const settled = await Promise.allSettled(
+              choice.message.tool_calls.map(async (toolCall) => {
+                const toolStartTime = Date.now();
+                const toolName = toolCall.function.name;
+
+                const toolPromise = executeTool(toolCall, toolContext);
+                const toolTimeoutPromise = new Promise<never>((_, reject) => {
+                  setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
+                });
+                const toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
+
+                console.log(`[TaskProcessor] Tool ${toolName} completed in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
+                return { toolName, toolResult };
+              })
+            );
+
+            // Map settled results: fulfilled → value, rejected → error message
+            toolResults = settled.map((outcome, idx) => {
+              if (outcome.status === 'fulfilled') {
+                return outcome.value;
+              }
+              const toolCall = choice.message.tool_calls![idx];
+              const errorMsg = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+              return {
+                toolName: toolCall.function.name,
+                toolResult: {
+                  tool_call_id: toolCall.id,
+                  content: `Error: ${errorMsg}`,
+                },
+              };
+            });
+            console.log(`[TaskProcessor] ${toolResults.length} tools executed in parallel (allSettled) in ${Date.now() - parallelStart}ms`);
+          } else {
+            // Sequential path: mutation/unsafe tools or mixed batches
+            toolResults = [];
+            for (const toolCall of choice.message.tool_calls) {
               const toolStartTime = Date.now();
               const toolName = toolCall.function.name;
 
