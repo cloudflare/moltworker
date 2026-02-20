@@ -491,6 +491,7 @@ export class TelegramHandler {
   // Acontext observability
   private acontextKey?: string;
   private acontextBaseUrl?: string;
+  private cloudflareApiToken?: string; // Cloudflare API token for Code Mode MCP
   // (sync sessions now persisted in R2 via storage.saveSyncSession)
 
   constructor(
@@ -509,7 +510,8 @@ export class TelegramHandler {
     deepseekKey?: string, // DeepSeek API key
     sandbox?: SandboxLike, // Sandbox container for code execution
     acontextKey?: string, // Acontext API key for observability
-    acontextBaseUrl?: string // Acontext API base URL
+    acontextBaseUrl?: string, // Acontext API base URL
+    cloudflareApiToken?: string // Cloudflare API token for Code Mode MCP
   ) {
     this.bot = new TelegramBot(telegramToken);
     this.openrouter = createOpenRouterClient(openrouterKey, workerUrl);
@@ -529,6 +531,7 @@ export class TelegramHandler {
     this.deepseekKey = deepseekKey;
     this.acontextKey = acontextKey;
     this.acontextBaseUrl = acontextBaseUrl;
+    this.cloudflareApiToken = cloudflareApiToken;
     if (allowedUserIds && allowedUserIds.length > 0) {
       this.allowedUsers = new Set(allowedUserIds);
     }
@@ -883,6 +886,58 @@ export class TelegramHandler {
           await this.bot.sendMessage(chatId, 'Task processor not available.');
         }
         break;
+
+      case '/cloudflare':
+      case '/cf': {
+        // Cloudflare API via Code Mode MCP
+        const cfQuery = args.join(' ').trim();
+        if (!cfQuery) {
+          await this.bot.sendMessage(chatId,
+            '☁️ *Cloudflare Code Mode MCP*\n\n' +
+            'Access the entire Cloudflare API (2500+ endpoints) in ~1k tokens.\n\n' +
+            '*Usage:*\n' +
+            '`/cloudflare search list R2 buckets`\n' +
+            '`/cloudflare execute <typescript code>`\n' +
+            '`/cf search workers list`\n\n' +
+            `*Status:* ${this.cloudflareApiToken ? '✅ Token configured' : '❌ CLOUDFLARE_API_TOKEN not set'}`
+          );
+          break;
+        }
+
+        if (!this.cloudflareApiToken) {
+          await this.bot.sendMessage(chatId, '❌ CLOUDFLARE_API_TOKEN is not configured. Set it in your environment variables.');
+          break;
+        }
+
+        // Parse action: first word can be "search" or "execute", default to "search"
+        const cfParts = cfQuery.split(/\s+/);
+        let cfAction: 'search' | 'execute' = 'search';
+        let cfArg = cfQuery;
+        if (cfParts[0] === 'search' || cfParts[0] === 'execute') {
+          cfAction = cfParts[0] as 'search' | 'execute';
+          cfArg = cfParts.slice(1).join(' ');
+        }
+
+        if (!cfArg) {
+          await this.bot.sendMessage(chatId, '❌ Please provide a query or code after the action.');
+          break;
+        }
+
+        await this.bot.sendMessage(chatId, cfAction === 'search'
+          ? `🔍 Searching Cloudflare API: "${cfArg}"...`
+          : '⚡ Executing against Cloudflare API...');
+
+        try {
+          const { cloudflareApi: cfApiCall } = await import('../openrouter/tools-cloudflare');
+          const cfResult = await cfApiCall(cfAction, cfAction === 'search' ? cfArg : undefined, cfAction === 'execute' ? cfArg : undefined, this.cloudflareApiToken);
+          // Truncate for Telegram (max 4096 chars)
+          const truncated = cfResult.length > 3900 ? cfResult.slice(0, 3900) + '\n...(truncated)' : cfResult;
+          await this.bot.sendMessage(chatId, `☁️ *Cloudflare ${cfAction}:*\n\`\`\`\n${truncated}\n\`\`\``);
+        } catch (error) {
+          await this.bot.sendMessage(chatId, `❌ Cloudflare API error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        break;
+      }
 
       case '/saves':
       case '/checkpoints': {
@@ -1638,6 +1693,7 @@ export class TelegramHandler {
       openrouterKey: this.openrouterKey,
       githubToken: this.githubToken,
       braveSearchKey: this.braveSearchKey,
+      cloudflareApiToken: this.cloudflareApiToken,
       dashscopeKey: this.dashscopeKey,
       moonshotKey: this.moonshotKey,
       deepseekKey: this.deepseekKey,
@@ -1896,7 +1952,7 @@ export class TelegramHandler {
           modelAlias, messages, {
             maxToolCalls: 10,
             maxTimeMs: 120000,
-            toolContext: { githubToken: this.githubToken, braveSearchKey: this.braveSearchKey, browser: this.browser, sandbox: this.sandbox },
+            toolContext: { githubToken: this.githubToken, braveSearchKey: this.braveSearchKey, cloudflareApiToken: this.cloudflareApiToken, browser: this.browser, sandbox: this.sandbox },
           }
         );
 
@@ -2005,6 +2061,7 @@ export class TelegramHandler {
       openrouterKey: this.openrouterKey,
       githubToken: this.githubToken,
       braveSearchKey: this.braveSearchKey,
+      cloudflareApiToken: this.cloudflareApiToken,
       dashscopeKey: this.dashscopeKey,
       moonshotKey: this.moonshotKey,
       deepseekKey: this.deepseekKey,
@@ -2069,6 +2126,7 @@ export class TelegramHandler {
       openrouterKey: this.openrouterKey,
       githubToken: this.githubToken,
       braveSearchKey: this.braveSearchKey,
+      cloudflareApiToken: this.cloudflareApiToken,
       dashscopeKey: this.dashscopeKey,
       moonshotKey: this.moonshotKey,
       deepseekKey: this.deepseekKey,
@@ -2282,6 +2340,7 @@ export class TelegramHandler {
             },
             toolContext: {
               githubToken: this.githubToken,
+              cloudflareApiToken: this.cloudflareApiToken,
               browser: this.browser,
               sandbox: this.sandbox,
             },
@@ -3342,7 +3401,12 @@ Direct: /dcode /dreason /q3coder /kimidirect
 All:   /models for full list
 /syncmodels — Fetch latest free models from OpenRouter
 
-━━━ 14 Live Tools ━━━
+━━━ Cloudflare API ━━━
+/cloudflare search <query> — Search CF API endpoints
+/cloudflare execute <code> — Run TypeScript against CF SDK
+/cf — Shortcut alias
+
+━━━ 15 Live Tools ━━━
 The bot calls these automatically when relevant:
  • get_weather — Current conditions + 7-day forecast
  • get_crypto — Coin price, top N, DEX pairs
@@ -3358,6 +3422,7 @@ The bot calls these automatically when relevant:
  • github_api — Full GitHub API access
  • github_create_pr — Create PR with file changes
  • sandbox_exec — Run commands in sandbox container
+ • cloudflare_api — Full Cloudflare API via Code Mode MCP
 
 ━━━ Orchestra Mode ━━━
 /orch set owner/repo — Lock default repo
@@ -3407,7 +3472,8 @@ export function createTelegramHandler(
   deepseekKey?: string,
   sandbox?: SandboxLike,
   acontextKey?: string,
-  acontextBaseUrl?: string
+  acontextBaseUrl?: string,
+  cloudflareApiToken?: string
 ): TelegramHandler {
   return new TelegramHandler(
     telegramToken,
@@ -3425,6 +3491,7 @@ export function createTelegramHandler(
     deepseekKey,
     sandbox,
     acontextKey,
-    acontextBaseUrl
+    acontextBaseUrl,
+    cloudflareApiToken
   );
 }

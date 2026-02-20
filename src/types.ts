@@ -41,6 +41,7 @@ export interface MoltbotEnv {
   DASHSCOPE_API_KEY?: string; // Alibaba DashScope (Qwen models)
   MOONSHOT_API_KEY?: string; // Moonshot (Kimi models)
   DEEPSEEK_API_KEY?: string; // DeepSeek (DeepSeek Coder)
+  CLOUDFLARE_API_TOKEN?: string; // Cloudflare API token for Code Mode MCP
   DISCORD_BOT_TOKEN?: string;
   DISCORD_DM_POLICY?: string;
   DISCORD_ANNOUNCEMENT_CHANNELS?: string; // Comma-separated channel IDs to monitor

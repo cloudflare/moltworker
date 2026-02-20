@@ -64,6 +64,29 @@ export const PARALLEL_SAFE_TOOLS = new Set([
   'generate_chart',
 ]);
 
+/**
+ * Check if a specific tool call is safe for parallel execution / caching.
+ * Extends PARALLEL_SAFE_TOOLS with action-level granularity:
+ *   - cloudflare_api with action="search" is safe (read-only discovery)
+ *   - cloudflare_api with action="execute" is NOT safe (mutations possible)
+ */
+export function isToolCallParallelSafe(toolCall: ToolCall): boolean {
+  const toolName = toolCall.function.name;
+  if (PARALLEL_SAFE_TOOLS.has(toolName)) return true;
+
+  // Action-level check for cloudflare_api
+  if (toolName === 'cloudflare_api') {
+    try {
+      const args = JSON.parse(toolCall.function.arguments) as Record<string, string>;
+      return args.action === 'search';
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 // Task category for capability-aware model rotation
 type TaskCategory = 'coding' | 'reasoning' | 'general';
 
@@ -148,6 +171,7 @@ interface TaskState {
   openrouterKey?: string; // Store for alarm recovery
   githubToken?: string; // Store for alarm recovery
   braveSearchKey?: string; // Store for alarm recovery
+  cloudflareApiToken?: string; // Store for alarm recovery
   // Direct provider API keys for alarm recovery
   dashscopeKey?: string;
   moonshotKey?: string;
@@ -182,6 +206,7 @@ export interface TaskRequest {
   dashscopeKey?: string;   // For Qwen (DashScope/Alibaba)
   moonshotKey?: string;    // For Kimi (Moonshot)
   deepseekKey?: string;    // For DeepSeek
+  cloudflareApiToken?: string; // Cloudflare API token for Code Mode MCP
   // Auto-resume setting
   autoResume?: boolean;    // If true, auto-resume on timeout
   // Reasoning level override (from think:LEVEL prefix)
@@ -260,7 +285,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   ): Promise<{ tool_call_id: string; content: string }> {
     const toolName = toolCall.function.name;
     const cacheKey = `${toolName}:${toolCall.function.arguments}`;
-    const isCacheable = PARALLEL_SAFE_TOOLS.has(toolName);
+    const isCacheable = isToolCallParallelSafe(toolCall);
 
     if (isCacheable) {
       // Check result cache
@@ -435,6 +460,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         openrouterKey: task.openrouterKey,
         githubToken: task.githubToken,
         braveSearchKey: task.braveSearchKey,
+        cloudflareApiToken: task.cloudflareApiToken,
         // Include direct provider API keys for resume
         dashscopeKey: task.dashscopeKey,
         moonshotKey: task.moonshotKey,
@@ -758,6 +784,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     task.openrouterKey = request.openrouterKey;
     task.githubToken = request.githubToken;
     task.braveSearchKey = request.braveSearchKey;
+    task.cloudflareApiToken = request.cloudflareApiToken;
     // Store direct provider API keys for alarm recovery
     task.dashscopeKey = request.dashscopeKey;
     task.moonshotKey = request.moonshotKey;
@@ -800,6 +827,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     const toolContext: ToolContext = {
       githubToken: request.githubToken,
       braveSearchKey: request.braveSearchKey,
+      cloudflareApiToken: request.cloudflareApiToken,
     };
 
     // Capability-aware free model rotation: prioritize models matching the task type
@@ -1300,7 +1328,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
           // Determine execution strategy: parallel (safe read-only tools) vs sequential (mutation tools)
           const modelInfo = getModel(task.modelAlias);
-          const allToolsSafe = toolNames.every(name => PARALLEL_SAFE_TOOLS.has(name));
+          const allToolsSafe = choice.message.tool_calls.every(tc => isToolCallParallelSafe(tc));
           const useParallel = allToolsSafe && modelInfo?.parallelCalls === true && choice.message.tool_calls.length > 1;
 
           const parallelStart = Date.now();

@@ -1134,6 +1134,58 @@ describe('PARALLEL_SAFE_TOOLS whitelist', () => {
     expect(PARALLEL_SAFE_TOOLS.has('github_create_pr')).toBe(false);
     expect(PARALLEL_SAFE_TOOLS.has('sandbox_exec')).toBe(false);
   });
+
+  it('should NOT include cloudflare_api in the static set (action-level check)', async () => {
+    const { PARALLEL_SAFE_TOOLS } = await import('./task-processor');
+    expect(PARALLEL_SAFE_TOOLS.has('cloudflare_api')).toBe(false);
+  });
+});
+
+describe('isToolCallParallelSafe', () => {
+  it('should return true for tools in PARALLEL_SAFE_TOOLS', async () => {
+    const { isToolCallParallelSafe } = await import('./task-processor');
+    expect(isToolCallParallelSafe({
+      id: 'call_1',
+      type: 'function',
+      function: { name: 'fetch_url', arguments: '{"url":"https://example.com"}' },
+    })).toBe(true);
+  });
+
+  it('should return true for cloudflare_api with search action', async () => {
+    const { isToolCallParallelSafe } = await import('./task-processor');
+    expect(isToolCallParallelSafe({
+      id: 'call_2',
+      type: 'function',
+      function: { name: 'cloudflare_api', arguments: JSON.stringify({ action: 'search', query: 'R2 buckets' }) },
+    })).toBe(true);
+  });
+
+  it('should return false for cloudflare_api with execute action', async () => {
+    const { isToolCallParallelSafe } = await import('./task-processor');
+    expect(isToolCallParallelSafe({
+      id: 'call_3',
+      type: 'function',
+      function: { name: 'cloudflare_api', arguments: JSON.stringify({ action: 'execute', code: 'test' }) },
+    })).toBe(false);
+  });
+
+  it('should return false for cloudflare_api with invalid JSON arguments', async () => {
+    const { isToolCallParallelSafe } = await import('./task-processor');
+    expect(isToolCallParallelSafe({
+      id: 'call_4',
+      type: 'function',
+      function: { name: 'cloudflare_api', arguments: 'not json' },
+    })).toBe(false);
+  });
+
+  it('should return false for mutation tools', async () => {
+    const { isToolCallParallelSafe } = await import('./task-processor');
+    expect(isToolCallParallelSafe({
+      id: 'call_5',
+      type: 'function',
+      function: { name: 'github_api', arguments: '{}' },
+    })).toBe(false);
+  });
 });
 
 describe('Parallel tools execution', () => {

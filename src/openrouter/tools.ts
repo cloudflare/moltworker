@@ -3,6 +3,7 @@
  */
 
 import { getModel } from './models';
+import { cloudflareApi } from './tools-cloudflare';
 
 // Tool definitions in OpenAI function calling format
 export interface ToolDefinition {
@@ -64,6 +65,7 @@ export interface ToolContext {
   braveSearchKey?: string;
   browser?: Fetcher; // Cloudflare Browser Rendering binding
   sandbox?: SandboxLike; // Sandbox container for code execution
+  cloudflareApiToken?: string; // Cloudflare API token for Code Mode MCP
 }
 
 /**
@@ -431,6 +433,32 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'cloudflare_api',
+      description: 'Access the entire Cloudflare API (2500+ endpoints) via Code Mode MCP. Use "search" to discover endpoints, then "execute" to run TypeScript code against the typed Cloudflare SDK. Extremely powerful — covers DNS, Workers, R2, D1, KV, Zero Trust, Pages, and more.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            description: 'Action to perform',
+            enum: ['search', 'execute'],
+          },
+          query: {
+            type: 'string',
+            description: 'Search query to find Cloudflare API endpoints (required for "search" action)',
+          },
+          code: {
+            type: 'string',
+            description: 'TypeScript code to execute against the Cloudflare SDK (required for "execute" action)',
+          },
+        },
+        required: ['action'],
+      },
+    },
+  },
 ];
 
 /**
@@ -512,6 +540,9 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
         break;
       case 'sandbox_exec':
         result = await sandboxExec(args.commands, args.timeout, context?.sandbox, githubToken);
+        break;
+      case 'cloudflare_api':
+        result = await cloudflareApi(args.action, args.query, args.code, context?.cloudflareApiToken);
         break;
       default:
         result = `Error: Unknown tool: ${name}`;
