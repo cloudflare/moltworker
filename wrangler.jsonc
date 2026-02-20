@@ -52,7 +52,7 @@
   "migrations": [
     {
       "new_sqlite_classes": ["Sandbox"],
-      "tag": "v2",
+      "tag": "v1",
     },
   ],
   // R2 bucket for persistent storage (moltbot data, conversations, etc.)
