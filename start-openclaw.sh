@@ -268,7 +268,11 @@ if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-or')
         baseUrl: 'https://openrouter.ai/api/v1',
         apiKey: process.env.OPENAI_API_KEY,
         api: 'openai-completions',
-        models: [{ id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5', contextWindow: 262144, maxTokens: 8192 }]
+        models: [
+            { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5', contextWindow: 262144, maxTokens: 8192 },
+            { id: 'minimax/minimax-01', name: 'MiniMax-01', contextWindow: 1000000, maxTokens: 8192 },
+            { id: 'minimax/minimax-m2.5', name: 'MiniMax M2.5', contextWindow: 196608, maxTokens: 8192 }
+        ]
     };
     config.agents = config.agents || {};
     config.agents.defaults = config.agents.defaults || {};
