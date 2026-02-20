@@ -3,40 +3,39 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-20 (Phase 4.2 complete — real tokenizer via gpt-tokenizer)
+**Last Updated:** 2026-02-20 (Phase 2.4 complete — Acontext dashboard in admin UI)
 
 ---
 
-## Current Task: Phase 2.4 — Acontext Dashboard Link in Admin UI
+## Current Task: Phase 4.3 — Tool Result Caching
 
 ### Goal
 
-Add a read-only "Acontext Sessions" section to the React admin dashboard showing recent AI task sessions with links to the Acontext dashboard.
+Cache identical tool call results (same function + arguments) within a task session to avoid redundant API calls. For example, if `get_weather` is called twice with the same lat/lon, return the cached result on the second call.
 
 ### Context
 
-- Phase 4.2 just completed: real tokenizer (gpt-tokenizer cl100k_base) integrated
-- Acontext REST client already exists: `src/acontext/client.ts`
-- Admin UI: React 19 + Vite 6, `src/client/pages/AdminPage.tsx`
-- Admin API: `src/client/api.ts` (calls `/api/admin/*`)
-- Env binding: `ACONTEXT_API_KEY` already configured in Cloudflare
-- This is a Codex-assigned task (frontend + simple API endpoint)
+- Phase 4.2 complete: real tokenizer integrated
+- Phase 2.4 complete: Acontext dashboard in admin UI
+- Tool execution happens in `src/durable-objects/task-processor.ts` and `src/openrouter/tools.ts`
+- 14 tools total, 11 are read-only (safe to cache), 3 are mutation tools (should not cache)
+- `PARALLEL_SAFE_TOOLS` whitelist already identifies which tools are read-only
+- This is a Codex-assigned task
 
 ### Files to Modify
 
 | File | What to change |
 |------|---------------|
-| Admin routes | Add `GET /api/admin/acontext/sessions` endpoint |
-| `src/client/api.ts` | Add `getAcontextSessions()` client function |
-| `src/client/pages/AdminPage.tsx` | Add Acontext sessions section |
-| `src/client/pages/AdminPage.css` | Styling for new section |
+| `src/durable-objects/task-processor.ts` | Add in-memory cache keyed by tool name + arguments hash |
+| `src/openrouter/tools.ts` | Consider cache-hit path in tool execution |
+| Tests | Add tests for cache hit, cache miss, mutation tool bypass |
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Current | 2.4: Acontext dashboard link in admin UI | Low | Read-only integration (Codex) |
-| Next | 4.3: Tool result caching | Medium | Cache identical tool calls (Codex) |
+| Current | 4.3: Tool result caching | Medium | Cache identical tool calls (Codex) |
+| Next | 4.4: Cross-session context continuity | Medium | Resume tasks days later (Claude) |
 | Then | Audit Phase 2: P2 guardrails | Medium | Multi-agent review, tool result validation |
 
 ---

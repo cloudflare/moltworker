@@ -4,6 +4,39 @@
 
 ---
 
+## Session: 2026-02-20 | Phase 2.4 — Acontext Sessions Dashboard in Admin UI (Session: session_01SE5WrUuc6LWTmZC8WBXKY4)
+
+**AI:** Claude Opus 4.6 (review & integration) + Codex GPT-5.2 (5 candidate implementations)
+**Branch:** `claude/implement-p1-guardrails-DcOgI`
+**Task:** Add Acontext sessions dashboard section to admin UI
+
+### Approach
+- Codex generated 5 candidate implementations (PR124–PR128)
+- Claude reviewed all 5, scored them (5–8/10), selected best (branch 4: -8zikq4, 8/10)
+- Manually extracted functional code from winning branch, fixed known issues
+
+### Changes
+- **Modified:** `src/routes/api.ts` — added `GET /api/admin/acontext/sessions` backend route
+- **Modified:** `src/client/api.ts` — added `AcontextSessionInfo`, `AcontextSessionsResponse` types and `getAcontextSessions()` function
+- **Modified:** `src/client/pages/AdminPage.tsx` — added `AcontextSessionsSection` component (exported), `formatAcontextAge()`, `truncateAcontextPrompt()` helpers
+- **Modified:** `src/client/pages/AdminPage.css` — 91 lines of Acontext section styles (green border, grid, status dots, responsive)
+- **New:** `src/routes/api.test.ts` — 2 backend tests (unconfigured, mapped fields)
+- **New:** `src/routes/admin-acontext.test.tsx` — 11 UI tests (render, states, formatAcontextAge, truncateAcontextPrompt)
+- **Modified:** `vitest.config.ts` — added `.test.tsx` support
+
+### Design Decisions
+- Used `renderToStaticMarkup` for UI tests (SSR-based, no DOM mocking needed)
+- Test file placed at `src/routes/` (not `src/client/` which is excluded by vitest config)
+- Exported `formatAcontextAge`, `truncateAcontextPrompt`, `AcontextSessionsSection` for testability
+- Graceful degradation: shows "Acontext not configured" hint when API key missing
+
+### Test Results
+- 785 tests total (13 net new)
+- Typecheck clean
+- Build succeeds
+
+---
+
 ## Session: 2026-02-20 | Phase 4.2 — Real Tokenizer (gpt-tokenizer cl100k_base) (Session: session_01SE5WrUuc6LWTmZC8WBXKY4)
 
 **AI:** Claude Opus 4.6

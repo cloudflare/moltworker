@@ -349,3 +349,94 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Acontext sessions section */
+.acontext-section {
+  border-left: 3px solid #22c55e;
+}
+
+.acontext-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.acontext-row {
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 0.65rem 0.75rem;
+  display: grid;
+  grid-template-columns: 120px minmax(120px, 180px) minmax(0, 1fr) 90px 70px;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.85rem;
+}
+
+.acontext-col {
+  min-width: 0;
+}
+
+.acontext-status {
+  display: inline-flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.status-dot {
+  display: inline-flex;
+  width: 1.2rem;
+  height: 1.2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+.status-dot.is-success {
+  color: #15803d;
+  background-color: rgba(34, 197, 94, 0.18);
+}
+
+.status-dot.is-failure {
+  color: #b91c1c;
+  background-color: rgba(239, 68, 68, 0.18);
+}
+
+.status-dot.is-unknown {
+  color: #a16207;
+  background-color: rgba(234, 179, 8, 0.18);
+}
+
+.acontext-model,
+.acontext-tools {
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.acontext-prompt {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.acontext-link a {
+  color: var(--primary-color);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.acontext-link a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 900px) {
+  .acontext-row {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+    padding: 0.75rem;
+  }
+}

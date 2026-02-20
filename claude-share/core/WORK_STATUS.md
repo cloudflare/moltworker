@@ -41,6 +41,7 @@
 | S48.1 | Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | 4.2 | Replace estimateTokens with real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
+| 2.4 | Acontext sessions dashboard in admin UI | Codex+Claude | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 
 ---
 
@@ -100,6 +101,7 @@
 | S48.1 | Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | 2026-02-20 | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | 2026-02-20 | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | 4.2 | Real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | 2026-02-20 | `claude/implement-p1-guardrails-DcOgI` |
+| 2.4 | Acontext sessions dashboard in admin UI | Codex+Claude | 2026-02-20 | `claude/implement-p1-guardrails-DcOgI` |
 
 ---
 
@@ -131,8 +133,8 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **Phase 2.4** — Acontext dashboard link in admin UI
-2. **Phase 4.3** — Tool result caching (Codex)
+1. **Phase 4.3** — Tool result caching (Codex)
+2. **Phase 4.4** — Cross-session context continuity
 3. **Audit Phase 2** — P2 guardrails (multi-agent review, tool result validation)
 
 ---
@@ -141,4 +143,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 41 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2.1-2.3 complete, Phase 2.5 COMPLETE (all 8 tools + holiday awareness 2.5.9), Phase 3 COMPLETE (3.1-3.4), Phase 4.1-4.2 done, P1 guardrails done, Acontext observability done, Sprint 48h done (phase budgets + allSettled), ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 772 tests total |
+| Sprint 1 (current) | 8 | 42 | Phase 0 complete, Phase 1 COMPLETE (1.1-1.5), upstream sync complete, Phase 2 COMPLETE (2.1-2.4), Phase 2.5 COMPLETE (all 8 tools + holiday awareness 2.5.9), Phase 3 COMPLETE (3.1-3.4), Phase 4.1-4.2 done, P1 guardrails done, Sprint 48h done (phase budgets + allSettled), ALL 12 bugs fixed, /start redesign + bot menu + briefing fixes, 785 tests total |
