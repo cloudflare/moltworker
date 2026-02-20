@@ -140,3 +140,21 @@ export async function triggerSync(): Promise<SyncResponse> {
     method: 'POST',
   });
 }
+
+export interface AcontextSessionInfo {
+  id: string;
+  model: string;
+  prompt: string;
+  toolsUsed: number;
+  success: boolean | null;
+  createdAt: string;
+}
+
+export interface AcontextSessionsResponse {
+  items: AcontextSessionInfo[];
+  configured: boolean;
+}
+
+export async function getAcontextSessions(): Promise<AcontextSessionsResponse> {
+  return apiRequest<AcontextSessionsResponse>('/acontext/sessions');
+}

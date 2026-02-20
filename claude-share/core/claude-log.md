@@ -4,6 +4,113 @@
 
 ---
 
+## Session: 2026-02-20 | Phase 2.4 — Acontext Sessions Dashboard in Admin UI (Session: session_01SE5WrUuc6LWTmZC8WBXKY4)
+
+**AI:** Claude Opus 4.6 (review & integration) + Codex GPT-5.2 (5 candidate implementations)
+**Branch:** `claude/implement-p1-guardrails-DcOgI`
+**Task:** Add Acontext sessions dashboard section to admin UI
+
+### Approach
+- Codex generated 5 candidate implementations (PR124–PR128)
+- Claude reviewed all 5, scored them (5–8/10), selected best (branch 4: -8zikq4, 8/10)
+- Manually extracted functional code from winning branch, fixed known issues
+
+### Changes
+- **Modified:** `src/routes/api.ts` — added `GET /api/admin/acontext/sessions` backend route
+- **Modified:** `src/client/api.ts` — added `AcontextSessionInfo`, `AcontextSessionsResponse` types and `getAcontextSessions()` function
+- **Modified:** `src/client/pages/AdminPage.tsx` — added `AcontextSessionsSection` component (exported), `formatAcontextAge()`, `truncateAcontextPrompt()` helpers
+- **Modified:** `src/client/pages/AdminPage.css` — 91 lines of Acontext section styles (green border, grid, status dots, responsive)
+- **New:** `src/routes/api.test.ts` — 2 backend tests (unconfigured, mapped fields)
+- **New:** `src/routes/admin-acontext.test.tsx` — 11 UI tests (render, states, formatAcontextAge, truncateAcontextPrompt)
+- **Modified:** `vitest.config.ts` — added `.test.tsx` support
+
+### Design Decisions
+- Used `renderToStaticMarkup` for UI tests (SSR-based, no DOM mocking needed)
+- Test file placed at `src/routes/` (not `src/client/` which is excluded by vitest config)
+- Exported `formatAcontextAge`, `truncateAcontextPrompt`, `AcontextSessionsSection` for testability
+- Graceful degradation: shows "Acontext not configured" hint when API key missing
+
+### Test Results
+- 785 tests total (13 net new)
+- Typecheck clean
+- Build succeeds
+
+---
+
+## Session: 2026-02-20 | Phase 4.2 — Real Tokenizer (gpt-tokenizer cl100k_base) (Session: session_01SE5WrUuc6LWTmZC8WBXKY4)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/implement-p1-guardrails-DcOgI`
+**Task:** Replace heuristic `estimateStringTokens` with real BPE tokenizer
+
+### Changes
+- **New:** `src/utils/tokenizer.ts` — wrapper around `gpt-tokenizer/encoding/cl100k_base`
+  - `countTokens(text)` — exact BPE token count with heuristic fallback
+  - `estimateTokensHeuristic(text)` — original chars/4 heuristic (fallback)
+  - `isTokenizerAvailable()` / `resetTokenizerState()` — diagnostics + testing
+- **Modified:** `src/durable-objects/context-budget.ts` — `estimateStringTokens()` now delegates to `countTokens()` from tokenizer module
+- **New export:** `estimateStringTokensHeuristic()` for comparison/testing
+- **New:** `src/utils/tokenizer.test.ts` — 18 tests covering exact counts, fallback, comparison
+- **Adjusted:** `context-budget.test.ts` — relaxed bounds for real tokenizer accuracy
+- **Adjusted:** `context-budget.edge.test.ts` — relaxed reasoning_content bound
+- **New dependency:** `gpt-tokenizer` (pure JS, no WASM)
+
+### Design Decisions
+- **cl100k_base encoding** — best universal approximation across multi-provider models (GPT-4, Claude ~70% overlap, Llama 3+, DeepSeek, Gemini)
+- **gpt-tokenizer over js-tiktoken** — pure JS (no WASM cold start), compact binary BPE ranks, per-encoding tree-shakeable imports
+- **Heuristic fallback** — if tokenizer throws, flag disables it for process lifetime and falls back to chars/4 heuristic
+- **Bundle impact:** worker entry +1.1 MB (1,388 → 2,490 KB uncompressed) — within CF Workers 10 MB limit
+
+### Test Results
+- 772 tests total (10 net new from tokenizer module)
+- Typecheck clean
+- Build succeeds
+
+---
+
+## Session: 2026-02-20 | Sprint 48h — Phase Budget Circuit Breakers + Parallel Tools Upgrade (Session: session_01AtnWsZSprM6Gjr9vjTm1xp)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/budget-circuit-breakers-parallel-bAtHI`
+**Status:** Completed (merged as PR #123)
+
+### Summary
+Sprint 48h completed both planned tasks: phase budget circuit breakers to prevent Cloudflare DO 30s CPU hard-kill, and parallel tools upgrade from `Promise.all` to `Promise.allSettled` with a safety whitelist for mutation tools.
+
+### Changes Made
+1. **`src/durable-objects/phase-budget.ts`** (NEW) — Phase budget circuit breaker module:
+   - `PHASE_BUDGETS` constants: plan=8s, work=18s, review=3s
+   - `PhaseBudgetExceededError` custom error with phase/elapsed/budget metadata
+   - `checkPhaseBudget()` — throws if elapsed exceeds phase budget
+2. **`src/durable-objects/phase-budget.test.ts`** (NEW) — 14 tests covering budget constants, error class, threshold checks, integration concepts
+3. **`src/durable-objects/task-processor.ts`** — Integrated both features:
+   - Phase budget checks before API calls and tool execution
+   - Catch block: increments `autoResumeCount`, saves checkpoint before propagating
+   - `phaseStartTime` tracked and reset at phase transitions
+   - `Promise.all` replaced with `Promise.allSettled` for parallel tool execution
+   - `PARALLEL_SAFE_TOOLS` whitelist (11 read-only tools): fetch_url, browse_url, get_weather, get_crypto, github_read_file, github_list_files, fetch_news, convert_currency, geolocate_ip, url_metadata, generate_chart
+   - Mutation tools (github_api, github_create_pr, sandbox_exec) always sequential
+   - Sequential fallback when any tool in batch is unsafe or model lacks `parallelCalls`
+4. **`src/durable-objects/task-processor.test.ts`** — 8 new tests: whitelist coverage, parallel/sequential routing, allSettled isolation, error handling
+
+### Files Modified
+- `src/durable-objects/phase-budget.ts` (new)
+- `src/durable-objects/phase-budget.test.ts` (new)
+- `src/durable-objects/task-processor.ts`
+- `src/durable-objects/task-processor.test.ts`
+
+### Tests
+- [x] Tests pass (762 total, 0 failures — 22 new)
+- [x] Typecheck passes
+
+### Audit Notes (post-merge review)
+- `client.ts` still uses `Promise.all` without whitelist (Worker path, non-DO) — not upgraded in this sprint. Roadmap corrected to reflect this.
+- `checkPhaseBudget()` does not call `saveCheckpoint` itself (deviation from sprint pseudocode); the wiring is in the task-processor catch block, which is architecturally cleaner.
+- No integration test verifying `autoResumeCount` increment in task-processor on phase budget exceeded — only a conceptual test in phase-budget.test.ts. Low risk since the catch path is straightforward.
+- GLOBAL_ROADMAP overview said "12 tools" — corrected to 14 (was missing github_create_pr, sandbox_exec).
+
+---
+
 ## Session: 2026-02-18 | Phase 4.1 Token-Budgeted Context Retrieval (Session: 018M5goT7Vhaymuo8AxXhUCg)
 
 **AI:** Claude Opus 4.6

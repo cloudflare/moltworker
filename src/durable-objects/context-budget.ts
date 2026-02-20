@@ -3,15 +3,16 @@
  *
  * Replaces the naive compressContext (keep N recent, drop rest) with
  * a smarter system that:
- * 1. Estimates tokens per message more accurately (not just chars/4)
+ * 1. Counts tokens accurately via BPE tokenizer (cl100k_base) with heuristic fallback
  * 2. Assigns priority scores — recent messages and final tool results rank higher
  * 3. Summarizes evicted middle messages instead of silently dropping them
  * 4. Maintains valid tool_call/result pairing (required by OpenAI-format APIs)
  *
- * Phase 4.1 of the Moltworker roadmap.
+ * Phase 4.1 + 4.2 of the Moltworker roadmap.
  */
 
 import type { ChatMessage } from '../openrouter/client';
+import { countTokens, estimateTokensHeuristic } from '../utils/tokenizer';
 
 // --- Constants ---
 
@@ -24,33 +25,19 @@ const IMAGE_PART_TOKENS = 425;
 const SUMMARY_RESERVE_TOKENS = 100;
 
 /**
- * Estimate the token count for a string.
- *
- * Uses a refined heuristic: 1 token ≈ 4 characters for English, but
- * accounts for whitespace compression and code patterns.
- * This is intentionally conservative (slightly over-estimates) so that
- * we never exceed the real budget.
+ * Count tokens for a string using the real BPE tokenizer (cl100k_base).
+ * Falls back to heuristic estimation if the tokenizer is unavailable.
  */
 export function estimateStringTokens(text: string): number {
-  if (!text) return 0;
+  return countTokens(text);
+}
 
-  // Base: chars / 4, with adjustments
-  let tokens = Math.ceil(text.length / 4);
-
-  // Code-heavy content tends to have more tokens per char due to
-  // short identifiers, operators, and punctuation.
-  // Heuristic: if >20% of chars are non-alpha, add 15% overhead.
-  const nonAlpha = text.replace(/[a-zA-Z\s]/g, '').length;
-  if (nonAlpha / text.length > 0.2) {
-    tokens = Math.ceil(tokens * 1.15);
-  }
-
-  // Dense JSON payloads often tokenize worse than prose due to punctuation/quotes.
-  if ((text.startsWith('{') || text.startsWith('[')) && text.includes('":')) {
-    tokens = Math.ceil(tokens * 1.1);
-  }
-
-  return tokens;
+/**
+ * Heuristic-only string token estimation.
+ * Exported for testing and comparison purposes.
+ */
+export function estimateStringTokensHeuristic(text: string): number {
+  return estimateTokensHeuristic(text);
 }
 
 /**

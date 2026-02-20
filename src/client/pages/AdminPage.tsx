@@ -6,23 +6,105 @@ import {
   restartGateway,
   getStorageStatus,
   triggerSync,
+  getAcontextSessions,
   AuthError,
   type PendingDevice,
   type PairedDevice,
   type DeviceListResponse,
   type StorageStatusResponse,
+  type AcontextSessionsResponse,
 } from '../api'
 import './AdminPage.css'
+
+const ACONTEXT_DASHBOARD_URL = 'https://platform.acontext.com/sessions'
 
 // Small inline spinner for buttons
 function ButtonSpinner() {
   return <span className="btn-spinner" />
 }
 
+export function formatAcontextAge(createdAt: string, nowMs: number = Date.now()): string {
+  const createdMs = Date.parse(createdAt)
+  if (Number.isNaN(createdMs)) return 'Unknown'
+
+  const seconds = Math.max(0, Math.floor((nowMs - createdMs) / 1000))
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+export function truncateAcontextPrompt(prompt: string, maxLength: number = 60): string {
+  if (prompt.length <= maxLength) return prompt
+  return `${prompt.slice(0, maxLength - 1)}…`
+}
+
+export function AcontextSessionsSection({
+  data,
+  loading,
+}: {
+  data: AcontextSessionsResponse | null;
+  loading: boolean;
+}) {
+  const sessions = data?.items || []
+
+  return (
+    <section className="devices-section gateway-section acontext-section">
+      <div className="section-header">
+        <h2>Acontext Sessions</h2>
+      </div>
+
+      {loading ? (
+        <p className="hint">Loading recent sessions...</p>
+      ) : !data?.configured ? (
+        <p className="hint">Acontext not configured — add ACONTEXT_API_KEY</p>
+      ) : sessions.length === 0 ? (
+        <p className="hint">No recent sessions found.</p>
+      ) : (
+        <div className="acontext-list">
+          {sessions.map((session) => {
+            const statusIcon = session.success === true ? '✓' : session.success === false ? '✗' : '?'
+            const statusClass = session.success === true ? 'is-success' : session.success === false ? 'is-failure' : 'is-unknown'
+            const statusLabel = session.success === true ? 'Success' : session.success === false ? 'Failed' : 'Unknown'
+
+            return (
+              <div key={session.id} className="acontext-row">
+                <div className="acontext-col acontext-status">
+                  <span className={`status-dot ${statusClass}`} title={statusLabel}>{statusIcon}</span>
+                  <span>{formatAcontextAge(session.createdAt)}</span>
+                </div>
+                <div className="acontext-col acontext-model" title={session.model}>{session.model}</div>
+                <div className="acontext-col acontext-prompt" title={session.prompt || 'No prompt recorded'}>
+                  {truncateAcontextPrompt(session.prompt || 'No prompt recorded')}
+                </div>
+                <div className="acontext-col acontext-tools">{session.toolsUsed} tools</div>
+                <div className="acontext-col acontext-link">
+                  <a
+                    href={`${ACONTEXT_DASHBOARD_URL}/${session.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Open
+                  </a>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingDevice[]>([])
   const [paired, setPaired] = useState<PairedDevice[]>([])
   const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null)
+  const [acontextSessions, setAcontextSessions] = useState<AcontextSessionsResponse | null>(null)
+  const [acontextLoading, setAcontextLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
@@ -62,10 +144,23 @@ export default function AdminPage() {
     }
   }, [])
 
+  const fetchAcontextSessions = useCallback(async () => {
+    try {
+      const sessions = await getAcontextSessions()
+      setAcontextSessions(sessions)
+    } catch (err) {
+      console.error('Failed to fetch Acontext sessions:', err)
+      setAcontextSessions({ items: [], configured: true })
+    } finally {
+      setAcontextLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     fetchDevices()
     fetchStorageStatus()
-  }, [fetchDevices, fetchStorageStatus])
+    fetchAcontextSessions()
+  }, [fetchDevices, fetchStorageStatus, fetchAcontextSessions])
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId)
@@ -235,6 +330,8 @@ export default function AdminPage() {
           All connected clients will be temporarily disconnected.
         </p>
       </section>
+
+      <AcontextSessionsSection data={acontextSessions} loading={acontextLoading} />
 
       {loading ? (
         <div className="loading">

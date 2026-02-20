@@ -62,7 +62,9 @@ describe('context-budget edge cases', () => {
       content: 'answer',
       reasoning_content: 'long hidden reasoning ' + 'x'.repeat(1200),
     };
-    expect(estimateMessageTokens(msg)).toBeGreaterThan(300);
+    // Real tokenizer is efficient with repeated chars; heuristic gives ~300+.
+    // Both should be significantly above baseline (4 overhead + 2 for 'answer').
+    expect(estimateMessageTokens(msg)).toBeGreaterThan(100);
   });
 
   it('gracefully degrades when budget is smaller than always-keep set', () => {

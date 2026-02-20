@@ -71,7 +71,9 @@ describe('estimateStringTokens', () => {
   it('should handle large strings', () => {
     const large = 'a'.repeat(10000);
     const tokens = estimateStringTokens(large);
-    expect(tokens).toBeGreaterThan(2000);
+    // Real tokenizer (cl100k_base) is efficient with repeated chars (~1250 tokens).
+    // Heuristic gives ~2500. Accept either path.
+    expect(tokens).toBeGreaterThan(500);
     expect(tokens).toBeLessThan(4000);
   });
 });
@@ -545,7 +547,9 @@ describe('compressContextBudgeted', () => {
       assistantMsg('Recent answer'),
     ];
 
-    const result = compressContextBudgeted(msgs, 600, 2);
+    // Use tight budget to force compression even with real tokenizer
+    // (real tokenizer counts ~150 tokens for 'x'.repeat(400), heuristic ~115)
+    const result = compressContextBudgeted(msgs, 300, 2);
 
     // The system notice should survive compression better than plain assistant text
     const hasSystemNotice = result.some(

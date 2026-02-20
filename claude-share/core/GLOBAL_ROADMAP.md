@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-20 (Phase budget circuit breakers + parallel tools upgrade)
+**Last Updated:** 2026-02-20 (Phase 4.2: real tokenizer + parallel tools upgrade)
 
 ---
 
@@ -11,7 +11,7 @@
 
 **Moltworker** is a multi-platform AI assistant gateway deployed on Cloudflare Workers. It provides:
 - 30+ AI models via OpenRouter + direct provider APIs (with capability metadata)
-- 12 tools (fetch_url, github_read_file, github_list_files, github_api, url_metadata, generate_chart, get_weather, fetch_news, convert_currency, get_crypto, geolocate_ip, browse_url) — parallel execution
+- 14 tools (fetch_url, github_read_file, github_list_files, github_api, github_create_pr, url_metadata, generate_chart, get_weather, fetch_news, convert_currency, get_crypto, geolocate_ip, browse_url, sandbox_exec) — parallel execution with safety whitelist
 - Durable Objects for unlimited-time task execution
 - Multi-platform chat (Telegram, Discord, Slack)
 - Image generation (FLUX.2 models)
@@ -54,7 +54,7 @@
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
-| 1.1 | Implement parallel tool execution (`Promise.allSettled`) | ✅ | Claude | `client.ts` + `task-processor.ts` — concurrent execution with safety whitelist, allSettled isolation |
+| 1.1 | Implement parallel tool execution (`Promise.allSettled`) | ✅ | Claude | `task-processor.ts` — `Promise.allSettled` + `PARALLEL_SAFE_TOOLS` whitelist (11 read-only safe, 3 mutation sequential); `client.ts` — `Promise.all` (no whitelist, Worker path) |
 | 1.2 | Enrich model capability metadata | ✅ | Claude | `parallelCalls`, `structuredOutput`, `reasoning`, `maxContext` for all 30+ models |
 | 1.3 | Add configurable reasoning per model | ✅ | Claude | Auto-detect + `think:LEVEL` override; DeepSeek/Grok `{enabled}`, Gemini `{effort}` |
 | 1.4 | Combine vision + tools into unified method | ✅ | Claude | Vision messages now route through tool-calling path (DO) for tool-supporting models |
@@ -85,7 +85,7 @@
 | 2.1 | Add token/cost tracking per request | ✅ | Claude | `costs.ts` — pricing parser, per-user daily accumulation, cost footer on responses |
 | 2.2 | Add `/costs` Telegram command | ✅ | Claude | `/costs` today + `/costs week` 7-day breakdown, integrated with Phase 2.1 |
 | 2.3 | Integrate Acontext observability (Phase 1) | ✅ | Claude | Lightweight REST client, session storage at task completion, /sessions command |
-| 2.4 | Add Acontext dashboard link to admin UI | 🔲 | Codex | Low-risk, read-only integration |
+| 2.4 | Add Acontext dashboard link to admin UI | ✅ | Codex+Claude | Backend route + React section + CSS + 13 tests (785 total) |
 
 > 🧑 HUMAN CHECK 2.5: Set up Acontext account and configure API key — ✅ DONE (2026-02-11)
 > 🧑 HUMAN CHECK 2.6: Review cost tracking accuracy against OpenRouter billing — ⏳ PENDING
@@ -130,12 +130,23 @@
 
 ---
 
+### Sprint 48h: Infrastructure Guardrails (2026-02-20)
+
+| ID | Task | Status | Owner | Notes |
+|----|------|--------|-------|-------|
+| S48.1 | Phase budget circuit breakers | ✅ | Claude | `phase-budget.ts` — per-phase CPU budgets (plan=8s, work=18s, review=3s), checkpoint-save-before-crash, auto-resume on exceeded. Mitigates risk: CF DO 30s CPU hard-kill. 14 tests |
+| S48.2 | Parallel tools → allSettled + safety whitelist | ✅ | Claude | `task-processor.ts` — `Promise.allSettled` isolation, `PARALLEL_SAFE_TOOLS` (11 read-only), mutation tools sequential. 8 tests |
+
+> Risk "No phase timeouts (9x10 severity)" → mitigated by S48.1
+
+---
+
 ### Phase 4: Context Engineering (Medium-High effort)
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
 | 4.1 | Replace `compressContext()` with token-budgeted retrieval | ✅ | Claude | Priority-scored messages, tool pairing, summarization — 28 tests |
-| 4.2 | Replace `estimateTokens()` with actual tokenizer | 🔲 | Claude | Use Acontext or tiktoken |
+| 4.2 | Replace `estimateTokens()` with actual tokenizer | ✅ | Claude | `gpt-tokenizer` cl100k_base encoding, heuristic fallback — 18 tests (772 total) |
 | 4.3 | Add tool result caching | 🔲 | Codex | Cache identical tool calls (same GitHub file, etc.) |
 | 4.4 | Implement cross-session context continuity | 🔲 | Claude | Resume complex tasks days later with full context |
 
@@ -225,6 +236,8 @@
 
 ```
 
+2026-02-20 | Codex+Claude (Session: session_01SE5WrUuc6LWTmZC8WBXKY4) | feat(admin): Phase 2.4 Acontext sessions dashboard — backend route, React section, CSS, 13 new tests (785 total). Best-of-5 Codex outputs reviewed and merged by Claude | src/routes/api.ts, src/routes/api.test.ts, src/routes/admin-acontext.test.tsx, src/client/api.ts, src/client/pages/AdminPage.tsx, src/client/pages/AdminPage.css, vitest.config.ts
+2026-02-20 | Claude Opus 4.6 (Session: session_01SE5WrUuc6LWTmZC8WBXKY4) | feat(context-budget): Phase 4.2 real tokenizer — gpt-tokenizer cl100k_base BPE encoding replaces heuristic estimateStringTokens, heuristic fallback, 18 new tests (772 total) | src/utils/tokenizer.ts, src/utils/tokenizer.test.ts, src/durable-objects/context-budget.ts, src/durable-objects/context-budget.test.ts, src/durable-objects/context-budget.edge.test.ts, package.json
 2026-02-20 | Claude Opus 4.6 (Session: session_01AtnWsZSprM6Gjr9vjTm1xp) | feat(task-processor): parallel tools Promise.allSettled + safety whitelist — PARALLEL_SAFE_TOOLS set (11 read-only tools), mutation tools sequential, allSettled isolation, 8 new tests (762 total) | src/durable-objects/task-processor.ts, src/durable-objects/task-processor.test.ts
 2026-02-20 | Claude Opus 4.6 (Session: session_01AtnWsZSprM6Gjr9vjTm1xp) | feat(task-processor): phase budget circuit breakers — per-phase CPU time budgets (plan=8s, work=18s, review=3s), checkpoint-save-before-crash, auto-resume on budget exceeded, 14 new tests (754 total) | src/durable-objects/phase-budget.ts, src/durable-objects/phase-budget.test.ts, src/durable-objects/task-processor.ts
 2026-02-19 | Codex (Session: codex-phase-4-1-audit-001) | fix(task-processor/context): Phase 4.1 audit hardening — safer tool pairing, transitive pair retention, model-aware context budgets, 11 edge-case tests, audit report | src/durable-objects/context-budget.ts, src/durable-objects/context-budget.edge.test.ts, src/durable-objects/task-processor.ts, brainstorming/phase-4.1-audit.md
@@ -268,7 +281,7 @@
 
 ```mermaid
 graph TD
-    P0[Phase 0: Quick Wins ✅] --> P1[Phase 1: Tool-Calling ✅/🔄]
+    P0[Phase 0: Quick Wins ✅] --> P1[Phase 1: Tool-Calling ✅]
     P0 --> P15[Phase 1.5: Upstream Sync ✅]
     P1 --> P2[Phase 2: Observability & Costs]
     P1 --> P25[Phase 2.5: Free APIs 🔲]

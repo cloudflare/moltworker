@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, waitForProcess } from '../gateway';
+import { createAcontextClient } from '../acontext/client';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -264,6 +265,45 @@ adminApi.post('/gateway/restart', async (c) => {
         ? 'Gateway process killed, new instance starting...'
         : 'No existing process found, starting new instance...',
       previousProcessId: existingProcess?.id,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /api/admin/acontext/sessions - List recent Acontext task sessions
+adminApi.get('/acontext/sessions', async (c) => {
+  const client = createAcontextClient(c.env.ACONTEXT_API_KEY, c.env.ACONTEXT_BASE_URL);
+
+  if (!client) {
+    return c.json({
+      items: [],
+      configured: false,
+    });
+  }
+
+  try {
+    const sessions = await client.listSessions({ limit: 10, timeDesc: true });
+
+    return c.json({
+      configured: true,
+      items: sessions.items.map((session) => {
+        const configs = session.configs || {};
+        const model = typeof configs.model === 'string' ? configs.model : 'unknown';
+        const prompt = typeof configs.prompt === 'string' ? configs.prompt : '';
+        const toolsUsed = typeof configs.toolsUsed === 'number' ? configs.toolsUsed : 0;
+        const success = typeof configs.success === 'boolean' ? configs.success : null;
+
+        return {
+          id: session.id,
+          model,
+          prompt,
+          toolsUsed,
+          success,
+          createdAt: session.created_at,
+        };
+      }),
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

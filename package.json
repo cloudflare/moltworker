@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.0.5",
+    "gpt-tokenizer": "^3.4.0",
     "hono": "^4.11.6",
     "jose": "^6.0.0",
     "react": "^19.0.0",
@@ -35,11 +36,11 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "oxfmt": "^0.28.0",
+    "oxlint": "^1.43.0",
     "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vitest": "^4.0.18",
-    "oxfmt": "^0.28.0",
-    "oxlint": "^1.43.0",
     "wrangler": "^4.50.0"
   },
   "author": "",
