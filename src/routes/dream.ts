@@ -3,6 +3,7 @@
  *
  * POST /dream-build — Accept a build job from Storia
  * GET  /dream-build/:jobId — Check job status
+ * POST /dream-build/:jobId/approve — Resume a paused job after human approval
  *
  * Auth: Bearer token (STORIA_MOLTWORKER_SECRET shared secret)
  */
@@ -143,6 +144,39 @@ dream.get('/:jobId', async (c) => {
       costEstimate: status.costEstimate,
       startedAt: status.startedAt,
       updatedAt: status.updatedAt,
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return c.json({ error: msg }, 500);
+  }
+});
+
+/**
+ * POST /dream-build/:jobId/approve — Resume a paused job.
+ *
+ * When destructive ops are detected, the job is paused.
+ * A human reviewer calls this endpoint to approve and resume processing.
+ */
+dream.post('/:jobId/approve', async (c) => {
+  const jobId = c.req.param('jobId');
+
+  if (!c.env.DREAM_BUILD_PROCESSOR) {
+    return c.json({ error: 'Dream Build processor not configured' }, 503);
+  }
+
+  try {
+    const id = c.env.DREAM_BUILD_PROCESSOR.idFromName(jobId);
+    const stub = c.env.DREAM_BUILD_PROCESSOR.get(id);
+    const result = await stub.resumeJob();
+
+    if (!result.ok) {
+      return c.json({ error: result.error }, 400);
+    }
+
+    return c.json({
+      ok: true,
+      jobId,
+      message: `Job ${jobId} approved and resumed`,
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

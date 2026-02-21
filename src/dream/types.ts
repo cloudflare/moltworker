@@ -97,6 +97,8 @@ export interface DreamJobState {
   costEstimate: number;
   startedAt: number;
   updatedAt: number;
+  /** Set to true when a human approves a paused job — skips destructive ops check on re-run */
+  approved?: boolean;
 }
 
 // ── Code generation config ───────────────────────────────────────────

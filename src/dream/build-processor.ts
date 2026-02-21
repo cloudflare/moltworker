@@ -84,6 +84,35 @@ export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
   }
 
   /**
+   * Resume a paused job after human approval.
+   * Called via POST /dream-build/:jobId/approve.
+   */
+  async resumeJob(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.state) {
+      this.state = await this.ctx.storage.get<DreamJobState>('state') ?? null;
+    }
+
+    if (!this.state) {
+      return { ok: false, error: 'Job not found' };
+    }
+
+    if (this.state.status !== 'paused') {
+      return { ok: false, error: `Job is not paused (current status: ${this.state.status})` };
+    }
+
+    // Mark as approved and re-queue
+    this.state.approved = true;
+    this.state.status = 'queued';
+    this.state.updatedAt = Date.now();
+    await this.ctx.storage.put('state', this.state);
+
+    // Set alarm to trigger re-processing
+    await this.ctx.storage.setAlarm(Date.now() + 100);
+
+    return { ok: true };
+  }
+
+  /**
    * Alarm handler — drives the build process.
    */
   async alarm(): Promise<void> {
@@ -155,16 +184,18 @@ export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
     this.state!.updatedAt = Date.now();
     await this.ctx.storage.put('state', this.state!);
 
-    // 3. Safety check — destructive ops
-    const destructiveCheck = checkDestructiveOps(plan.items);
-    if (!destructiveCheck.allowed) {
-      this.state!.status = 'paused';
-      this.state!.updatedAt = Date.now();
-      await this.ctx.storage.put('state', this.state!);
-      await callback.pausedApproval(
-        `Destructive operations detected: ${destructiveCheck.flaggedItems?.join(', ')}`
-      );
-      return;
+    // 3. Safety check — destructive ops (skip if human-approved)
+    if (!this.state!.approved) {
+      const destructiveCheck = checkDestructiveOps(plan.items);
+      if (!destructiveCheck.allowed) {
+        this.state!.status = 'paused';
+        this.state!.updatedAt = Date.now();
+        await this.ctx.storage.put('state', this.state!);
+        await callback.pausedApproval(
+          `Destructive operations detected: ${destructiveCheck.flaggedItems?.join(', ')}`
+        );
+        return;
+      }
     }
 
     // 4. Execute work items via GitHub API
