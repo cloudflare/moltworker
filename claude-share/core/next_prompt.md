@@ -3,7 +3,7 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-21 (Dream Machine Build stage complete — DM.1-DM.3 done)
+**Last Updated:** 2026-02-21 (Dream Machine Build stage complete — DM.1-DM.3 done, P2 guardrails audit complete)
 
 ---
 
@@ -64,6 +64,7 @@ Replace the TODO stub files that `executeBuild()` currently generates with actua
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-21 | Audit Phase 2: P2 guardrails — tool result validation + No Fake Success enforcement | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.1-DM.3: Dream Machine Build stage + auth + route fix (935 tests) | Claude Opus 4.6 | session_01QETPeWbuAmbGASZr8mqoYm |
 | 2026-02-20 | Phase 5.2: MCP integration — Cloudflare Code Mode MCP (38 tests, 872 total) | Claude Opus 4.6 | session_01QETPeWbuAmbGASZr8mqoYm |
 | 2026-02-20 | Phase 5.5: Web search tool (Brave Search API, cache, key plumbing, tests) | Codex (GPT-5.2-Codex) | codex-phase-5-5-web-search-001 |

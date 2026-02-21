@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-21 (Dream Machine Build stage + Phase 5.2 MCP complete + route fix)
+**Last Updated:** 2026-02-21 (P2 guardrails audit complete + Dream Machine Build stage + MCP + route fix)
 
 ---
 
@@ -42,6 +42,7 @@
 | S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | 4.2 | Replace estimateTokens with real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 | 2.4 | Acontext sessions dashboard in admin UI | Codex+Claude | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
+| P2 | Audit Phase 2: P2 guardrails (tool validation + No Fake Success) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 | 5.2 | MCP integration (Cloudflare Code Mode) | Claude Opus 4.6 | ✅ Complete | `claude/code-mode-mcp-integration-yDHLz` |
 | 5.5 | Web search tool (Brave Search API) | Codex | ✅ Complete | `work` |
 | DM.1 | Dream Machine Build stage (DO, queue, callbacks, safety) | Claude Opus 4.6 | ✅ Complete | `claude/code-mode-mcp-integration-yDHLz` |
@@ -112,6 +113,7 @@
 | S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | 2026-02-20 | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | 4.2 | Real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | 2026-02-20 | `claude/implement-p1-guardrails-DcOgI` |
 | 2.4 | Acontext sessions dashboard in admin UI | Codex+Claude | 2026-02-20 | `claude/implement-p1-guardrails-DcOgI` |
+| P2 | Audit Phase 2: P2 guardrails (tool validation + No Fake Success + enhanced confidence) | Claude Opus 4.6 | 2026-02-21 | `claude/execute-next-prompt-Wh6Cx` |
 
 ---
 
@@ -147,7 +149,8 @@
 2. **DM.5** — Add `POST /dream-build/:jobId/approve` endpoint (resume paused jobs)
 3. **DM.6** — Token/cost tracking in build pipeline (tokensUsed/costEstimate always 0)
 4. **Phase 5.1** — Multi-agent review for complex tasks
-5. **Phase 5.3** — Acontext Sandbox for code execution
+5. **Phase 3 Audit** — CI gates + policy tests (task router, guardrail regression)
+6. **Phase 5.3** — Acontext Sandbox for code execution
 
 ---
 

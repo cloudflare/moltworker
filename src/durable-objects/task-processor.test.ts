@@ -1759,3 +1759,204 @@ describe('Tool result caching', () => {
     expect(processor.getToolCacheStats()).toEqual({ hits: 2, misses: 2, size: 2 });
   });
 });
+
+describe('P2 guardrails: tool result validation', () => {
+  let TaskProcessorClass: typeof import('./task-processor').TaskProcessor;
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const mod = await import('./task-processor');
+    TaskProcessorClass = mod.TaskProcessor;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('appends mutation tool warning when github_create_pr fails', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    // Simulate github_create_pr failure
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => ({
+      tool_call_id: toolCall.id,
+      role: 'tool',
+      content: toolCall.function.name === 'github_create_pr'
+        ? 'Error: 422 Unprocessable Entity - branch already exists'
+        : 'File contents here',
+    }));
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Reading file first.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'github_read_file', arguments: '{"owner":"test","repo":"test","path":"README.md"}' } },
+        ],
+      },
+      {
+        content: 'Creating PR now.',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'github_create_pr', arguments: '{"owner":"test","repo":"test","title":"fix","branch":"fix-1"}' } },
+        ],
+      },
+      { content: 'PR created successfully!' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    const result = task.result as string;
+    expect(result).toContain('mutation tool error');
+    expect(result).toContain('github_create_pr');
+    expect(result).toContain('Verify');
+  });
+
+  it('does not append warning when only read-only tools fail', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    // Simulate read-only tool failure
+    vi.mocked(executeTool).mockResolvedValue({
+      tool_call_id: 'call_1',
+      role: 'tool',
+      content: 'Error: 500 server error from weather API',
+    });
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Checking weather.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"lat":0,"lon":0}' } },
+        ],
+      },
+      { content: 'Weather service is down, sorry.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    const result = task.result as string;
+    expect(result).not.toContain('mutation tool error');
+  });
+
+  it('downgrades confidence when mutation tools fail on coding tasks', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => ({
+      tool_call_id: toolCall.id,
+      role: 'tool',
+      content: toolCall.function.name === 'github_api'
+        ? 'Error: 403 Forbidden - bad credentials'
+        : 'File: README.md\nHello world',
+    }));
+
+    // Use a coding task (system prompt with code/repo keywords triggers coding category)
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Reading the repo.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'github_read_file', arguments: '{"owner":"test","repo":"test","path":"src/index.ts"}' } },
+        ],
+      },
+      {
+        content: 'Pushing changes.',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'github_api', arguments: '{"method":"POST","endpoint":"/repos/test/test/git/refs"}' } },
+        ],
+      },
+      { content: 'Changes pushed to repo.' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest({
+        messages: [
+          { role: 'system', content: 'You are a coding assistant.' },
+          { role: 'user', content: 'Fix the bug in the repository code and deploy' },
+        ],
+      })),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    const result = task.result as string;
+    // Should have mutation warning
+    expect(result).toContain('mutation tool error');
+    // Should have confidence label (coding task)
+    expect(result).toContain('Confidence:');
+    // Confidence should not be High since mutation tool failed
+    expect(result).not.toContain('Confidence: High');
+  });
+
+  it('does not downgrade confidence when tools succeed', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => ({
+      tool_call_id: toolCall.id,
+      role: 'tool',
+      content: 'Success: operation completed',
+    }));
+
+    vi.stubGlobal('fetch', buildApiResponses([
+      {
+        content: 'Reading code.',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'github_read_file', arguments: '{"owner":"test","repo":"test","path":"src/index.ts"}' } },
+        ],
+      },
+      {
+        content: 'Creating PR.',
+        tool_calls: [
+          { id: 'call_2', type: 'function', function: { name: 'github_read_file', arguments: '{"owner":"test","repo":"test","path":"package.json"}' } },
+        ],
+      },
+      { content: 'Code looks good!' },
+    ]));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest({
+        messages: [
+          { role: 'system', content: 'You are a coding assistant.' },
+          { role: 'user', content: 'Review the code in the repository and fix bugs' },
+        ],
+      })),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || task.status !== 'completed') throw new Error('not completed yet');
+    }, { timeout: 10000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    const result = task.result as string;
+    expect(result).not.toContain('mutation tool error');
+    expect(result).toContain('Confidence: High');
+  });
+});
