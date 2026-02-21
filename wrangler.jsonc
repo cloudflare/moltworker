@@ -87,7 +87,9 @@
   // - CF_ACCESS_AUD: Cloudflare Access application audience
   //
   // Chat channels (optional):
-  // - TELEGRAM_BOT_TOKEN, DISCORD_BOT_TOKEN, SLACK_BOT_TOKEN, SLACK_APP_TOKEN
+  // - TELEGRAM_BOT_TOKEN, TELEGRAM_DM_POLICY
+  // - DISCORD_BOT_TOKEN, DISCORD_DM_POLICY
+  // - SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_DM_POLICY
   //
   // Browser automation (optional):
   // - CDP_SECRET: Shared secret for /cdp endpoint authentication
