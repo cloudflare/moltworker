@@ -19,6 +19,11 @@
 - 일정 삭제: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js delete --id EVENT_ID`
 - memory_search 쓰지 마라. 캘린더는 위 방법으로만 접근.
 
+## Browser (IMPORTANT)
+- 웹페이지 읽기 (JS 렌더링 포함): `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/read-page.js "URL" --max-chars 5000` 실행
+- 스크린샷: `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js "URL" /tmp/screenshot.png` 실행
+- **내장 browser 툴 사용하지 마라.** 페어링 오류 발생함. 반드시 위 exec 스크립트만 사용.
+
 ## Self-Evolution
 - HOT-MEMORY.md에 핵심 기억, 오너 선호, 활성 컨텍스트 자동 업데이트
 - 대화에서 새로운 사실 발견 시 즉시 self-modify로 기록
