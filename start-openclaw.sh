@@ -205,6 +205,29 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     if (baseUrl && apiKey) {
         if (gwProvider === 'google-ai-studio') baseUrl += '/v1beta';
         const api = gwProvider === 'anthropic' ? 'anthropic-messages' : gwProvider === 'google-ai-studio' ? 'google-generative-ai' : 'openai-completions';
+        // Map Cloudflare AI Gateway provider to OpenClaw ModelApi type
+        // CF providers: https://developers.cloudflare.com/ai-gateway/usage/providers
+        // OpenClaw API types: https://github.com/openclaw/openclaw/blob/main/src/config/types.models.ts
+        const apiMap = {
+            'anthropic': 'anthropic-messages',
+            'google-ai-studio': 'google-generative-ai',
+            'bedrock': 'bedrock-converse-stream',
+            // openai, groq, mistral, openrouter, etc. use openai-completions
+        };
+        let api = apiMap[gwProvider] || 'openai-completions';
+
+        // workers-ai: parse @cf/<vendor>/<model> to select API based on vendor
+        if (gwProvider === 'workers-ai') {
+            const vendorMatch = modelId.match(/^@cf\/([^/]+)\//);
+            if (vendorMatch) {
+                const vendor = vendorMatch[1];
+                if (vendor === 'meta') {
+                    api = 'ollama'; // LLaMA models use ollama API
+                }
+                // openai, mistral, etc. stay as openai-completions
+            }
+        }
+
         const providerName = 'cf-ai-gw-' + gwProvider;
 
         config.models = config.models || {};
