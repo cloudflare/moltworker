@@ -3,45 +3,43 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-21 (DM.5 complete — approve endpoint for paused Dream Build jobs)
+**Last Updated:** 2026-02-21 (DM.7 complete — trust level enforcement at route layer)
 
 ---
 
-## Current Task: DM.7 — Enforce checkTrustLevel() at Route Layer
+## Current Task: DM.8 — CI Trigger / Test Execution Before PR
 
 ### Goal
 
-Wire the existing `checkTrustLevel()` function into the dream-build route. The function is already implemented in `src/dream/auth.ts` but never called — add a one-line check in the POST `/dream-build` handler.
+Make the Dream Build pipeline actually run tests before creating a PR. Currently, the `testing` callback fires (`callback.testing()`) but no tests are executed — it's a no-op placeholder. Wire up a real test/lint step using Cloudflare sandbox or a lightweight CI mechanism.
 
 ### Context
 
-- DM.1-DM.5 are complete — full Dream Machine pipeline with AI code generation, budget enforcement, and human approval
-- `checkTrustLevel()` is defined in `src/dream/auth.ts` but not invoked anywhere
-- Trust levels: observer (read-only), planner (plan but don't execute), builder (execute), shipper (execute + deploy)
-- The POST `/dream-build` route should enforce that the caller has `builder` or `shipper` trust level
+- DM.1-DM.7 are complete — full Dream Machine pipeline with AI code generation, budget enforcement, human approval, and trust level enforcement
+- In `executeBuild()` at step 5, `callback.testing()` fires but no actual validation runs
+- The generated code is committed and a PR is created without any syntax or lint checking
+- Options: (a) use Cloudflare sandbox to run `tsc --noEmit` on generated files, (b) call GitHub Actions API to trigger a workflow, (c) validate syntax locally via lightweight checks
 
 ### What Needs to Happen
 
-1. **Check if `checkTrustLevel()` exists** in `src/dream/auth.ts` — understand the function signature
-2. **Add trust level to DreamBuildJob** if not already present (may need a `trustLevel` field)
-3. **Call `checkTrustLevel()`** in the POST `/dream-build` handler before starting the job
-4. **Tests**: Add route tests for trust level enforcement
+1. **Choose approach** — sandbox-based TypeScript check vs GitHub Actions trigger
+2. **Add validation step** in `executeBuild()` between file writes and PR creation
+3. **Handle validation failures** — fail the job or add warnings to the PR body
+4. **Tests**: Mock the validation step
 
 ### Files to Modify
 
 | File | What to change |
 |------|---------------|
-| `src/routes/dream.ts` | Add trust level check in POST handler |
-| `src/dream/auth.ts` | May need adjustment if `checkTrustLevel` needs different params |
-| Tests | Route tests for trust enforcement |
+| `src/dream/build-processor.ts` | Add validation step between writing and PR creation |
+| Tests | Validation step tests |
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Current | DM.7: Enforce checkTrustLevel() | Low | One-line addition to route |
-| Next | DM.8: CI trigger / test execution before PR | Medium | testing callback fires but no actual tests run |
-| Then | Phase 5.1: Multi-agent review | High | Route results through reviewer model |
+| Current | DM.8: CI trigger / test execution before PR | Medium | Run validation before creating PR |
+| Next | Phase 5.1: Multi-agent review | High | Route results through reviewer model |
 
 ---
 
@@ -49,6 +47,7 @@ Wire the existing `checkTrustLevel()` function into the dream-build route. The f
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-21 | DM.7: Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.5: Add /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.4: Wire real AI code generation into Dream Build (993 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | Audit Phase 2: P2 guardrails — tool result validation + No Fake Success enforcement | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |

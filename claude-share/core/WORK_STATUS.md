@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-21 (DM.5 approve endpoint + DM.4 AI code generation + P2 guardrails audit)
+**Last Updated:** 2026-02-21 (DM.7 trust level enforcement + DM.5 approve endpoint + DM.4 AI code gen)
 
 ---
 
@@ -50,6 +50,7 @@
 | DM.3 | Route fix — /dream-build bypasses CF Access | Claude Opus 4.6 | ✅ Complete | `claude/code-mode-mcp-integration-yDHLz` |
 | DM.4 | Wire real AI code generation into Dream Build (993 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 | DM.5 | Add POST /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| DM.7 | Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 
 ---
 
