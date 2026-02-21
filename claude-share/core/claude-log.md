@@ -4,6 +4,69 @@
 
 ---
 
+## Session: 2026-02-21 | Dream Machine Build Stage + MCP Integration + Route Fix (Session: session_01QETPeWbuAmbGASZr8mqoYm)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/code-mode-mcp-integration-yDHLz`
+**Status:** Completed (merged to main)
+
+### Summary
+Three-part session: (1) Phase 5.2 MCP integration — generic JSON-RPC 2.0 MCP client + Cloudflare Code Mode MCP wrapper enabling access to 2500+ Cloudflare API endpoints as a tool. (2) Dream Machine Build Stage — full pipeline for Storia to submit approved specs and have moltworker autonomously write code, create PRs, and report status via callbacks. (3) Route fix — moved `/api/dream-build` to `/dream-build` to bypass Cloudflare Access edge interception.
+
+### Changes Made
+
+**Phase 5.2: MCP Integration (commit 8e0b189)**
+- `src/mcp/client.ts` (NEW) — Generic MCP HTTP client (Streamable HTTP transport, JSON-RPC 2.0)
+- `src/mcp/cloudflare.ts` (NEW) — Cloudflare MCP wrapper (`search()` + `execute()`)
+- `src/openrouter/tools-cloudflare.ts` (NEW) — `cloudflare_api` tool implementation
+- `src/openrouter/tools.ts` — Added `cloudflare_api` tool definition + dispatcher
+- `src/durable-objects/task-processor.ts` — `isToolCallParallelSafe()` for action-level granularity
+- `src/telegram/handler.ts` — `/cloudflare` and `/cf` commands, pass CF API token
+- `src/types.ts` — `CLOUDFLARE_API_TOKEN` in MoltbotEnv
+- `src/routes/telegram.ts` — Wire env var
+- 38 new tests (872 total)
+
+**Dream Machine Build Stage (commit 6decd97)**
+- `src/dream/` (NEW directory) — Full dream-build module:
+  - `build-processor.ts` — DreamBuildProcessor Durable Object (job state, alarm-driven execution)
+  - `spec-parser.ts` — Markdown spec → structured requirements/routes/components
+  - `safety.ts` — Budget cap, destructive op detection, branch protection
+  - `callbacks.ts` — Status callback system with retry logic
+  - `auth.ts` — Bearer token auth, constant-time compare, trust level checks
+  - `types.ts` — DreamJobState, DreamBuildJob, ParsedSpec interfaces
+  - `index.ts` — Barrel exports
+- `src/routes/dream.ts` (NEW) — POST endpoint with immediate + queue ingress, GET status
+- `src/index.ts` — Queue consumer, DO binding, route registration
+- `wrangler.jsonc` — DO class, queue producer + consumer bindings
+- `src/types.ts` — STORIA_MOLTWORKER_SECRET, DREAM_BUILD_QUEUE, DREAM_BUILD_PROCESSOR env bindings
+- 63 new tests (935 total)
+
+**Route Fix (commit f868bc3)**
+- `src/routes/dream.ts` — Changed paths from `/api/dream-build` to `/dream-build`
+- `src/index.ts` — Updated route mount point
+
+### Files Modified
+- `src/mcp/client.ts` (new), `src/mcp/cloudflare.ts` (new)
+- `src/openrouter/tools-cloudflare.ts` (new), `src/openrouter/tools.ts`
+- `src/dream/build-processor.ts` (new), `src/dream/spec-parser.ts` (new), `src/dream/safety.ts` (new), `src/dream/callbacks.ts` (new), `src/dream/auth.ts` (new), `src/dream/types.ts` (new), `src/dream/index.ts` (new)
+- `src/routes/dream.ts` (new), `src/routes/index.ts`
+- `src/durable-objects/task-processor.ts`, `src/telegram/handler.ts`, `src/routes/telegram.ts`
+- `src/index.ts`, `src/types.ts`, `wrangler.jsonc`
+- Test files: `src/mcp/client.test.ts`, `src/mcp/cloudflare.test.ts`, `src/openrouter/tools-cloudflare.test.ts`, `src/dream/auth.test.ts`, `src/dream/callbacks.test.ts`, `src/dream/safety.test.ts`, `src/dream/spec-parser.test.ts`
+
+### Tests
+- [x] 935 tests pass (101 new)
+- [x] Typecheck passes
+
+### Notes for Next Session
+- Dream-build pipeline writes TODO stub files, not real code — wiring MCP/OpenRouter into `executeBuild()` for actual code generation is the logical next step
+- `POST /dream-build/:jobId/approve` endpoint needed to resume paused jobs
+- `tokensUsed`/`costEstimate` always 0 — budget enforcement is a no-op
+- `checkTrustLevel()` implemented but not called in the route layer
+- Deployed and verified: wrong token → 401, empty body → 400
+
+---
+
 ## Session: 2026-02-20 | Phase 2.4 — Acontext Sessions Dashboard in Admin UI (Session: session_01SE5WrUuc6LWTmZC8WBXKY4)
 
 **AI:** Claude Opus 4.6 (review & integration) + Codex GPT-5.2 (5 candidate implementations)
