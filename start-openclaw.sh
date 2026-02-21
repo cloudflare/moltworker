@@ -243,13 +243,14 @@ if [ -f "/root/clawd/TOOLS.md" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ 
   cat >> "/root/clawd/TOOLS.md.real" << 'GMAILEOF'
 
 ## Gmail (이메일 - 읽기 전용, 2개 계정)
+- **중요**: 유저가 이메일 확인을 요청하면, 먼저 `exec` tool로 `node /root/clawd/skills/gmail/scripts/sync-inbox.js` 실행하여 최신 동기화 후 읽어라.
 ### 회사 이메일 (astin@hashed.com)
-- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox.md` 파일을 읽어라. 자동 동기화됨.
+- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox.md` 파일을 읽어라.
 - 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID --account work` 실행
 - 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어" --account work` 실행
 - 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24 --account work` 실행
 ### 개인 이메일 (gkswlghks118@gmail.com)
-- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox-personal.md` 파일을 읽어라. 자동 동기화됨.
+- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox-personal.md` 파일을 읽어라.
 - 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID --account personal` 실행
 - 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어" --account personal` 실행
 - 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24 --account personal` 실행
