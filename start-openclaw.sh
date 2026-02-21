@@ -207,6 +207,17 @@ EOF
   echo "Gmail credentials written to /root/.google-gmail.env"
 fi
 
+# Write Gmail personal credentials (gkswlghks118@gmail.com) to a file
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; then
+  cat > /root/.google-gmail-personal.env << EOF
+GOOGLE_GMAIL_CLIENT_ID=$GOOGLE_GMAIL_CLIENT_ID
+GOOGLE_GMAIL_CLIENT_SECRET=$GOOGLE_GMAIL_CLIENT_SECRET
+GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN=$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN
+EOF
+  chmod 600 /root/.google-gmail-personal.env
+  echo "Gmail personal credentials written to /root/.google-gmail-personal.env"
+fi
+
 # Inject Google Calendar instructions into TOOLS.md
 if [ -f "/root/clawd/TOOLS.md" ]; then
   cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
@@ -227,15 +238,22 @@ CALEOF
 fi
 
 # Inject Gmail instructions into TOOLS.md
-if [ -f "/root/clawd/TOOLS.md" ] && [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ]; then
+if [ -f "/root/clawd/TOOLS.md" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; }; then
   cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
   cat >> "/root/clawd/TOOLS.md.real" << 'GMAILEOF'
 
-## Gmail (이메일 - 읽기 전용, astin@hashed.com)
+## Gmail (이메일 - 읽기 전용, 2개 계정)
+### 회사 이메일 (astin@hashed.com)
 - 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox.md` 파일을 읽어라. 자동 동기화됨.
-- 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID` 실행
-- 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어"` 실행
-- 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24` 실행
+- 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID --account work` 실행
+- 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어" --account work` 실행
+- 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24 --account work` 실행
+### 개인 이메일 (gkswlghks118@gmail.com)
+- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox-personal.md` 파일을 읽어라. 자동 동기화됨.
+- 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID --account personal` 실행
+- 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어" --account personal` 실행
+- 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24 --account personal` 실행
+### 공통
 - 주의: 이메일 전송 기능 없음. 읽기만 가능.
 - 이메일 관련 요청에 memory_search 사용하지 마라. 위 방법만 사용.
 GMAILEOF
@@ -315,7 +333,7 @@ config.agents = config.agents || {};
 config.agents.defaults = config.agents.defaults || {};
 config.agents.defaults.workspace = '/root/clawd';
 config.agents.defaults.contextPruning = { mode: 'cache-ttl', ttl: '1h' };
-config.agents.defaults.compaction = { mode: 'aggressive' };
+config.agents.defaults.compaction = { mode: 'safeguard' };
 config.agents.defaults.heartbeat = { every: '30m' };
 config.agents.defaults.maxConcurrent = 4;
 config.agents.defaults.subagents = { maxConcurrent: 4 };
@@ -334,20 +352,6 @@ config.agents.defaults.memorySearch = {
         }
     },
     extraPaths: ['/root/clawd/warm-memory', '/root/clawd/brain-memory']
-};
-
-// Budget & rate limits
-config.budget = { daily: 5, dailyWarn: 4, monthly: 150, monthlyWarn: 120 };
-config.rateLimits = {
-    minCallInterval: 5000,
-    minSearchInterval: 10000,
-    maxSearchesPerBatch: 5,
-    searchBatchCooldown: 120000
-};
-config.context = {
-    bootstrapMaxChars: 10000,
-    bootstrapTotalMaxChars: 75000,
-    compaction: 'aggressive'
 };
 
 // Node browser auto config
@@ -510,6 +514,16 @@ if [ -n "${NODE_DEVICE_ID:-}" ] && [ -n "${NODE_DEVICE_PUBLIC_KEY:-}" ]; then
   echo "[PAIRING] Pre-seeded device pairing for node: ${NODE_DEVICE_ID:0:16}..."
 else
   echo "[PAIRING] NODE_DEVICE_ID or NODE_DEVICE_PUBLIC_KEY not set, skipping pre-seed"
+fi
+
+# ============================================================
+# CUSTOM: openclaw doctor --fix (auto-fix config drift)
+# ============================================================
+DOCTOR_DONE="$CONFIG_DIR/.doctor-done"
+if [ ! -f "$DOCTOR_DONE" ]; then
+  echo "Running openclaw doctor --fix..."
+  timeout 60 openclaw doctor --fix 2>/dev/null || true
+  touch "$DOCTOR_DONE"
 fi
 
 # ============================================================
@@ -715,9 +729,9 @@ fi
         fi
       fi
 
-      # 5. email-summary (daily inbox digest)
+      # 5. email-summary (daily inbox digest — both accounts)
       GMAIL_SCRIPT="/root/clawd/skills/gmail/scripts/gmail.js"
-      if [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] && [ -f "$GMAIL_SCRIPT" ]; then
+      if [ -f "$GMAIL_SCRIPT" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; }; then
         if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "email-summary "; then
           register_cron "EMAIL" \
             --name "email-summary" \
@@ -726,7 +740,7 @@ fi
             --model "$ALLOWED_MODEL" \
             --thinking off \
             $TOKEN_FLAG \
-            --message "Read /root/clawd/warm-memory/inbox.md (recent emails from astin@hashed.com). Summarize important emails: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-$(date +%Y-%m-%d).md. If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary"
+            --message "Read /root/clawd/warm-memory/inbox.md (work: astin@hashed.com) and /root/clawd/warm-memory/inbox-personal.md (personal: gkswlghks118@gmail.com). Summarize important emails from both accounts: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-$(date +%Y-%m-%d).md. If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary"
         fi
       fi
 
@@ -812,12 +826,12 @@ if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
 fi
 
 # ============================================================
-# CUSTOM: Gmail inbox sync (background, every 6h)
+# CUSTOM: Gmail inbox sync (background, every 6h — syncs all available accounts)
 # ============================================================
-if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ]; then
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; }; then
   (
     while true; do
-      echo "[GMAIL-SYNC] Syncing inbox..."
+      echo "[GMAIL-SYNC] Syncing all available inboxes..."
       node /root/clawd/skills/gmail/scripts/sync-inbox.js --hours 24 2>&1 || echo "[GMAIL-SYNC] sync failed"
       sleep 21600  # 6 hours
     done

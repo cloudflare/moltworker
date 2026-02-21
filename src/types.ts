@@ -64,6 +64,7 @@ export interface MoltbotEnv {
   GOOGLE_GMAIL_CLIENT_ID?: string; // Gmail OAuth client ID (Web application type)
   GOOGLE_GMAIL_CLIENT_SECRET?: string; // Gmail OAuth client secret
   GOOGLE_GMAIL_REFRESH_TOKEN?: string; // Gmail read-only refresh token (astin@hashed.com)
+  GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN?: string; // Gmail read-only refresh token (gkswlghks118@gmail.com)
 }
 
 /**

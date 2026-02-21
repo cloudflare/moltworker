@@ -5,21 +5,36 @@
  * Usage: node gmail.js <subcommand> [options]
  * Subcommands: list, read, search
  *
- * READ-ONLY: No send, delete, or modify operations.
+ * Multi-account support:
+ *   --account work     → astin@hashed.com (GOOGLE_GMAIL_REFRESH_TOKEN)
+ *   --account personal → gkswlghks118@gmail.com (GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN)
+ *   Default: tries work first, falls back to personal
  *
- * Requires env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_GMAIL_REFRESH_TOKEN
+ * READ-ONLY: No send, delete, or modify operations.
  */
 
 import { readFileSync } from 'node:fs';
 
 const GMAIL_API = 'https://www.googleapis.com/gmail/v1/users/me';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const CREDS_FILE = '/root/.google-gmail.env';
+
+const ACCOUNTS = {
+  work: {
+    label: 'astin@hashed.com',
+    refreshTokenEnv: 'GOOGLE_GMAIL_REFRESH_TOKEN',
+    credsFile: '/root/.google-gmail.env',
+  },
+  personal: {
+    label: 'gkswlghks118@gmail.com',
+    refreshTokenEnv: 'GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN',
+    credsFile: '/root/.google-gmail-personal.env',
+  },
+};
 
 // Load credentials from file if env vars are missing
-function loadCredsFromFile() {
+function loadCredsFromFile(filePath) {
   try {
-    const content = readFileSync(CREDS_FILE, 'utf-8');
+    const content = readFileSync(filePath, 'utf-8');
     for (const line of content.split('\n')) {
       const idx = line.indexOf('=');
       if (idx > 0) {
@@ -31,26 +46,35 @@ function loadCredsFromFile() {
   } catch {}
 }
 
+// Resolve which account to use
+function resolveAccount(accountName) {
+  if (accountName && ACCOUNTS[accountName]) {
+    return ACCOUNTS[accountName];
+  }
+  // Auto-detect: try work first, then personal
+  for (const key of ['work', 'personal']) {
+    const acct = ACCOUNTS[key];
+    loadCredsFromFile(acct.credsFile);
+    if (process.env[acct.refreshTokenEnv]) return acct;
+  }
+  throw new Error('No Gmail account configured. Set GOOGLE_GMAIL_REFRESH_TOKEN (work) or GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN (personal)');
+}
+
 // ─── Token Management ───────────────────────────────────────────────
 
-async function getAccessToken() {
-  let clientId = process.env.GOOGLE_GMAIL_CLIENT_ID;
-  let clientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET;
-  let refreshToken = process.env.GOOGLE_GMAIL_REFRESH_TOKEN;
+async function getAccessToken(account) {
+  loadCredsFromFile(account.credsFile);
 
-  if (!clientId || !clientSecret || !refreshToken) {
-    loadCredsFromFile();
-    clientId = process.env.GOOGLE_GMAIL_CLIENT_ID;
-    clientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET;
-    refreshToken = process.env.GOOGLE_GMAIL_REFRESH_TOKEN;
-  }
+  const clientId = process.env.GOOGLE_GMAIL_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_GMAIL_CLIENT_SECRET;
+  const refreshToken = process.env[account.refreshTokenEnv];
 
   if (!clientId || !clientSecret || !refreshToken) {
     const missing = [];
     if (!clientId) missing.push('GOOGLE_GMAIL_CLIENT_ID');
     if (!clientSecret) missing.push('GOOGLE_GMAIL_CLIENT_SECRET');
-    if (!refreshToken) missing.push('GOOGLE_GMAIL_REFRESH_TOKEN');
-    throw new Error(`Missing env vars: ${missing.join(', ')}`);
+    if (!refreshToken) missing.push(account.refreshTokenEnv);
+    throw new Error(`Missing env vars for ${account.label}: ${missing.join(', ')}`);
   }
 
   const res = await fetch(TOKEN_URL, {
@@ -66,7 +90,7 @@ async function getAccessToken() {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Token refresh failed (${res.status}): ${text}`);
+    throw new Error(`Token refresh failed for ${account.label} (${res.status}): ${text}`);
   }
 
   const data = await res.json();
@@ -74,14 +98,18 @@ async function getAccessToken() {
 }
 
 let cachedToken = null;
+let cachedAccount = null;
 
-async function getToken() {
-  if (!cachedToken) cachedToken = await getAccessToken();
+async function getToken(account) {
+  if (!cachedToken || cachedAccount !== account) {
+    cachedToken = await getAccessToken(account);
+    cachedAccount = account;
+  }
   return cachedToken;
 }
 
-async function gmailFetch(path) {
-  const token = await getToken();
+async function gmailFetch(path, account) {
+  const token = await getToken(account);
   const url = path.startsWith('http') ? path : `${GMAIL_API}${path}`;
 
   const res = await fetch(url, {
@@ -135,14 +163,9 @@ function extractTextBody(payload) {
   return '';
 }
 
-function formatDate(ms) {
-  const d = new Date(parseInt(ms, 10));
-  return d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-}
-
 // ─── Subcommands ────────────────────────────────────────────────────
 
-async function listMessages(opts) {
+async function listMessages(opts, account) {
   const hours = parseInt(opts.hours || '24', 10);
   const maxResults = parseInt(opts.max || '20', 10);
   const afterEpoch = Math.floor((Date.now() - hours * 3600 * 1000) / 1000);
@@ -153,18 +176,18 @@ async function listMessages(opts) {
     maxResults: String(maxResults),
   });
 
-  const data = await gmailFetch(`/messages?${params}`);
+  const data = await gmailFetch(`/messages?${params}`, account);
   const messages = data.messages || [];
 
   if (messages.length === 0) {
-    console.log(JSON.stringify({ command: 'list', hours, count: 0, messages: [] }, null, 2));
+    console.log(JSON.stringify({ command: 'list', account: account.label, hours, count: 0, messages: [] }, null, 2));
     return;
   }
 
   // Fetch metadata for each message
   const results = [];
   for (const msg of messages) {
-    const detail = await gmailFetch(`/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
+    const detail = await gmailFetch(`/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, account);
     const headers = detail.payload?.headers || [];
     results.push({
       id: detail.id,
@@ -182,6 +205,7 @@ async function listMessages(opts) {
     JSON.stringify(
       {
         command: 'list',
+        account: account.label,
         hours,
         count: results.length,
         messages: results,
@@ -192,10 +216,10 @@ async function listMessages(opts) {
   );
 }
 
-async function readMessage(opts) {
+async function readMessage(opts, account) {
   if (!opts.id) throw new Error('--id is required');
 
-  const detail = await gmailFetch(`/messages/${opts.id}?format=full`);
+  const detail = await gmailFetch(`/messages/${opts.id}?format=full`, account);
   const headers = detail.payload?.headers || [];
   const body = extractTextBody(detail.payload);
 
@@ -203,6 +227,7 @@ async function readMessage(opts) {
     JSON.stringify(
       {
         command: 'read',
+        account: account.label,
         id: detail.id,
         threadId: detail.threadId,
         from: getHeader(headers, 'From'),
@@ -219,7 +244,7 @@ async function readMessage(opts) {
   );
 }
 
-async function searchMessages(opts) {
+async function searchMessages(opts, account) {
   if (!opts.query) throw new Error('--query is required');
   const maxResults = parseInt(opts.max || '10', 10);
 
@@ -228,17 +253,17 @@ async function searchMessages(opts) {
     maxResults: String(maxResults),
   });
 
-  const data = await gmailFetch(`/messages?${params}`);
+  const data = await gmailFetch(`/messages?${params}`, account);
   const messages = data.messages || [];
 
   if (messages.length === 0) {
-    console.log(JSON.stringify({ command: 'search', query: opts.query, count: 0, messages: [] }, null, 2));
+    console.log(JSON.stringify({ command: 'search', account: account.label, query: opts.query, count: 0, messages: [] }, null, 2));
     return;
   }
 
   const results = [];
   for (const msg of messages) {
-    const detail = await gmailFetch(`/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`);
+    const detail = await gmailFetch(`/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`, account);
     const headers = detail.payload?.headers || [];
     results.push({
       id: detail.id,
@@ -254,6 +279,7 @@ async function searchMessages(opts) {
     JSON.stringify(
       {
         command: 'search',
+        account: account.label,
         query: opts.query,
         count: results.length,
         messages: results,
@@ -278,24 +304,30 @@ async function main() {
     }
   }
 
+  const account = resolveAccount(opts.account);
+
   switch (subcommand) {
     case 'list':
-      return await listMessages(opts);
+      return await listMessages(opts, account);
     case 'read':
-      return await readMessage(opts);
+      return await readMessage(opts, account);
     case 'search':
-      return await searchMessages(opts);
+      return await searchMessages(opts, account);
     default:
       console.error(
         'Usage: node gmail.js <list|read|search> [options]\n\n' +
           'Subcommands (READ-ONLY):\n' +
-          '  list [--hours N] [--max N]    List recent messages (default: 24h, max 20)\n' +
-          '  read --id MSG_ID              Read full message body\n' +
-          '  search --query "text" [--max N] Search emails (Gmail query syntax)\n\n' +
+          '  list [--hours N] [--max N] [--account work|personal]  List recent messages\n' +
+          '  read --id MSG_ID [--account work|personal]            Read full message body\n' +
+          '  search --query "text" [--max N] [--account work|personal]  Search emails\n\n' +
+          'Accounts:\n' +
+          '  --account work      astin@hashed.com\n' +
+          '  --account personal  gkswlghks118@gmail.com\n' +
+          '  (default: auto-detect first available)\n\n' +
           'Examples:\n' +
-          '  node gmail.js list --hours 48\n' +
-          '  node gmail.js read --id 18e1a2b3c4d5e6f7\n' +
-          '  node gmail.js search --query "from:someone@example.com subject:meeting"'
+          '  node gmail.js list --hours 48 --account work\n' +
+          '  node gmail.js read --id 18e1a2b3c4d5e6f7 --account personal\n' +
+          '  node gmail.js search --query "from:someone@example.com" --account work'
       );
       process.exit(1);
   }
