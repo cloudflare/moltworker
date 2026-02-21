@@ -3,44 +3,54 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-21 (DM.8 complete — pre-PR code validation step)
+**Last Updated:** 2026-02-21 (Added DM.10-DM.14 from dream-machine-moltworker-brief.md gap analysis)
 
 ---
 
-## Current Task: Phase 5.1 — Multi-Agent Review
+## Current Task: DM.10 — Queue Consumer Worker for Overnight Batch Builds
 
 ### Goal
 
-Add a review step to the Dream Build pipeline where a second AI model reviews the generated code before or after PR creation. This catches logical errors, security issues, and style violations that static checks can't.
+Implement the Cloudflare Queue consumer that picks up deferred `DreamBuildJob` messages and executes them. This enables the core "go to sleep, wake up with a PR" workflow from the Dream Machine spec.
 
 ### Context
 
-- DM.1-DM.8 are complete — full Dream Machine pipeline with AI code generation, validation, budget enforcement, human approval, and trust level enforcement
-- DM.8 added lightweight in-memory validation (bracket balancing, eval/any checks, stub detection)
-- The next level is having a reviewer model analyze the generated code for correctness and security
-- Options: (a) review before PR creation (blocks), (b) review after PR creation (adds as PR comment), (c) both
+- DM.1-DM.8 are complete — full Dream Machine pipeline with AI code generation, validation, budget enforcement, human approval, trust level enforcement
+- The `POST /dream-build` endpoint already enqueues jobs via `DREAM_BUILD_QUEUE.send()` when `queueName` is present
+- But there is **no consumer Worker** to pick up these queued jobs — they go nowhere
+- The brief (`brainstorming/dream-machine-moltworker-brief.md` §3, §6) specifies: consumer Worker picks up at off-peak hours, max 3 retries, exponential backoff, callbacks stream back to Storia via SSE
 
 ### What Needs to Happen
 
-1. **Design review flow** — when does review happen, what model, what's the output format
-2. **Add review step** to `executeBuild()` — call reviewer model on generated files
-3. **Output review** — either block PR or add review comments to PR body
-4. **Tests**: Mock the reviewer model response
+1. **Add queue consumer** in `src/index.ts` (or new file) — implement the `queue()` handler that Cloudflare Workers expects for queue consumers
+2. **Wire to DreamBuildProcessor DO** — consumer receives `DreamBuildJob` from queue, creates/gets DO instance, calls `startJob()`
+3. **Configure retry semantics** — max 3 retries with exponential backoff in `wrangler.jsonc`
+4. **Add queue consumer binding** in `wrangler.jsonc` — `[[queues.consumers]]` section
+5. **Tests**: Mock queue message delivery, retry on failure, dead-letter after 3 failures
 
 ### Files to Modify
 
 | File | What to change |
 |------|---------------|
-| `src/dream/build-processor.ts` | Add review step |
-| New `src/dream/reviewer.ts` | Review prompt builder + response parser |
-| Tests | Review step tests |
+| `src/index.ts` | Add `queue()` export handler for Cloudflare Queue consumer |
+| `wrangler.jsonc` | Add `[[queues.consumers]]` binding with retry config |
+| `src/routes/dream.ts` | Verify queue send path works end-to-end |
+| Tests | Queue consumer tests |
+
+### Reference
+
+- `brainstorming/dream-machine-moltworker-brief.md` §3 (Ingress Modes) and §6 (Cloudflare Worker Endpoint)
+- Cloudflare Queue consumer docs: https://developers.cloudflare.com/queues/configuration/consumer/
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Current | Phase 5.1: Multi-agent review | High | Second AI reviews generated code |
-| Next | DM.9: Security review checkpoint | Medium | Human security review step |
+| Next | DM.12: JWT-signed trust level | Medium | Security gap — trust level currently in plain request body |
+| Next | DM.11: Migrate GitHub API to Code Mode MCP | Low | Reuse Phase 5.2 MCP client, saves tokens |
+| Later | Phase 5.1: Multi-agent review | High | Second AI reviews generated code |
+| Later | DM.13: Shipper-tier deploy to staging | Medium | Opt-in auto-deploy after PR |
+| Later | DM.14: Vex review for risky steps | Low | Chaos gecko secondary review |
 
 ---
 
@@ -58,6 +68,3 @@ Add a review step to the Dream Build pipeline where a second AI model reviews th
 | 2026-02-20 | Phase 5.5: Web search tool (Brave Search API, cache, key plumbing, tests) | Codex (GPT-5.2-Codex) | codex-phase-5-5-web-search-001 |
 | 2026-02-20 | Phase 4.4: Cross-session context continuity (SessionSummary ring buffer) | Claude Opus 4.6 | session_01SE5WrUuc6LWTmZC8WBXKY4 |
 | 2026-02-20 | Phase 4.3: Tool result caching with in-flight dedup | Codex+Claude | session_01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-20 | Phase 4.2: Real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | session_01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-20 | Phase 2.4: Acontext sessions dashboard in admin UI | Codex+Claude | session_01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-20 | Sprint 48h: Phase budget circuit breakers + parallel tools allSettled | Claude Opus 4.6 | session_01AtnWsZSprM6Gjr9vjTm1xp |

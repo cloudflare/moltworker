@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-21 (DM.4 AI code generation + Dream Machine Build stage + Phase 5.2 MCP)
+**Last Updated:** 2026-02-21 (DM.10-DM.14 added from dream-machine-moltworker-brief.md gap analysis)
 
 ---
 
@@ -195,8 +195,14 @@
 | DM.6 | Token/cost tracking in build pipeline | ✅ | Claude | Done as part of DM.4 — estimateCost(), MODEL_COST_RATES, real budget enforcement |
 | DM.7 | Enforce checkTrustLevel() at route layer | ✅ | Claude | Added trustLevel to DreamBuildJob, 403 for observer/planner, 6 tests (1007 total) |
 | DM.8 | Pre-PR code validation step | ✅ | Claude | In-memory validation (brackets, eval, any, stubs, SQL), warnings in PR body, 24 tests (1031 total) |
+| DM.10 | Queue consumer Worker for overnight batch builds | 🔲 | Claude | Consume `dream-build-queue`, off-peak scheduling, max 3 retries — "go to sleep, wake up with PR" |
+| DM.11 | Migrate GitHub API calls to Code Mode MCP | 🔲 | Claude | Replace raw `fetch()` in build-processor with MCP client from Phase 5.2 (~800 tokens) |
+| DM.12 | JWT-signed trust level (replace body field) | 🔲 | Claude | Sign `dreamTrustLevel` claim in JWT, verify via existing CF Access middleware — closes auth gap |
+| DM.13 | Shipper-tier deploy to Cloudflare staging | 🔲 | Claude | Shipper trust level triggers `wrangler deploy --env staging` after PR merge |
+| DM.14 | Vex review integration for risky steps | 🔲 | Claude | Route flagged-risky build steps through Vex (chaos gecko) for secondary review |
 
 > 🧑 HUMAN CHECK DM.9: Review dream-build security (token auth, branch protection, destructive op detection) — ⏳ PENDING
+> **Source:** `brainstorming/dream-machine-moltworker-brief.md` (v1.2) — DM.10-DM.14 derived from gaps between brief and implementation
 
 ---
 
