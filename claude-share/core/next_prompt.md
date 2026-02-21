@@ -3,40 +3,60 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-20 (Phase 5.5 complete — web_search tool added)
+**Last Updated:** 2026-02-21 (Dream Machine Build stage complete — DM.1-DM.3 done)
 
 ---
 
-## Current Task: Phase 4.3 — Tool Result Caching
+## Current Task: DM.4 — Wire Real Code Generation into Dream Build
 
 ### Goal
 
-Cache identical tool call results (same function + arguments) within a task session to avoid redundant API calls. For example, if `get_weather` is called twice with the same lat/lon, return the cached result on the second call.
+Replace the TODO stub files that `executeBuild()` currently generates with actual AI-generated code. Right now the dream-build pipeline creates a branch, writes placeholder files (`// TODO: Implement ...`), and opens a PR — but no real code generation happens. The MCP client (`CloudflareMcpClient`) is already imported in `build-processor.ts` but never called.
 
 ### Context
 
-- Phase 4.2 complete: real tokenizer integrated
-- Phase 2.4 complete: Acontext dashboard in admin UI
-- Tool execution happens in `src/durable-objects/task-processor.ts` and `src/openrouter/tools.ts`
-- 15 tools total (including web_search), 12 are read-only (safe to cache), 3 are mutation tools (should not cache)
-- `PARALLEL_SAFE_TOOLS` whitelist already identifies which tools are read-only
-- This is a Codex-assigned task
+- Dream Machine pipeline is live and deployed (DM.1-DM.3 complete)
+- `POST /dream-build` → DreamBuildProcessor DO → `executeBuild()` → GitHub PR
+- `executeBuild()` calls `buildWorkPlan()` which generates stub files with TODOs
+- `CloudflareMcpClient` is imported but never used in the build flow
+- OpenRouter client is available for AI code generation
+- The spec parser extracts: title, overview, requirements, apiRoutes, dbChanges, uiComponents
+- Budget/cost tracking fields exist (`tokensUsed`, `costEstimate`) but are always 0
+
+### What Needs to Happen
+
+1. **For each WorkItem** in the plan, call OpenRouter (or Cloudflare MCP where appropriate) to generate actual implementation code based on the parsed spec
+2. **Track token usage** — increment `tokensUsed` and `costEstimate` after each AI call
+3. **Use budget checks** — call `checkBudget()` with real values so the budget cap actually works
+4. **Generate meaningful code** — routes should have real Hono handlers, components should have real React JSX, migrations should have real SQL
+5. **Use spec context** — pass the full parsed spec (requirements, related routes, related components) as context to the AI for each file
 
 ### Files to Modify
 
 | File | What to change |
 |------|---------------|
-| `src/durable-objects/task-processor.ts` | Add in-memory cache keyed by tool name + arguments hash |
-| `src/openrouter/tools.ts` | Consider cache-hit path in tool execution |
-| Tests | Add tests for cache hit, cache miss, mutation tool bypass |
+| `src/dream/build-processor.ts` | Wire OpenRouter/MCP calls into `executeBuild()` loop, replace stub content with AI-generated code, track tokens/cost |
+| `src/openrouter/client.ts` | May need a simpler `generateCode()` helper for single-file code generation |
+| `src/dream/types.ts` | May need to add fields for generation config (model, temperature, etc.) |
+| Tests | Add tests for AI code generation path (mock OpenRouter responses) |
+
+### Key Constraints
+
+- Each generated file must be self-contained and syntactically valid
+- Budget must be enforced — stop generating if cost exceeds `job.budget`
+- Use a capable model (e.g., Claude Sonnet 4.5 or GPT-4o) for code generation
+- Keep callback lifecycle: `writing(item.path)` should fire before each file generation
+- Maintain the existing safety gates (destructive op detection, branch protection)
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Current | 4.3: Tool result caching | Medium | Cache identical tool calls (Codex) |
-| Next | 4.4: Cross-session context continuity | Medium | Resume tasks days later (Claude) |
-| Then | Audit Phase 2: P2 guardrails | Medium | Multi-agent review, tool result validation |
+| Current | DM.4: Wire real code generation | High | Replace TODO stubs with AI-generated code |
+| Next | DM.5: Add /dream-build/:jobId/approve endpoint | Medium | Resume paused jobs after human approval |
+| Then | DM.6: Token/cost tracking in build pipeline | Low | Already partially done if DM.4 tracks tokens |
+| Then | DM.7: Enforce checkTrustLevel() | Low | One-line addition to route |
+| Then | Phase 5.1: Multi-agent review | High | Route results through reviewer model |
 
 ---
 
@@ -44,19 +64,11 @@ Cache identical tool call results (same function + arguments) within a task sess
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-21 | DM.1-DM.3: Dream Machine Build stage + auth + route fix (935 tests) | Claude Opus 4.6 | session_01QETPeWbuAmbGASZr8mqoYm |
+| 2026-02-20 | Phase 5.2: MCP integration — Cloudflare Code Mode MCP (38 tests, 872 total) | Claude Opus 4.6 | session_01QETPeWbuAmbGASZr8mqoYm |
 | 2026-02-20 | Phase 5.5: Web search tool (Brave Search API, cache, key plumbing, tests) | Codex (GPT-5.2-Codex) | codex-phase-5-5-web-search-001 |
-| 2026-02-20 | Phase 4.2: Real tokenizer (gpt-tokenizer cl100k_base, heuristic fallback) | Claude Opus 4.6 | session_01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-20 | Sprint 48h: Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | session_01AtnWsZSprM6Gjr9vjTm1xp |
-| 2026-02-20 | Sprint 48h: Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | session_01AtnWsZSprM6Gjr9vjTm1xp |
-| 2026-02-19 | Phase 4.1 Audit: context-budget hardening + edge-case tests | Codex (GPT-5.2-Codex) | codex-phase-4-1-audit-001 |
-| 2026-02-18 | Phase 4.1: Token-budgeted context retrieval | Claude Opus 4.6 | 018M5goT7Vhaymuo8AxXhUCg |
-| 2026-02-18 | Phase 2.5.9: Holiday awareness (Nager.Date) | Claude Opus 4.6 | 01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-18 | Phase 2.3: Acontext observability (REST client + /sessions) | Claude Opus 4.6 | 01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-18 | P1 guardrails + /learnings command (Phase 3.3 + audit P1) | Claude Opus 4.6 | 01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-11 | Phase 3.2: Structured task phases (Plan → Work → Review) | Claude Opus 4.6 | 019jH8X9pJabGwP2untYhuYE |
-| 2026-02-11 | UX fixes: /start redesign, bot menu, briefing location, news links, crypto fix, Acontext key | Claude Opus 4.6 | 018gmCDcuBJqs9ffrrDHHBBd |
-| 2026-02-10 | Fix auto-resume counter + revert GLM free tool flag | Claude Opus 4.6 | 018gmCDcuBJqs9ffrrDHHBBd |
-| 2026-02-10 | 6 bot improvements: GLM tools, 402 handling, cross-task ctx, time cap, tool-intent, parallel prompt | Claude Opus 4.6 | 018gmCDcuBJqs9ffrrDHHBBd |
-| 2026-02-10 | Phase 3.1+3.4: Compound learning loop + prompt injection | Claude Opus 4.6 | 018gmCDcuBJqs9ffrrDHHBBd |
-| 2026-02-09 | Phase 1.5: Structured output support (json: prefix) | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
-| 2026-02-09 | Phase 1.4: Vision + tools unified + /help update | Claude Opus 4.6 | 013wvC2kun5Mbr3J81KUPn99 |
+| 2026-02-20 | Phase 4.4: Cross-session context continuity (SessionSummary ring buffer) | Claude Opus 4.6 | session_01SE5WrUuc6LWTmZC8WBXKY4 |
+| 2026-02-20 | Phase 4.3: Tool result caching with in-flight dedup | Codex+Claude | session_01SE5WrUuc6LWTmZC8WBXKY4 |
+| 2026-02-20 | Phase 4.2: Real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | session_01SE5WrUuc6LWTmZC8WBXKY4 |
+| 2026-02-20 | Phase 2.4: Acontext sessions dashboard in admin UI | Codex+Claude | session_01SE5WrUuc6LWTmZC8WBXKY4 |
+| 2026-02-20 | Sprint 48h: Phase budget circuit breakers + parallel tools allSettled | Claude Opus 4.6 | session_01AtnWsZSprM6Gjr9vjTm1xp |
