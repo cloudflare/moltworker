@@ -99,6 +99,57 @@ export interface DreamJobState {
   updatedAt: number;
 }
 
+// ── Code generation config ───────────────────────────────────────────
+
+/** Per-dollar cost rates for OpenRouter models (input $/1M tokens, output $/1M tokens) */
+export interface ModelCostRate {
+  inputPerMillion: number;
+  outputPerMillion: number;
+}
+
+/** Known cost rates for models used in Dream builds */
+export const MODEL_COST_RATES: Record<string, ModelCostRate> = {
+  'anthropic/claude-sonnet-4.5': { inputPerMillion: 3, outputPerMillion: 15 },
+  'anthropic/claude-opus-4.5': { inputPerMillion: 5, outputPerMillion: 25 },
+  'openai/gpt-4o': { inputPerMillion: 2.5, outputPerMillion: 10 },
+  'openai/gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.6 },
+  'google/gemini-2.5-pro-preview': { inputPerMillion: 1.25, outputPerMillion: 10 },
+};
+
+/** Default model alias for Dream code generation (resolved by getModelId) */
+export const DREAM_CODE_MODEL_ALIAS = 'sonnet';
+
+/** Default model ID for cost estimation */
+export const DREAM_CODE_MODEL_ID = 'anthropic/claude-sonnet-4.5';
+
+/** Estimate cost from token usage */
+export function estimateCost(
+  modelId: string,
+  promptTokens: number,
+  completionTokens: number
+): number {
+  const rate = MODEL_COST_RATES[modelId];
+  if (!rate) return 0;
+  return (promptTokens / 1_000_000) * rate.inputPerMillion
+    + (completionTokens / 1_000_000) * rate.outputPerMillion;
+}
+
+// ── Code fence stripping ─────────────────────────────────────────────
+
+/**
+ * Extract code from an AI response, stripping markdown fences if present.
+ */
+export function extractCodeFromResponse(raw: string): string {
+  const trimmed = raw.trim();
+  // Strip ```language\n...\n``` fences
+  const fenceMatch = trimmed.match(/^```[\w]*\n([\s\S]*?)\n```$/);
+  if (fenceMatch) return fenceMatch[1].trim();
+  // Strip ``` fences without language
+  const simpleFence = trimmed.match(/^```\n?([\s\S]*?)\n?```$/);
+  if (simpleFence) return simpleFence[1].trim();
+  return trimmed;
+}
+
 // ── Safety gate results ─────────────────────────────────────────────
 
 export interface SafetyCheckResult {

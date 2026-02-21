@@ -13,11 +13,13 @@ import type {
   DreamJobState,
   WorkItem,
   WorkPlan,
+  ParsedSpec,
 } from './types';
+import { DREAM_CODE_MODEL_ALIAS, DREAM_CODE_MODEL_ID, estimateCost, extractCodeFromResponse } from './types';
 import { parseSpecMarkdown, generatePRBody, slugify } from './spec-parser';
 import { validateJob, checkBudget, checkDestructiveOps, checkBranchSafety } from './safety';
 import { createCallbackHelper } from './callbacks';
-import { CloudflareMcpClient } from '../mcp/cloudflare';
+import { OpenRouterClient, type ChatCompletionResponse, type ChatMessage } from '../openrouter/client';
 
 // Watchdog alarm interval — re-fires if the job stalls
 const ALARM_INTERVAL_MS = 90_000;
@@ -32,6 +34,7 @@ export interface DreamBuildEnv {
   GITHUB_TOKEN?: string;
   CLOUDFLARE_API_TOKEN?: string;
   STORIA_MOLTWORKER_SECRET?: string;
+  OPENROUTER_API_KEY?: string;
 }
 
 export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
@@ -170,6 +173,15 @@ export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
       return;
     }
 
+    // Create OpenRouter client for AI code generation
+    const openrouter = this.env.OPENROUTER_API_KEY
+      ? new OpenRouterClient(this.env.OPENROUTER_API_KEY, { siteName: 'Moltworker Dream Build' })
+      : null;
+
+    if (!openrouter) {
+      console.log('[DreamBuild] No OPENROUTER_API_KEY — using stub content (no AI generation)');
+    }
+
     // Create branch first
     const branchCreated = await this.createBranch(
       job.repoOwner,
@@ -184,9 +196,9 @@ export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
       return;
     }
 
-    // Write each file
+    // Write each file — generate real code via AI when available
     for (const item of plan.items) {
-      // Budget check before each file
+      // Budget check before each file (now uses real values)
       const budgetCheck = checkBudget(
         this.state!.tokensUsed,
         this.state!.costEstimate,
@@ -198,6 +210,32 @@ export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
       }
 
       await callback.writing(item.path);
+
+      // Generate real code for code files (skip spec reference docs)
+      const isSpecDoc = item.path.startsWith('docs/');
+      if (openrouter && !isSpecDoc) {
+        try {
+          const generated = await this.generateFileCode(item, parsed, openrouter);
+          item.content = generated.content;
+
+          // Track token usage and cost
+          const totalTokens = generated.promptTokens + generated.completionTokens;
+          this.state!.tokensUsed += totalTokens;
+          this.state!.costEstimate += estimateCost(
+            DREAM_CODE_MODEL_ID,
+            generated.promptTokens,
+            generated.completionTokens
+          );
+
+          console.log(
+            `[DreamBuild] Generated ${item.path}: ${totalTokens} tokens, $${this.state!.costEstimate.toFixed(4)} total`
+          );
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[DreamBuild] AI generation failed for ${item.path}: ${msg}`);
+          // Keep stub content and continue — partial code is better than no PR
+        }
+      }
 
       const writeResult = await this.writeFile(
         job.repoOwner,
@@ -248,6 +286,139 @@ export class DreamBuildProcessor extends DurableObject<DreamBuildEnv> {
     // 6. Notify complete
     await callback.prOpen(prUrl);
     await callback.complete(prUrl);
+  }
+
+  /**
+   * Generate real code for a work item using OpenRouter AI.
+   * Returns the generated content and token usage.
+   */
+  private async generateFileCode(
+    item: WorkItem,
+    parsed: ParsedSpec,
+    openrouter: OpenRouterClient
+  ): Promise<{ content: string; promptTokens: number; completionTokens: number }> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: this.buildSystemPrompt(item, parsed) },
+      { role: 'user', content: this.buildUserPrompt(item, parsed) },
+    ];
+
+    const response: ChatCompletionResponse = await openrouter.chatCompletion(
+      DREAM_CODE_MODEL_ALIAS,
+      messages,
+      { maxTokens: 4096, temperature: 0.3 }
+    );
+
+    const rawContent = response.choices[0]?.message?.content || '';
+    const code = extractCodeFromResponse(rawContent);
+
+    const usage = response.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+    return {
+      content: code,
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+    };
+  }
+
+  /**
+   * Build the system prompt for code generation based on file type.
+   */
+  private buildSystemPrompt(item: WorkItem, parsed: ParsedSpec): string {
+    const ext = item.path.split('.').pop()?.toLowerCase() || '';
+
+    let frameworkInstructions = '';
+    if (ext === 'ts' && item.path.startsWith('src/routes/')) {
+      frameworkInstructions = [
+        'You are generating a Hono 4 route handler for a Cloudflare Workers project.',
+        'Use `import { Hono } from "hono";` and export the router.',
+        'Use TypeScript strict mode. No `any` types.',
+        'Return JSON responses using `c.json()`.',
+      ].join('\n');
+    } else if (ext === 'tsx' && item.path.startsWith('src/components/')) {
+      frameworkInstructions = [
+        'You are generating a React 19 functional component with TypeScript.',
+        'Use `export default function ComponentName()` pattern.',
+        'Use modern React (hooks, no class components).',
+        'Include proper TypeScript prop types via an interface.',
+      ].join('\n');
+    } else if (ext === 'sql') {
+      frameworkInstructions = [
+        'You are generating a SQL migration file.',
+        'Use standard SQL compatible with D1 (SQLite dialect).',
+        'Include both the migration and a brief comment explaining the schema change.',
+        'Use IF NOT EXISTS where applicable.',
+      ].join('\n');
+    } else {
+      frameworkInstructions = [
+        'You are generating TypeScript code for a Cloudflare Workers project.',
+        'Use TypeScript strict mode. No `any` types.',
+        'Export all public interfaces and functions.',
+      ].join('\n');
+    }
+
+    return [
+      frameworkInstructions,
+      '',
+      'RULES:',
+      '- Output ONLY the file contents. No explanation, no markdown fences.',
+      '- The code must be syntactically valid and self-contained.',
+      '- Include necessary imports at the top.',
+      '- Do NOT include placeholder TODOs — write real, working code.',
+      `- Target file path: ${item.path}`,
+    ].join('\n');
+  }
+
+  /**
+   * Build the user prompt with spec context for a specific work item.
+   */
+  private buildUserPrompt(item: WorkItem, parsed: ParsedSpec): string {
+    const sections: string[] = [
+      `## Task: ${item.description}`,
+      `File: ${item.path}`,
+      '',
+      `## Project Spec: ${parsed.title}`,
+      '',
+    ];
+
+    if (parsed.overview) {
+      sections.push('### Overview', parsed.overview.slice(0, 1000), '');
+    }
+
+    if (parsed.requirements.length > 0) {
+      sections.push('### Requirements');
+      for (const req of parsed.requirements.slice(0, 15)) {
+        sections.push(`- ${req}`);
+      }
+      sections.push('');
+    }
+
+    if (parsed.apiRoutes.length > 0) {
+      sections.push('### API Routes');
+      for (const route of parsed.apiRoutes.slice(0, 10)) {
+        sections.push(`- ${route}`);
+      }
+      sections.push('');
+    }
+
+    if (parsed.dbChanges.length > 0) {
+      sections.push('### Database Changes');
+      for (const change of parsed.dbChanges.slice(0, 10)) {
+        sections.push(`- ${change}`);
+      }
+      sections.push('');
+    }
+
+    if (parsed.uiComponents.length > 0) {
+      sections.push('### UI Components');
+      for (const comp of parsed.uiComponents.slice(0, 10)) {
+        sections.push(`- ${comp}`);
+      }
+      sections.push('');
+    }
+
+    sections.push(`Generate the complete implementation for: ${item.description}`);
+
+    return sections.join('\n');
   }
 
   /**
