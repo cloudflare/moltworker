@@ -203,7 +203,8 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     }
 
     if (baseUrl && apiKey) {
-        const api = gwProvider === 'anthropic' ? 'anthropic-messages' : 'openai-completions';
+        if (gwProvider === 'google-ai-studio') baseUrl += '/v1beta';
+        const api = gwProvider === 'anthropic' ? 'anthropic-messages' : gwProvider === 'google-ai-studio' ? 'google-generative-ai' : 'openai-completions';
         const providerName = 'cf-ai-gw-' + gwProvider;
 
         config.models = config.models || {};
