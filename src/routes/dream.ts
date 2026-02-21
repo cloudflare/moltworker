@@ -5,29 +5,38 @@
  * GET  /dream-build/:jobId — Check job status
  * POST /dream-build/:jobId/approve — Resume a paused job after human approval
  *
- * Auth: Bearer token (STORIA_MOLTWORKER_SECRET shared secret)
+ * Auth: JWT-signed trust level (DM.12) with shared-secret fallback
  */
 
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
-import type { DreamBuildJob } from '../dream/types';
+import type { DreamBuildJob, DreamTrustLevel } from '../dream/types';
 import type { DreamBuildProcessor } from '../dream/build-processor';
 import { verifyDreamSecret, checkTrustLevel } from '../dream/auth';
+import { verifyDreamJWT } from '../dream/jwt-auth';
 import { validateJob } from '../dream/safety';
 
-// Extend AppEnv to include Dream Machine bindings
+// Extend AppEnv to include Dream Machine bindings + JWT variables
 type DreamEnv = AppEnv & {
   Bindings: AppEnv['Bindings'] & {
     DREAM_BUILD_PROCESSOR?: DurableObjectNamespace<DreamBuildProcessor>;
     STORIA_MOLTWORKER_SECRET?: string;
     DREAM_BUILD_QUEUE?: Queue;
   };
+  Variables: AppEnv['Variables'] & {
+    jwtTrustLevel?: DreamTrustLevel;
+    jwtUserId?: string;
+  };
 };
 
 const dream = new Hono<DreamEnv>();
 
 /**
- * Auth middleware — verify shared secret on all dream routes.
+ * Auth middleware — verify JWT or shared secret on all dream routes.
+ *
+ * DM.12: Tries JWT verification first. If the token is not a JWT
+ * (returns NOT_JWT), falls back to legacy shared-secret check.
+ * JWT carries the trust level claim, eliminating the body-field auth gap.
  */
 dream.use('*', async (c, next) => {
   // Skip auth in dev mode
@@ -35,16 +44,30 @@ dream.use('*', async (c, next) => {
     return next();
   }
 
-  const authResult = verifyDreamSecret(
-    c.req.header('Authorization'),
-    c.env.STORIA_MOLTWORKER_SECRET
-  );
+  const authHeader = c.req.header('Authorization');
+  const secret = c.env.STORIA_MOLTWORKER_SECRET;
 
-  if (!authResult.ok) {
-    return c.json({ error: authResult.error }, 401);
+  // Try JWT verification first (DM.12)
+  const jwtResult = await verifyDreamJWT(authHeader, secret);
+
+  if (jwtResult.ok) {
+    // JWT verified — store trust level for downstream use
+    c.set('jwtTrustLevel', jwtResult.payload!.dreamTrustLevel);
+    c.set('jwtUserId', jwtResult.payload!.sub);
+    return next();
   }
 
-  return next();
+  // If not a JWT, fall back to legacy shared-secret
+  if (jwtResult.error === 'NOT_JWT') {
+    const secretResult = verifyDreamSecret(authHeader, secret);
+    if (!secretResult.ok) {
+      return c.json({ error: secretResult.error }, 401);
+    }
+    return next();
+  }
+
+  // JWT was present but invalid
+  return c.json({ error: jwtResult.error }, 401);
 });
 
 /**
@@ -66,6 +89,13 @@ dream.post('/', async (c) => {
   const validation = validateJob(job);
   if (!validation.allowed) {
     return c.json({ error: validation.reason }, 400);
+  }
+
+  // DM.12: Prefer JWT trust level over body field
+  const jwtTrustLevel = c.get('jwtTrustLevel');
+  if (jwtTrustLevel) {
+    // Override body trust level with cryptographically signed JWT claim
+    job.trustLevel = jwtTrustLevel;
   }
 
   // Enforce trust level — only 'builder' and 'shipper' can start builds
@@ -145,9 +175,15 @@ dream.get('/:jobId', async (c) => {
       status: status.status,
       completedItems: status.completedItems,
       prUrl: status.prUrl,
+      deployUrl: status.deployUrl,
       error: status.error,
       tokensUsed: status.tokensUsed,
       costEstimate: status.costEstimate,
+      vexReview: status.vexReview ? {
+        riskLevel: status.vexReview.riskLevel,
+        recommendation: status.vexReview.recommendation,
+        flaggedCount: status.vexReview.flaggedItems.length,
+      } : undefined,
       startedAt: status.startedAt,
       updatedAt: status.updatedAt,
     });
@@ -160,7 +196,7 @@ dream.get('/:jobId', async (c) => {
 /**
  * POST /dream-build/:jobId/approve — Resume a paused job.
  *
- * When destructive ops are detected, the job is paused.
+ * When destructive ops or Vex review flags are detected, the job is paused.
  * A human reviewer calls this endpoint to approve and resume processing.
  */
 dream.post('/:jobId/approve', async (c) => {

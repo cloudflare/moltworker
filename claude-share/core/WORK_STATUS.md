@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-21 (DM.8 pre-PR validation + DM.7 trust level + DM.5 approve + DM.4 AI code gen)
+**Last Updated:** 2026-02-21 (DM.10-DM.14 all completed — queue consumer, GitHub client, JWT auth, shipper deploy, Vex review)
 
 ---
 
@@ -52,6 +52,11 @@
 | DM.5 | Add POST /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 | DM.7 | Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 | DM.8 | Pre-PR code validation step (1031 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| DM.10 | Queue consumer Worker for overnight batch builds (1084 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| DM.11 | Migrate GitHub API calls to GitHubClient (1084 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| DM.12 | JWT-signed trust level — HMAC-SHA256 (1084 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| DM.13 | Shipper-tier deploy to Cloudflare staging (1084 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| DM.14 | Vex review integration for risky steps (1084 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 
 ---
 
@@ -149,12 +154,11 @@
 
 > Ordered by priority. Next AI session should pick the top item.
 
-1. **DM.4** — Wire real code generation into dream-build `executeBuild()` (currently writes TODO stubs)
-2. **DM.5** — Add `POST /dream-build/:jobId/approve` endpoint (resume paused jobs)
-3. **DM.6** — Token/cost tracking in build pipeline (tokensUsed/costEstimate always 0)
-4. **Phase 5.1** — Multi-agent review for complex tasks
-5. **Phase 3 Audit** — CI gates + policy tests (task router, guardrail regression)
-6. **Phase 5.3** — Acontext Sandbox for code execution
+1. **Phase 5.1** — Multi-agent review for complex tasks
+2. **Phase 3 Audit** — CI gates + policy tests (task router, guardrail regression)
+3. **Phase 5.3** — Acontext Sandbox for code execution
+4. **Phase 5.4** — Acontext Disk for file management
+5. **Phase 6.2** — Telegram response streaming
 
 ---
 
@@ -162,4 +166,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 47 | Phase 0-4 COMPLETE, Phase 5.2+5.5 done, Dream Machine Build stage (DM.1-DM.3) done, ALL 12 bugs fixed, 935 tests total |
+| Sprint 1 (current) | 8 | 52 | Phase 0-4 COMPLETE, Phase 5.2+5.5 done, Dream Machine (DM.1-DM.14) COMPLETE, ALL 12 bugs fixed, 1084 tests total |

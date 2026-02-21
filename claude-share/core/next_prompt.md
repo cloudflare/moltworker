@@ -3,54 +3,39 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-21 (Added DM.10-DM.14 from dream-machine-moltworker-brief.md gap analysis)
+**Last Updated:** 2026-02-21 (DM.10-DM.14 all completed)
 
 ---
 
-## Current Task: DM.10 — Queue Consumer Worker for Overnight Batch Builds
+## Current Task: Phase 5.1 — Multi-Agent Review for Complex Tasks
 
 ### Goal
 
-Implement the Cloudflare Queue consumer that picks up deferred `DreamBuildJob` messages and executes them. This enables the core "go to sleep, wake up with a PR" workflow from the Dream Machine spec.
+Route generated code (from Dream builds or task processor) through a secondary AI reviewer model before finalizing. This adds a safety net where a different model reviews code quality, security, and correctness.
 
 ### Context
 
-- DM.1-DM.8 are complete — full Dream Machine pipeline with AI code generation, validation, budget enforcement, human approval, trust level enforcement
-- The `POST /dream-build` endpoint already enqueues jobs via `DREAM_BUILD_QUEUE.send()` when `queueName` is present
-- But there is **no consumer Worker** to pick up these queued jobs — they go nowhere
-- The brief (`brainstorming/dream-machine-moltworker-brief.md` §3, §6) specifies: consumer Worker picks up at off-peak hours, max 3 retries, exponential backoff, callbacks stream back to Storia via SSE
+- DM.10-DM.14 are now complete — full Dream Machine pipeline with queue consumer, JWT auth, GitHubClient, shipper deploy, and Vex review
+- Vex review (DM.14) handles risky pattern detection but doesn't do full code review
+- Phase 5.1 would add a second model pass (e.g., Claude reviewing GPT output or vice versa) for complex tasks
+- Referenced in GLOBAL_ROADMAP.md as Phase 5.1
 
 ### What Needs to Happen
 
-1. **Add queue consumer** in `src/index.ts` (or new file) — implement the `queue()` handler that Cloudflare Workers expects for queue consumers
-2. **Wire to DreamBuildProcessor DO** — consumer receives `DreamBuildJob` from queue, creates/gets DO instance, calls `startJob()`
-3. **Configure retry semantics** — max 3 retries with exponential backoff in `wrangler.jsonc`
-4. **Add queue consumer binding** in `wrangler.jsonc` — `[[queues.consumers]]` section
-5. **Tests**: Mock queue message delivery, retry on failure, dead-letter after 3 failures
-
-### Files to Modify
-
-| File | What to change |
-|------|---------------|
-| `src/index.ts` | Add `queue()` export handler for Cloudflare Queue consumer |
-| `wrangler.jsonc` | Add `[[queues.consumers]]` binding with retry config |
-| `src/routes/dream.ts` | Verify queue send path works end-to-end |
-| Tests | Queue consumer tests |
-
-### Reference
-
-- `brainstorming/dream-machine-moltworker-brief.md` §3 (Ingress Modes) and §6 (Cloudflare Worker Endpoint)
-- Cloudflare Queue consumer docs: https://developers.cloudflare.com/queues/configuration/consumer/
+1. **Design review protocol** — which tasks trigger review, which model reviews
+2. **Implement reviewer** in `src/openrouter/reviewer.ts` — takes generated code + spec, returns review assessment
+3. **Wire into task processor** — for tasks flagged as complex, add review phase
+4. **Wire into Dream builds** — optionally review generated files before PR creation
+5. **Tests**: Mock reviewer responses, test integration
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | DM.12: JWT-signed trust level | Medium | Security gap — trust level currently in plain request body |
-| Next | DM.11: Migrate GitHub API to Code Mode MCP | Low | Reuse Phase 5.2 MCP client, saves tokens |
-| Later | Phase 5.1: Multi-agent review | High | Second AI reviews generated code |
-| Later | DM.13: Shipper-tier deploy to staging | Medium | Opt-in auto-deploy after PR |
-| Later | DM.14: Vex review for risky steps | Low | Chaos gecko secondary review |
+| Next | Phase 5.3: Acontext Sandbox for code execution | Medium | Replaces roadmap Priority 3.2 |
+| Next | Phase 5.4: Acontext Disk for file management | Medium | Replaces roadmap Priority 3.3 |
+| Later | Phase 6.2: Response streaming (Telegram) | Medium | Progressive message updates |
+| Later | Code Mode MCP Sprint A: storia-agent skill | High | See CODE_MODE_MCP_STORIA_SPEC.md |
 
 ---
 
@@ -58,6 +43,7 @@ Implement the Cloudflare Queue consumer that picks up deferred `DreamBuildJob` m
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-21 | DM.10-DM.14: Queue consumer, GitHubClient, JWT auth, shipper deploy, Vex review (1084 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.8: Pre-PR code validation step (1031 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.7: Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.5: Add /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |

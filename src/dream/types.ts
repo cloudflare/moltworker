@@ -43,6 +43,8 @@ export type BuildStatus =
   | 'writing'
   | 'testing'
   | 'pr_open'
+  | 'deploying'
+  | 'deployed'
   | 'complete'
   | 'failed'
   | 'paused_approval';
@@ -103,6 +105,10 @@ export interface DreamJobState {
   approved?: boolean;
   /** Validation warnings from pre-PR checks (empty = all passed) */
   validationWarnings?: string[];
+  /** Vex review result (populated when risky steps detected) */
+  vexReview?: VexReviewResult;
+  /** Staging deploy URL (populated for shipper-tier jobs) */
+  deployUrl?: string;
 }
 
 // ── Code generation config ───────────────────────────────────────────
@@ -154,6 +160,53 @@ export function extractCodeFromResponse(raw: string): string {
   const simpleFence = trimmed.match(/^```\n?([\s\S]*?)\n?```$/);
   if (simpleFence) return simpleFence[1].trim();
   return trimmed;
+}
+
+// ── Vex review types ─────────────────────────────────────────────────
+
+/** Vex review result for risky build steps */
+export interface VexReviewResult {
+  riskLevel: 'low' | 'medium' | 'high' | 'critical';
+  summary: string;
+  flaggedItems: string[];
+  recommendation: 'proceed' | 'pause' | 'reject';
+  reviewedAt: number;
+}
+
+// ── JWT types ────────────────────────────────────────────────────────
+
+/** JWT payload signed by Storia to authenticate dream build requests */
+export interface DreamJWTPayload {
+  /** Subject — Storia user ID */
+  sub: string;
+  /** Dream Machine trust level */
+  dreamTrustLevel: DreamTrustLevel;
+  /** Job ID this token authorizes */
+  jti: string;
+  /** Expiration timestamp (seconds since epoch) */
+  exp: number;
+  /** Issued-at timestamp (seconds since epoch) */
+  iat: number;
+  /** Issuer — must be 'storia' */
+  iss: string;
+}
+
+// ── Queue consumer types ─────────────────────────────────────────────
+
+/** Result of processing a single queue message */
+export interface QueueProcessResult {
+  jobId: string;
+  ok: boolean;
+  error?: string;
+  durationMs: number;
+}
+
+/** Dead-letter record stored in R2 when a job exhausts retries */
+export interface DeadLetterRecord {
+  job: DreamBuildJob;
+  error: string;
+  attempts: number;
+  failedAt: number;
 }
 
 // ── Safety gate results ─────────────────────────────────────────────

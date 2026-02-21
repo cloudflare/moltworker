@@ -499,41 +499,20 @@ async function scheduled(
 }
 
 /**
- * Queue consumer handler for Dream Machine batch builds.
- * Processes jobs from the dream-build-queue.
+ * Queue consumer handler for Dream Machine batch builds (DM.10).
+ * Processes jobs from the dream-build-queue with enhanced error handling,
+ * dead-letter support, and detailed logging.
  */
 async function queue(
   batch: MessageBatch<unknown>,
   env: MoltbotEnv,
   _ctx: ExecutionContext
 ): Promise<void> {
-  for (const message of batch.messages) {
-    const job = message.body as import('./dream/types').DreamBuildJob;
-    console.log(`[DreamQueue] Processing job ${job.jobId}`);
-
-    if (!env.DREAM_BUILD_PROCESSOR) {
-      console.error('[DreamQueue] DREAM_BUILD_PROCESSOR not configured');
-      message.retry();
-      continue;
-    }
-
-    try {
-      const id = env.DREAM_BUILD_PROCESSOR.idFromName(job.jobId);
-      const stub = env.DREAM_BUILD_PROCESSOR.get(id);
-      const result = await stub.startJob(job);
-
-      if (result.ok) {
-        message.ack();
-        console.log(`[DreamQueue] Job ${job.jobId} started successfully`);
-      } else {
-        console.error(`[DreamQueue] Job ${job.jobId} rejected: ${result.error}`);
-        message.ack(); // Don't retry invalid jobs
-      }
-    } catch (error) {
-      console.error(`[DreamQueue] Failed to process job ${job.jobId}:`, error);
-      message.retry();
-    }
-  }
+  const { processDreamBuildBatch } = await import('./dream/queue-consumer');
+  await processDreamBuildBatch(batch, {
+    DREAM_BUILD_PROCESSOR: env.DREAM_BUILD_PROCESSOR,
+    MOLTBOT_BUCKET: env.MOLTBOT_BUCKET,
+  });
 }
 
 export default {

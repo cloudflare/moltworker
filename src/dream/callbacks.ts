@@ -126,6 +126,24 @@ export function createCallbackHelper(callbackUrl: string, jobId: string, secret?
         message: `Build failed: ${error}`,
       }, secret),
 
+    deploying: (prUrl: string) =>
+      postStatusUpdate(callbackUrl, {
+        jobId,
+        status: 'deploying',
+        prUrl,
+        message: 'Deploying to staging (shipper-tier)',
+      }, secret),
+
+    deployed: (prUrl: string, deployUrl?: string) =>
+      postStatusUpdate(callbackUrl, {
+        jobId,
+        status: 'deployed',
+        prUrl,
+        message: deployUrl
+          ? `Deployed to staging: ${deployUrl}`
+          : 'PR auto-merged (staging deploy pending)',
+      }, secret),
+
     pausedApproval: (reason: string) =>
       postStatusUpdate(callbackUrl, {
         jobId,
