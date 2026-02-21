@@ -43,8 +43,9 @@ RUN mkdir -p /root/.openclaw \
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
-# Copy custom skills
+# Copy custom skills (both live and pristine copy for post-R2-restore overlay)
 COPY skills/ /root/clawd/skills/
+COPY skills/ /root/clawd/.skills-pristine/
 
 # Copy permanent memory seed file (built-in OpenClaw memory, no temporal decay)
 COPY MEMORY.md /root/clawd/MEMORY.md

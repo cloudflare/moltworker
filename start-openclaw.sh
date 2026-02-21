@@ -117,6 +117,13 @@ else
     echo "R2 not configured, starting fresh"
 fi
 
+# Overlay Docker-built skills on top of R2-restored ones
+# R2 may have old versions; pristine copy from Docker image is authoritative
+if [ -d "/root/clawd/.skills-pristine" ]; then
+  cp -rf /root/clawd/.skills-pristine/* "$SKILLS_DIR/"
+  echo "Skills overlay: Docker-built scripts restored over R2 backup"
+fi
+
 # ============================================================
 # GITHUB REPO CLONE (custom: clone clawd-memory repo)
 # ============================================================
@@ -218,6 +225,16 @@ EOF
   echo "Gmail personal credentials written to /root/.google-gmail-personal.env"
 fi
 
+# Write CDP/browser credentials for Cloudflare Browser Rendering
+if [ -n "$CDP_SECRET" ] && [ -n "$WORKER_URL" ]; then
+  cat > /root/.cdp-browser.env << EOF
+CDP_SECRET=$CDP_SECRET
+WORKER_URL=$WORKER_URL
+EOF
+  chmod 600 /root/.cdp-browser.env
+  echo "CDP browser credentials written to /root/.cdp-browser.env"
+fi
+
 # Inject Google Calendar instructions into TOOLS.md
 if [ -f "/root/clawd/TOOLS.md" ]; then
   cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
@@ -260,6 +277,20 @@ if [ -f "/root/clawd/TOOLS.md" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ 
 GMAILEOF
   mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
   echo "Gmail instructions appended to TOOLS.md"
+fi
+
+# Inject Browser instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ] && [ -n "$CDP_SECRET" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'BROWSEREOF'
+
+## Browser (Cloudflare Browser Rendering - 헤드리스 Chrome)
+- 웹페이지 읽기 (JS 렌더링 포함): `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/read-page.js "URL" --max-chars 5000` 실행
+- 스크린샷 찍기: `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js "URL" /tmp/screenshot.png` 실행
+- JS 렌더링이 필요한 SPA 사이트도 읽을 수 있음. 일반 curl로 안 될 때 사용.
+BROWSEREOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Browser instructions appended to TOOLS.md"
 fi
 
 # ============================================================
