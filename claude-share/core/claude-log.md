@@ -4,6 +4,26 @@
 
 ---
 
+## Session: 2026-02-21 | DM.8 — Pre-PR Code Validation Step (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-Wh6Cx`
+**Task:** Add lightweight in-memory validation for generated code before PR creation
+
+### Changes
+- **New:** `src/dream/validation.ts` — `validateFile()`, `validateGeneratedFiles()`, `formatValidationWarnings()`; bracket balancer aware of strings/comments; detects eval(), `any` types, stub-only files, SQL issues
+- **New:** `src/dream/validation.test.ts` — 24 tests covering TS, TSX, SQL, docs, edge cases
+- **Modified:** `src/dream/types.ts` — added `validationWarnings?: string[]` to `DreamJobState`
+- **Modified:** `src/dream/build-processor.ts` — wired validation into step 5 of `executeBuild()`, warnings appended to PR body via `formatValidationWarnings()`
+
+### Design Decision
+Chose in-memory validation over Cloudflare sandbox (`tsc`) or GitHub Actions trigger. Workers DO environment can't run Node.js toolchain, and GitHub Actions polling adds latency. Lightweight checks catch the worst issues (broken brackets, forbidden patterns) immediately. Warnings don't block PR creation — they inform reviewers.
+
+### Test Results
+- 1031 tests passing (24 new), typecheck clean
+
+---
+
 ## Session: 2026-02-21 | DM.7 — Enforce checkTrustLevel() at Route Layer (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
 
 **AI:** Claude Opus 4.6

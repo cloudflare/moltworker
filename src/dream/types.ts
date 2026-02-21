@@ -101,6 +101,8 @@ export interface DreamJobState {
   updatedAt: number;
   /** Set to true when a human approves a paused job — skips destructive ops check on re-run */
   approved?: boolean;
+  /** Validation warnings from pre-PR checks (empty = all passed) */
+  validationWarnings?: string[];
 }
 
 // ── Code generation config ───────────────────────────────────────────

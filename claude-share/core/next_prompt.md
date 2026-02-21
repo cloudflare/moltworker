@@ -3,43 +3,44 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-21 (DM.7 complete — trust level enforcement at route layer)
+**Last Updated:** 2026-02-21 (DM.8 complete — pre-PR code validation step)
 
 ---
 
-## Current Task: DM.8 — CI Trigger / Test Execution Before PR
+## Current Task: Phase 5.1 — Multi-Agent Review
 
 ### Goal
 
-Make the Dream Build pipeline actually run tests before creating a PR. Currently, the `testing` callback fires (`callback.testing()`) but no tests are executed — it's a no-op placeholder. Wire up a real test/lint step using Cloudflare sandbox or a lightweight CI mechanism.
+Add a review step to the Dream Build pipeline where a second AI model reviews the generated code before or after PR creation. This catches logical errors, security issues, and style violations that static checks can't.
 
 ### Context
 
-- DM.1-DM.7 are complete — full Dream Machine pipeline with AI code generation, budget enforcement, human approval, and trust level enforcement
-- In `executeBuild()` at step 5, `callback.testing()` fires but no actual validation runs
-- The generated code is committed and a PR is created without any syntax or lint checking
-- Options: (a) use Cloudflare sandbox to run `tsc --noEmit` on generated files, (b) call GitHub Actions API to trigger a workflow, (c) validate syntax locally via lightweight checks
+- DM.1-DM.8 are complete — full Dream Machine pipeline with AI code generation, validation, budget enforcement, human approval, and trust level enforcement
+- DM.8 added lightweight in-memory validation (bracket balancing, eval/any checks, stub detection)
+- The next level is having a reviewer model analyze the generated code for correctness and security
+- Options: (a) review before PR creation (blocks), (b) review after PR creation (adds as PR comment), (c) both
 
 ### What Needs to Happen
 
-1. **Choose approach** — sandbox-based TypeScript check vs GitHub Actions trigger
-2. **Add validation step** in `executeBuild()` between file writes and PR creation
-3. **Handle validation failures** — fail the job or add warnings to the PR body
-4. **Tests**: Mock the validation step
+1. **Design review flow** — when does review happen, what model, what's the output format
+2. **Add review step** to `executeBuild()` — call reviewer model on generated files
+3. **Output review** — either block PR or add review comments to PR body
+4. **Tests**: Mock the reviewer model response
 
 ### Files to Modify
 
 | File | What to change |
 |------|---------------|
-| `src/dream/build-processor.ts` | Add validation step between writing and PR creation |
-| Tests | Validation step tests |
+| `src/dream/build-processor.ts` | Add review step |
+| New `src/dream/reviewer.ts` | Review prompt builder + response parser |
+| Tests | Review step tests |
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Current | DM.8: CI trigger / test execution before PR | Medium | Run validation before creating PR |
-| Next | Phase 5.1: Multi-agent review | High | Route results through reviewer model |
+| Current | Phase 5.1: Multi-agent review | High | Second AI reviews generated code |
+| Next | DM.9: Security review checkpoint | Medium | Human security review step |
 
 ---
 
@@ -47,6 +48,7 @@ Make the Dream Build pipeline actually run tests before creating a PR. Currently
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-21 | DM.8: Pre-PR code validation step (1031 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.7: Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.5: Add /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.4: Wire real AI code generation into Dream Build (993 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
