@@ -24,9 +24,9 @@ import { Hono } from 'hono';
 import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 
 import type { AppEnv, MoltbotEnv } from './types';
-import { MOLTBOT_PORT } from './config';
+import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess } from './gateway';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, cleanupExitedProcesses, getLastGatewayStartTime } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
@@ -81,10 +81,12 @@ function validateRequiredEnv(env: MoltbotEnv): string[] {
   const hasLegacyGateway = !!(env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL);
   const hasAnthropicKey = !!env.ANTHROPIC_API_KEY;
   const hasOpenAIKey = !!env.OPENAI_API_KEY;
+  const hasClaudeToken = !!env.CLAUDE_ACCESS_TOKEN;
+  const hasCopilotToken = !!env.GITHUB_COPILOT_TOKEN;
 
-  if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey) {
+  if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey && !hasClaudeToken && !hasCopilotToken) {
     missing.push(
-      'ANTHROPIC_API_KEY, OPENAI_API_KEY, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
+      'ANTHROPIC_API_KEY, OPENAI_API_KEY, CLAUDE_ACCESS_TOKEN, GITHUB_COPILOT_TOKEN, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
     );
   }
 
@@ -121,7 +123,7 @@ const app = new Hono<AppEnv>();
 // MIDDLEWARE: Applied to ALL routes
 // =============================================================================
 
-// Middleware: Log every request
+// Middleware: Log every request (compact)
 app.use('*', async (c, next) => {
   const url = new URL(c.req.url);
   const redactedSearch = redactSensitiveParams(url);
@@ -196,7 +198,14 @@ app.use('*', async (c, next) => {
 });
 
 // Middleware: Cloudflare Access authentication for protected routes
+// Bypass CF Access for WebSocket connections with a valid gateway token (for openclaw node)
 app.use('*', async (c, next) => {
+  // Skip CF Access for WebSocket upgrades — the container gateway handles its own auth
+  const isWebSocket = c.req.header('Upgrade')?.toLowerCase() === 'websocket';
+  if (isWebSocket) {
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
@@ -255,28 +264,32 @@ app.all('*', async (c) => {
     return c.html(loadingPageHtml);
   }
 
-  // Ensure moltbot is running (this will wait for startup)
-  try {
-    await ensureMoltbotGateway(sandbox, c.env);
-  } catch (error) {
-    console.error('[PROXY] Failed to start Moltbot:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  // Ensure moltbot is running
+  // For WebSocket requests: skip the blocking waitForPort if gateway process is already running
+  // (waitForPort can block for up to 180s watching for a port transition that already happened,
+  // causing the Workers runtime to cancel the request)
+  if (isWebSocketRequest && isGatewayReady) {
+    console.log('[WS] Gateway already running, skipping ensureMoltbotGateway');
+  } else {
+    try {
+      await ensureMoltbotGateway(sandbox, c.env);
+    } catch (error) {
+      console.error('[PROXY] Failed to start Moltbot:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-    let hint = 'Check worker logs with: wrangler tail';
-    if (!c.env.ANTHROPIC_API_KEY) {
-      hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
-    } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
-      hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
-    }
+      let hint = 'Check worker logs with: wrangler tail';
+      if (!c.env.ANTHROPIC_API_KEY) {
+        hint = 'ANTHROPIC_API_KEY is not set. Run: wrangler secret put ANTHROPIC_API_KEY';
+      } else if (errorMessage.includes('heap out of memory') || errorMessage.includes('OOM')) {
+        hint = 'Gateway ran out of memory. Try again or check for memory leaks.';
+      }
 
-    return c.json(
-      {
+      return c.json({
         error: 'Moltbot gateway failed to start',
         details: errorMessage,
         hint,
-      },
-      503,
-    );
+      }, 503);
+    }
   }
 
   // Proxy to Moltbot with WebSocket message interception
@@ -444,6 +457,77 @@ app.all('*', async (c) => {
   });
 });
 
+/**
+ * Scheduled handler for cron triggers.
+ * Runs health check and syncs moltbot config/state to R2.
+ */
+async function scheduled(
+  _event: ScheduledEvent,
+  env: MoltbotEnv,
+  _ctx: ExecutionContext
+): Promise<void> {
+  const options = buildSandboxOptions(env);
+  const sandbox = getSandbox(env.Sandbox, 'moltbot', options);
+
+  // Clean up zombie processes from previous cron runs
+  const cleaned = await cleanupExitedProcesses(sandbox);
+  if (cleaned > 0) {
+    console.log(`[cron] Cleaned up ${cleaned} exited processes`);
+  }
+
+  // Health check: ensure the gateway is running and responding
+  console.log('[cron] Running health check...');
+  let gatewayHealthy = false;
+  try {
+    const process = await findExistingMoltbotProcess(sandbox);
+    if (!process) {
+      console.log('[cron] Gateway not running, starting it...');
+      await ensureMoltbotGateway(sandbox, env);
+      console.log('[cron] Gateway started successfully');
+      gatewayHealthy = true;
+    } else {
+      console.log('[cron] Gateway process found:', process.id, 'status:', process.status);
+
+      // Grace period: don't kill a gateway that was recently started (still initializing)
+      const timeSinceStart = Date.now() - getLastGatewayStartTime();
+      if (process.status === 'starting' || timeSinceStart < STARTUP_TIMEOUT_MS) {
+        console.log(`[cron] Gateway recently started (${Math.round(timeSinceStart / 1000)}s ago) or still starting, skipping health check`);
+        // Don't mark as healthy yet -- it's still booting
+      } else {
+        // Try to ensure it's actually responding (use 30s timeout instead of 10s)
+        try {
+          await process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: 30000 });
+          console.log('[cron] Gateway is healthy and responding');
+          gatewayHealthy = true;
+        } catch (e) {
+          console.log('[cron] Gateway not responding after 30s, restarting...');
+          try {
+            await process.kill();
+          } catch (killError) {
+            console.log('[cron] Could not kill process:', killError);
+          }
+          await ensureMoltbotGateway(sandbox, env);
+          console.log('[cron] Gateway restarted successfully');
+          gatewayHealthy = true;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[cron] Health check failed:', e);
+  }
+
+  // Backup sync to R2 (rclone handles continuous sync in container, this is a fallback)
+  console.log('[cron] Starting backup sync to R2...');
+  const result = await syncToR2(sandbox, env);
+
+  if (result.success) {
+    console.log('[cron] Backup sync completed successfully at', result.lastSync);
+  } else {
+    console.error('[cron] Backup sync failed:', result.error, result.details || '');
+  }
+}
+
 export default {
   fetch: app.fetch,
+  scheduled,
 };

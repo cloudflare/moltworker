@@ -8,6 +8,7 @@ export interface SyncResult {
   lastSync?: string;
   error?: string;
   details?: string;
+  method?: 's3fs' | 'r2-binding';
 }
 
 const RCLONE_FLAGS = '--transfers=16 --fast-list --s3-no-check-bucket';

@@ -14,9 +14,10 @@ describe('syncToR2', () => {
   });
 
   describe('configuration checks', () => {
-    it('returns error when R2 is not configured', async () => {
+    it('returns error when R2 is not configured and no bucket binding', async () => {
       const { sandbox } = createMockSandbox();
-      const env = createMockEnv();
+      // No R2 credentials AND no bucket binding
+      const env = createMockEnv({ MOLTBOT_BUCKET: undefined as any });
 
       const result = await syncToR2(sandbox, env);
 
