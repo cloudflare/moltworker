@@ -61,6 +61,9 @@ export interface MoltbotEnv {
   NODE_DEVICE_DISPLAY_NAME?: string; // Display name for the node (default: "Node Host")
   GITHUB_COPILOT_TOKEN?: string; // GitHub Copilot OAuth token (ghu_...) for OpenClaw model auth
   GOOGLE_AI_API_KEY?: string; // Google AI API key for embeddings (memory_search)
+  GOOGLE_GMAIL_CLIENT_ID?: string; // Gmail OAuth client ID (Web application type)
+  GOOGLE_GMAIL_CLIENT_SECRET?: string; // Gmail OAuth client secret
+  GOOGLE_GMAIL_REFRESH_TOKEN?: string; // Gmail read-only refresh token (astin@hashed.com)
 }
 
 /**

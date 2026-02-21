@@ -41,6 +41,9 @@ if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
 fi
 
 mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
+
+echo "OpenClaw version: $(openclaw --version 2>/dev/null || echo 'unknown')"
 
 # ============================================================
 # RCLONE SETUP (from upstream)
@@ -192,6 +195,18 @@ EOF
   echo "Google Calendar credentials written to /root/.google-calendar.env"
 fi
 
+# Write Gmail credentials to a file so any process can access them
+# Gmail uses a separate OAuth client (Web application type) from Calendar
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ]; then
+  cat > /root/.google-gmail.env << EOF
+GOOGLE_GMAIL_CLIENT_ID=$GOOGLE_GMAIL_CLIENT_ID
+GOOGLE_GMAIL_CLIENT_SECRET=$GOOGLE_GMAIL_CLIENT_SECRET
+GOOGLE_GMAIL_REFRESH_TOKEN=$GOOGLE_GMAIL_REFRESH_TOKEN
+EOF
+  chmod 600 /root/.google-gmail.env
+  echo "Gmail credentials written to /root/.google-gmail.env"
+fi
+
 # Inject Google Calendar instructions into TOOLS.md
 if [ -f "/root/clawd/TOOLS.md" ]; then
   cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
@@ -209,6 +224,23 @@ if [ -f "/root/clawd/TOOLS.md" ]; then
 CALEOF
   mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
   echo "Calendar instructions appended to TOOLS.md"
+fi
+
+# Inject Gmail instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ] && [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'GMAILEOF'
+
+## Gmail (이메일 - 읽기 전용, astin@hashed.com)
+- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox.md` 파일을 읽어라. 자동 동기화됨.
+- 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID` 실행
+- 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어"` 실행
+- 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24` 실행
+- 주의: 이메일 전송 기능 없음. 읽기만 가능.
+- 이메일 관련 요청에 memory_search 사용하지 마라. 위 방법만 사용.
+GMAILEOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Gmail instructions appended to TOOLS.md"
 fi
 
 # ============================================================
@@ -283,10 +315,40 @@ config.agents = config.agents || {};
 config.agents.defaults = config.agents.defaults || {};
 config.agents.defaults.workspace = '/root/clawd';
 config.agents.defaults.contextPruning = { mode: 'cache-ttl', ttl: '1h' };
-config.agents.defaults.compaction = { mode: 'safeguard' };
+config.agents.defaults.compaction = { mode: 'aggressive' };
 config.agents.defaults.heartbeat = { every: '30m' };
 config.agents.defaults.maxConcurrent = 4;
 config.agents.defaults.subagents = { maxConcurrent: 4 };
+
+// Memory search: hybrid BM25+vector with temporal decay and MMR
+config.agents.defaults.memorySearch = {
+    provider: 'gemini',
+    model: 'text-embedding-004',
+    query: {
+        hybrid: {
+            enabled: true,
+            vectorWeight: 0.7,
+            textWeight: 0.3,
+            mmr: { enabled: true, lambda: 0.7 },
+            temporalDecay: { enabled: true, halfLifeDays: 30 }
+        }
+    },
+    extraPaths: ['/root/clawd/warm-memory', '/root/clawd/brain-memory']
+};
+
+// Budget & rate limits
+config.budget = { daily: 5, dailyWarn: 4, monthly: 150, monthlyWarn: 120 };
+config.rateLimits = {
+    minCallInterval: 5000,
+    minSearchInterval: 10000,
+    maxSearchesPerBatch: 5,
+    searchBatchCooldown: 120000
+};
+config.context = {
+    bootstrapMaxChars: 10000,
+    bootstrapTotalMaxChars: 75000,
+    compaction: 'aggressive'
+};
 
 // Node browser auto config
 if (process.env.NODE_DEVICE_ID) {
@@ -389,6 +451,28 @@ if [ -n "$TELEGRAM_OWNER_ID" ]; then
 EOFALLOW
   echo "Telegram allowlist set for owner ID: $TELEGRAM_OWNER_ID"
 fi
+
+# ============================================================
+# SECURITY: exec-approvals.json (command execution allowlist)
+# ============================================================
+cat > "$CONFIG_DIR/exec-approvals.json" << 'EOFEXEC'
+{
+  "mode": "allowlist",
+  "askMode": "on-miss",
+  "allowlist": [
+    "git status", "git diff", "git log", "git pull", "git push",
+    "ls", "cat", "head", "tail", "wc",
+    "node", "npm", "npx",
+    "curl", "wget",
+    "date", "whoami", "pwd", "env",
+    "openclaw cron list", "openclaw cron add",
+    "openclaw models", "openclaw doctor"
+  ]
+}
+EOFEXEC
+chmod 600 "$CONFIG_DIR/exec-approvals.json"
+chmod 600 "$CONFIG_DIR/openclaw.json"
+echo "Security: exec-approvals.json created, file permissions set"
 
 # ============================================================
 # CUSTOM: Pre-seed device pairing (workaround for openclaw#4833)
@@ -631,6 +715,21 @@ fi
         fi
       fi
 
+      # 5. email-summary (daily inbox digest)
+      GMAIL_SCRIPT="/root/clawd/skills/gmail/scripts/gmail.js"
+      if [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] && [ -f "$GMAIL_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "email-summary "; then
+          register_cron "EMAIL" \
+            --name "email-summary" \
+            --every "24h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Read /root/clawd/warm-memory/inbox.md (recent emails from astin@hashed.com). Summarize important emails: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-$(date +%Y-%m-%d).md. If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary"
+        fi
+      fi
+
       echo "[CRON] Cron restoration complete"
       break
     fi
@@ -710,6 +809,20 @@ if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
     done
   ) &
   echo "[CALENDAR-SYNC] Background sync started (every 6h)"
+fi
+
+# ============================================================
+# CUSTOM: Gmail inbox sync (background, every 6h)
+# ============================================================
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ]; then
+  (
+    while true; do
+      echo "[GMAIL-SYNC] Syncing inbox..."
+      node /root/clawd/skills/gmail/scripts/sync-inbox.js --hours 24 2>&1 || echo "[GMAIL-SYNC] sync failed"
+      sleep 21600  # 6 hours
+    done
+  ) &
+  echo "[GMAIL-SYNC] Background sync started (every 6h)"
 fi
 
 # ============================================================

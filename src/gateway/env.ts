@@ -87,6 +87,11 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   // Google AI API key for embeddings (memory_search)
   if (env.GOOGLE_AI_API_KEY) envVars.GOOGLE_AI_API_KEY = env.GOOGLE_AI_API_KEY;
 
+  // Gmail read-only credentials (separate OAuth client from Calendar)
+  if (env.GOOGLE_GMAIL_CLIENT_ID) envVars.GOOGLE_GMAIL_CLIENT_ID = env.GOOGLE_GMAIL_CLIENT_ID;
+  if (env.GOOGLE_GMAIL_CLIENT_SECRET) envVars.GOOGLE_GMAIL_CLIENT_SECRET = env.GOOGLE_GMAIL_CLIENT_SECRET;
+  if (env.GOOGLE_GMAIL_REFRESH_TOKEN) envVars.GOOGLE_GMAIL_REFRESH_TOKEN = env.GOOGLE_GMAIL_REFRESH_TOKEN;
+
   // R2 persistence credentials (used by rclone in start-openclaw.sh)
   if (env.R2_ACCESS_KEY_ID) envVars.R2_ACCESS_KEY_ID = env.R2_ACCESS_KEY_ID;
   if (env.R2_SECRET_ACCESS_KEY) envVars.R2_SECRET_ACCESS_KEY = env.R2_SECRET_ACCESS_KEY;

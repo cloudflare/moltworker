@@ -46,6 +46,9 @@ RUN chmod +x /usr/local/bin/start-openclaw.sh
 # Copy custom skills
 COPY skills/ /root/clawd/skills/
 
+# Copy permanent memory seed file (built-in OpenClaw memory, no temporal decay)
+COPY MEMORY.md /root/clawd/MEMORY.md
+
 # Copy agent communication scripts
 COPY scripts/ /root/clawd/moltworker/scripts/
 COPY TOOLS.md /root/clawd/moltworker/TOOLS.md
