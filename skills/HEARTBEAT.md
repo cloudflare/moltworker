@@ -3,7 +3,7 @@
 매 30분마다 아래 항목만 빠르게 체크. 토큰 절약 필수.
 
 ## 1. 시스템 헬스
-- `openclaw cron list` → 크론 5개 이상 등록 확인. 빠져있으면 로그 남기고 형에게 알림.
+- 크론 체크: `TOKEN=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('/root/.openclaw/identity/device-auth.json','utf8')).tokens.operator.token)}catch(e){}") && openclaw cron list --token "$TOKEN"` → 크론 5개 이상 등록 확인. 빠져있으면 로그 남기고 형에게 알림.
 - `/root/clawd/.git` 존재 확인. 없으면 `bash /root/clawd/clawd-memory/scripts/auto-restore.sh`
 
 ## 2. HOT-MEMORY 정리
