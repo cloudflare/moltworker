@@ -478,6 +478,18 @@ chmod 600 "$CONFIG_DIR/exec-approvals.json"
 chmod 600 "$CONFIG_DIR/openclaw.json"
 echo "Security: exec-approvals.json created, file permissions set"
 
+# Protect critical bootstrap files from agent self-modification
+# Skills dir files take priority — rm symlinks first (cp follows symlinks)
+for f in SOUL.md USER.md HEARTBEAT.md; do
+  if [ -f "/root/clawd/skills/$f" ]; then
+    rm -f "/root/clawd/$f"
+    cp "/root/clawd/skills/$f" "/root/clawd/$f"
+    chmod 444 "/root/clawd/$f"
+    chmod 444 "/root/clawd/skills/$f"
+  fi
+done
+echo "Security: critical bootstrap files protected (chmod 444)"
+
 # ============================================================
 # CUSTOM: Pre-seed device pairing (workaround for openclaw#4833)
 # ============================================================
