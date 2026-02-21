@@ -14,6 +14,7 @@ import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '..
 import { createAcontextClient, toOpenAIMessages } from '../acontext/client';
 import { estimateTokens, compressContextBudgeted } from './context-budget';
 import { checkPhaseBudget, PhaseBudgetExceededError } from './phase-budget';
+import { validateToolResult, createToolErrorTracker, trackToolError, generateCompletionWarning, adjustConfidence, type ToolErrorTracker } from '../guardrails/tool-validator';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -843,6 +844,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     let consecutiveNoToolIterations = 0;
     // Same-tool loop detection: track recent tool call signatures (name+args)
     const recentToolSignatures: string[] = [];
+    // P2 guardrails: track tool errors for "No Fake Success" enforcement
+    const toolErrorTracker = createToolErrorTracker();
 
     let conversationMessages: ChatMessage[] = [...request.messages];
     const maxIterations = 100; // Very high limit for complex tasks
@@ -1395,7 +1398,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             console.log(`[TaskProcessor] ${toolResults.length} tools executed sequentially in ${Date.now() - parallelStart}ms`);
           }
 
-          // Add all tool results to conversation (preserving order, with truncation)
+          // Add all tool results to conversation (preserving order, with truncation + validation)
           for (const { toolName, toolResult } of toolResults) {
             const truncatedContent = this.truncateToolResult(toolResult.content, toolName);
             conversationMessages.push({
@@ -1403,6 +1406,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               content: truncatedContent,
               tool_call_id: toolResult.tool_call_id,
             });
+
+            // P2 guardrails: validate and track tool errors
+            const toolCall = choice.message.tool_calls!.find(tc => tc.id === toolResult.tool_call_id);
+            const validation = validateToolResult(toolName, toolResult.content);
+            if (validation.isError) {
+              trackToolError(toolErrorTracker, toolName, validation, task.iterations, toolCall?.function.arguments || '');
+              console.log(`[TaskProcessor] Tool error tracked: ${toolName} (${validation.errorType}, ${validation.severity})`);
+            }
           }
 
           // Same-tool loop detection: check if model is calling identical tools repeatedly
@@ -1626,6 +1637,43 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           content = content.replace(/<tool_call>\s*\{[\s\S]*?(?:\}\s*<\/tool_call>|\}[\s\S]*$)/g, '').trim();
           task.result = content || 'No response generated.';
         }
+
+        // P2 guardrails: append "No Fake Success" warning if mutation tools failed
+        const completionWarning = generateCompletionWarning(toolErrorTracker);
+        if (completionWarning && task.result) {
+          task.result += completionWarning;
+        }
+
+        // Log tool error stats for observability
+        if (toolErrorTracker.totalErrors > 0) {
+          console.log(`[TaskProcessor] P2 guardrails: ${toolErrorTracker.totalErrors} tool errors (${toolErrorTracker.mutationErrors} mutation) across ${task.iterations} iterations`);
+        }
+
+        // Append system confidence label for coding tasks if the model didn't include one.
+        // Enhanced with P2 guardrails: mutation tool failures downgrade confidence.
+        if (taskCategory === 'coding' && task.result && !task.result.includes('Confidence:')) {
+          const hasToolEvidence = task.toolsUsed.length >= 2;
+          const hasGitActions = task.toolsUsed.some(t => t.startsWith('github_'));
+          const hadErrors = conversationMessages.some(m =>
+            m.role === 'tool' && typeof m.content === 'string' && /\b(error|failed|404|403|422|500)\b/i.test(m.content)
+          );
+          let baseConfidence: 'High' | 'Medium' | 'Low' = hasToolEvidence && !hadErrors ? 'High'
+            : hasToolEvidence && hadErrors ? 'Medium'
+            : 'Low';
+          let reason = !hasToolEvidence ? 'few tool verifications'
+            : hadErrors ? 'some tool errors occurred'
+            : hasGitActions ? 'tool-verified with GitHub operations' : 'tool-verified';
+
+          // P2: adjust confidence based on structured tool error tracking
+          const adjusted = adjustConfidence(baseConfidence, toolErrorTracker);
+          if (adjusted.reason) {
+            baseConfidence = adjusted.confidence;
+            reason = adjusted.reason;
+          }
+
+          task.result += `\n\n📊 Confidence: ${baseConfidence} (${reason})`;
+        }
+
         await this.doState.storage.put('task', task);
 
         // Cancel watchdog alarm - task completed successfully
@@ -1802,23 +1850,6 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Delete status message
         if (statusMessageId) {
           await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
-        }
-
-        // Append system confidence label for coding tasks if the model didn't include one.
-        // This provides an objective evidence-based confidence signal to the user.
-        if (taskCategory === 'coding' && task.result && !task.result.includes('Confidence:')) {
-          const hasToolEvidence = task.toolsUsed.length >= 2;
-          const hasGitActions = task.toolsUsed.some(t => t.startsWith('github_'));
-          const hadErrors = conversationMessages.some(m =>
-            m.role === 'tool' && typeof m.content === 'string' && /\b(error|failed|404|403|422|500)\b/i.test(m.content)
-          );
-          const confidenceLevel = hasToolEvidence && !hadErrors ? 'High'
-            : hasToolEvidence && hadErrors ? 'Medium'
-            : 'Low';
-          const reason = !hasToolEvidence ? 'few tool verifications'
-            : hadErrors ? 'some tool errors occurred'
-            : hasGitActions ? 'tool-verified with GitHub operations' : 'tool-verified';
-          task.result += `\n\n📊 Confidence: ${confidenceLevel} (${reason})`;
         }
 
         // Build final response
