@@ -4,6 +4,37 @@
 
 ---
 
+## Session: 2026-02-21 | Audit Phase 2 — P2 Guardrails: Tool Result Validation + No Fake Success (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-Wh6Cx`
+**Task:** Implement P2 guardrails — tool result validation, "No Fake Success" enforcement, enhanced confidence labeling
+
+### Approach
+- `next_prompt.md` pointed to Phase 4.3 (already complete) — advanced to next queue item: Audit Phase 2
+- Analyzed `brainstorming/audit-build-improvement-plan.md` Phase 2 spec
+- P2.1 (evidence-required answers), P2.3 (source-grounding), P2.4 (confidence labels) already implemented in P1
+- Focused on P2.2 ("No Fake Success" contract) and structured tool error tracking
+
+### Changes
+- **New:** `src/guardrails/tool-validator.ts` — `validateToolResult()` with 7 error types (timeout, auth_error, not_found, rate_limit, http_error, invalid_args, generic_error), `ToolErrorTracker`, `isMutationToolCall()` (github_api POST/PUT/PATCH/DELETE, github_create_pr, sandbox_exec), `generateCompletionWarning()`, `adjustConfidence()`
+- **New:** `src/guardrails/tool-validator.test.ts` — 34 unit tests across 5 describe blocks
+- **Modified:** `src/durable-objects/task-processor.ts` — integrated P2 validation into tool execution loop (validate after each tool call, track errors), moved confidence label + completion warning before storage.put (was after), enhanced confidence with `adjustConfidence()`
+- **Modified:** `src/durable-objects/task-processor.test.ts` — 4 integration tests (mutation warning on github_create_pr failure, no warning on read-only errors, confidence downgrade on mutation failure, confidence preserved on success)
+
+### Design Decisions
+- Separate `src/guardrails/` module for clean separation from tool execution
+- Mutation tools identified by name + args (github_api GET is not mutation)
+- Error results not just detected but classified (7 error types) with severity
+- Confidence adjustment layered on top of existing heuristic (not replacing it)
+- Warning appended to task.result before storage.put so both Telegram and stored state contain it
+
+### Stats
+- 973 tests total (34 new unit + 4 new integration), all passing
+- TypeScript clean (0 errors)
+
+---
+
 ## Session: 2026-02-21 | Dream Machine Build Stage + MCP Integration + Route Fix (Session: session_01QETPeWbuAmbGASZr8mqoYm)
 
 **AI:** Claude Opus 4.6
