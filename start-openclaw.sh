@@ -253,10 +253,16 @@ if (process.env.DISCORD_BOT_TOKEN) {
 
 // Slack configuration
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+    const dmPolicy = process.env.SLACK_DM_POLICY || 'pairing';
+    const dm = { policy: dmPolicy };
+    if (dmPolicy === 'open') {
+        dm.allowFrom = ['*'];
+    }
     config.channels.slack = {
         botToken: process.env.SLACK_BOT_TOKEN,
         appToken: process.env.SLACK_APP_TOKEN,
         enabled: true,
+        dm: dm,
     };
 }
 

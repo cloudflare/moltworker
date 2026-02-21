@@ -35,7 +35,12 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
+# TELEGRAM_DM_POLICY=pairing
 # DISCORD_BOT_TOKEN=optional
+# DISCORD_DM_POLICY=pairing
+# SLACK_BOT_TOKEN=optional
+# SLACK_APP_TOKEN=optional
+# SLACK_DM_POLICY=pairing
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth
