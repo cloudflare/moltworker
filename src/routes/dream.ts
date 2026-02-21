@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import type { DreamBuildJob } from '../dream/types';
 import type { DreamBuildProcessor } from '../dream/build-processor';
-import { verifyDreamSecret } from '../dream/auth';
+import { verifyDreamSecret, checkTrustLevel } from '../dream/auth';
 import { validateJob } from '../dream/safety';
 
 // Extend AppEnv to include Dream Machine bindings
@@ -66,6 +66,12 @@ dream.post('/', async (c) => {
   const validation = validateJob(job);
   if (!validation.allowed) {
     return c.json({ error: validation.reason }, 400);
+  }
+
+  // Enforce trust level — only 'builder' and 'shipper' can start builds
+  const trustCheck = checkTrustLevel(job.trustLevel);
+  if (!trustCheck.ok) {
+    return c.json({ error: trustCheck.error }, 403);
   }
 
   // Queue mode — enqueue for deferred processing

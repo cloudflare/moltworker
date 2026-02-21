@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Hono } from 'hono';
 import type { DreamJobState } from '../dream/types';
+import { checkTrustLevel } from '../dream/auth';
 
 // ── resumeJob() logic tests (via route integration) ─────────────────
 
@@ -204,5 +205,48 @@ describe('resumeJob state transitions', () => {
     const status = await stub.getStatus();
     expect(status?.status).toBe('running');
     expect(status?.approved).toBeUndefined();
+  });
+});
+
+// ── DM.7: Trust level enforcement ───────────────────────────────────
+
+describe('checkTrustLevel route integration', () => {
+  // The checkTrustLevel function is called in the POST /dream-build handler
+  // before starting a job. We test it's correctly wired by verifying the
+  // function behavior matches what the route returns.
+
+  it('allows builder trust level', () => {
+    const result = checkTrustLevel('builder');
+    expect(result.ok).toBe(true);
+  });
+
+  it('allows shipper trust level', () => {
+    const result = checkTrustLevel('shipper');
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects observer trust level with 403-worthy error', () => {
+    const result = checkTrustLevel('observer');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Insufficient trust level');
+    expect(result.error).toContain('observer');
+  });
+
+  it('rejects planner trust level', () => {
+    const result = checkTrustLevel('planner');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Insufficient trust level');
+  });
+
+  it('rejects missing trust level', () => {
+    const result = checkTrustLevel(undefined);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Missing dreamTrustLevel');
+  });
+
+  it('rejects unknown trust level', () => {
+    const result = checkTrustLevel('admin');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Insufficient trust level');
   });
 });

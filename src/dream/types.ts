@@ -31,6 +31,8 @@ export interface DreamBuildJob {
   callbackUrl: string;
   budget: DreamBuildBudget;
   queueName?: string;
+  /** Trust level of the requesting user — must be 'builder' or 'shipper' to start builds */
+  trustLevel?: DreamTrustLevel;
 }
 
 // ── Status updates (sent back to Storia) ────────────────────────────

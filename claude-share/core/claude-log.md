@@ -4,6 +4,22 @@
 
 ---
 
+## Session: 2026-02-21 | DM.7 — Enforce checkTrustLevel() at Route Layer (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-Wh6Cx`
+**Task:** Wire existing checkTrustLevel() into POST /dream-build route
+
+### Changes
+- **Modified:** `src/dream/types.ts` — added `trustLevel?: DreamTrustLevel` to `DreamBuildJob`
+- **Modified:** `src/routes/dream.ts` — imported `checkTrustLevel`, added call after `validateJob()` returning 403 for insufficient trust
+- **Modified:** `src/routes/dream.test.ts` — 6 new tests for trust level enforcement (builder/shipper allowed, observer/planner/missing/unknown rejected)
+
+### Test Results
+- 1007 tests passing (6 new), typecheck clean
+
+---
+
 ## Session: 2026-02-21 | DM.5 — Add /dream-build/:jobId/approve Endpoint (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
 
 **AI:** Claude Opus 4.6
