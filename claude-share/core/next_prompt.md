@@ -3,48 +3,42 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-22 (Phase 7 roadmap added — starting with low-effort wins)
+**Last Updated:** 2026-02-22 (7A.2 Smart Context Loading completed — moving to 7A.3)
 
 ---
 
-## Current Task: 7A.2 — Smart Context Loading
+## Current Task: 7A.3 — Destructive Op Guard
 
 ### Goal
 
-Add a complexity classifier to the Telegram handler so simple queries (weather, time, crypto prices) skip expensive R2 reads (learnings, past sessions), cutting ~300-400ms of latency on trivial messages.
+Wire the existing `scanForRiskyPatterns()` from `src/dream/vex-review.ts` into the task processor's tool execution path as a pre-execution safety check. Block or warn before executing destructive operations like `rm -rf`, `DROP TABLE`, `force push`, etc.
 
 ### Context
 
-- Currently `handleChat()` in `src/telegram/handler.ts` loads conversation history + learnings + session context for EVERY message
-- This costs ~300-400ms in R2 reads before the LLM even starts
-- Simple queries like "what's the weather?" or "convert 100 USD to EUR" don't need past learnings or session context
-- Phase 7 is the new Performance & Quality Engine (see `GLOBAL_ROADMAP.md`)
-- This is task #1 in the recommended implementation order (low effort, immediate win)
+- Vex review (DM.14) already has 14 risk patterns in `src/dream/vex-review.ts` → `scanForRiskyPatterns()`
+- Currently these only run in Dream Build flows
+- The task processor (`src/durable-objects/task-processor.ts`) executes tools without checking for destructive patterns
+- This task wires the same safety checks into the general tool execution path
+- Phase 7 is the Performance & Quality Engine (see `GLOBAL_ROADMAP.md`)
 
 ### What Needs to Happen
 
-1. **Add complexity classifier** — in `src/telegram/handler.ts` or a new `src/utils/task-classifier.ts`
-   - Input: user message text + conversation history length
-   - Output: `'simple' | 'complex'`
-   - Heuristics: message length < 50 chars, no code keywords (file, function, class, bug, fix, refactor, implement, build, deploy, test), no file paths, no URLs, conversation < 3 messages → `simple`
-   - Presence of code keywords, file paths, multi-line messages, long conversation → `complex`
-2. **Gate expensive loads** — in `handleChat()`:
-   - `simple`: skip `getRelevantLearnings()`, skip `getSessionContext()`, keep only last 5 conversation messages
-   - `complex`: full load (current behavior)
-3. **Tests**: Unit tests for classifier, integration test confirming simple queries skip heavy loads
-4. **Run `npm test` and `npm run typecheck`** before committing
+1. **Import/adapt `scanForRiskyPatterns()`** — from `src/dream/vex-review.ts` into the task processor's tool execution flow
+2. **Pre-execution check** — before executing `sandbox_exec`, `github_api` (write operations), or any tool that modifies state, scan the tool arguments for risky patterns
+3. **Behavior on match** — for high-severity patterns (data destruction, force push), block execution and return a warning as the tool result. For medium-severity, log a warning but allow execution.
+4. **Tests**: Unit tests confirming risky patterns are caught, integration test in task-processor
+5. **Run `npm test` and `npm run typecheck`** before committing
 
 ### Key Files
 
-- `src/telegram/handler.ts` — `handleChat()` function, where R2 loads happen
-- `src/openrouter/learnings.ts` — `getRelevantLearnings()` function
-- `src/durable-objects/task-processor.ts` — may need awareness of task complexity
+- `src/dream/vex-review.ts` — existing `scanForRiskyPatterns()` with 14 risk patterns
+- `src/durable-objects/task-processor.ts` — tool execution loop, where the guard needs to be wired
+- `src/openrouter/tools.ts` — tool execution functions
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | 7A.3: Destructive Op Guard — wire Vex patterns into task processor | Low | Wire existing `scanForRiskyPatterns()` from `src/dream/vex-review.ts` |
 | Next | 7A.5: Prompt Caching — `cache_control` for Anthropic direct API | Low | Only for direct Anthropic calls |
 | Next | 7B.2: Model Routing by Complexity — fast models for simple queries | Medium | Builds on 7A.2's classifier |
 | Next | 7B.3: Pre-fetching Context — parse file refs from user message | Low | Regex file paths → preload |
@@ -57,6 +51,7 @@ Add a complexity classifier to the Telegram handler so simple queries (weather, 
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-22 | 7A.2: Smart Context Loading — skip R2 reads for simple queries (1133 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | Phase 7 roadmap: 10 tasks added to GLOBAL_ROADMAP.md (5 quality, 5 speed) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-22 | S48.1-fix: Phase budget wall-clock fix (8s/18s/3s → 120s/240s/60s) + auto-resume double-counting | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-22 | Deployment verification: DM.10, DM.12, shared secret, smoke test — all PASS | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |

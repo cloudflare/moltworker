@@ -28,6 +28,7 @@ import {
 } from '../orchestra/orchestra';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import { fetchDOWithRetry } from '../utils/do-retry';
+import { classifyTaskComplexity } from '../utils/task-classifier';
 import { markdownToTelegramHtml } from '../utils/telegram-format';
 import {
   MODELS,
@@ -2173,7 +2174,12 @@ export class TelegramHandler {
       modelAlias = DEFAULT_MODEL;
       await this.storage.setUserModel(userId, modelAlias);
     }
-    const history = await this.storage.getConversation(userId, 10);
+    // Classify task complexity to skip expensive R2 reads for trivial queries (Phase 7A.2)
+    const fullHistory = await this.storage.getConversation(userId, 10);
+    const complexity = classifyTaskComplexity(messageText, fullHistory.length);
+
+    // Simple queries: skip learnings/sessions, keep only last 5 messages
+    const history = complexity === 'simple' ? fullHistory.slice(-5) : fullHistory;
     const systemPrompt = await this.getSystemPrompt();
 
     // Augment system prompt with tool hints for tool-supporting models
@@ -2201,12 +2207,16 @@ export class TelegramHandler {
       }
     }
 
-    // Inject relevant past learnings into system prompt
-    const learningsHint = await this.getLearningsHint(userId, messageText);
-    // Inject last completed task summary for cross-task context
-    const lastTaskHint = await this.getLastTaskHint(userId);
-    // Inject relevant session history for cross-session continuity (Phase 4.4)
-    const sessionContext = await this.getSessionContext(userId, messageText);
+    // Gate expensive R2 loads based on task complexity (Phase 7A.2)
+    // Simple queries skip learnings, last-task summary, and session history
+    let learningsHint = '';
+    let lastTaskHint = '';
+    let sessionContext = '';
+    if (complexity === 'complex') {
+      learningsHint = await this.getLearningsHint(userId, messageText);
+      lastTaskHint = await this.getLastTaskHint(userId);
+      sessionContext = await this.getSessionContext(userId, messageText);
+    }
 
     // Add conversation boundary hint when history exists to prevent context bleed
     const conversationBoundary = history.length > 0
