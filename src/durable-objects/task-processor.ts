@@ -10,6 +10,7 @@ import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WI
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { extractLearning, storeLearning, storeLastTaskSummary, storeSessionSummary, type SessionSummary } from '../openrouter/learnings';
+import { UserStorage } from '../openrouter/storage';
 import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
 import { createAcontextClient, toOpenAIMessages } from '../acontext/client';
 import { estimateTokens, compressContextBudgeted } from './context-budget';
@@ -1541,6 +1542,15 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             await this.sendLongMessage(request.telegramToken, request.chatId,
               `${task.result}\n\n${modelInfo} | ⏱️ ${elapsed}s (${task.iterations} iter)`
             );
+            // Save assistant response to conversation history
+            if (this.r2 && task.result) {
+              try {
+                const storage = new UserStorage(this.r2);
+                await storage.addMessage(request.userId, 'assistant', task.result);
+              } catch (e) {
+                console.error('[TaskProcessor] Failed to save assistant message to conversation:', e);
+              }
+            }
             return;
           }
           // No content at all after N iterations — fail
@@ -1917,6 +1927,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         // Send final result (split if too long)
         await this.sendLongMessage(request.telegramToken, request.chatId, finalResponse);
+
+        // Save assistant response to conversation history so subsequent messages have context
+        if (this.r2 && task.result) {
+          try {
+            const storage = new UserStorage(this.r2);
+            await storage.addMessage(request.userId, 'assistant', task.result);
+          } catch (e) {
+            console.error('[TaskProcessor] Failed to save assistant message to conversation:', e);
+          }
+        }
 
         return;
       }
