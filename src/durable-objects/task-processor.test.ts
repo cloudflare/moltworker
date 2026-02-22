@@ -710,8 +710,9 @@ describe('TaskProcessor phases', () => {
         { timeout: 10000, interval: 50 }
       );
 
-      expect(r2Puts.length).toBeGreaterThan(0);
-      const lastCheckpoint = JSON.parse(r2Puts[r2Puts.length - 1].body);
+      const checkpointPuts = r2Puts.filter(p => p.key.includes('checkpoint'));
+      expect(checkpointPuts.length).toBeGreaterThan(0);
+      const lastCheckpoint = JSON.parse(checkpointPuts[checkpointPuts.length - 1].body);
       expect(lastCheckpoint.phase).toBeDefined();
       expect(['plan', 'work', 'review']).toContain(lastCheckpoint.phase);
     });
@@ -855,8 +856,9 @@ describe('TaskProcessor phases', () => {
         { timeout: 10000, interval: 50 }
       );
 
-      expect(r2Puts.length).toBeGreaterThan(0);
-      const lastCheckpoint = JSON.parse(r2Puts[r2Puts.length - 1].body);
+      const checkpointPuts = r2Puts.filter(p => p.key.includes('checkpoint'));
+      expect(checkpointPuts.length).toBeGreaterThan(0);
+      const lastCheckpoint = JSON.parse(checkpointPuts[checkpointPuts.length - 1].body);
       expect(lastCheckpoint.modelAlias).toBe('deep');
     });
   });
