@@ -388,6 +388,11 @@ config.agents.defaults.heartbeat = { every: '30m' };
 config.agents.defaults.maxConcurrent = 4;
 config.agents.defaults.subagents = { maxConcurrent: 4 };
 
+// Disable built-in browser tool (requires gateway pairing which doesn't work in sandbox)
+// Agent uses CDP scripts via exec tool instead (read-page.js, screenshot.js)
+config.tools = config.tools || {};
+config.tools.deny = ['browser'];
+
 // Memory search: hybrid BM25+vector with temporal decay and MMR
 config.agents.defaults.memorySearch = {
     provider: 'gemini',
