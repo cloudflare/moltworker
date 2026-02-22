@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-22 (7A.2 + 7A.3 complete — 1158 tests)
+**Last Updated:** 2026-02-22 (7A.2 + 7A.3 + 7A.5 complete — 1175 tests)
 
 ---
 
@@ -225,7 +225,7 @@
 | 7A.2 | **Smart Context Loading** — task-aware context in handler | ✅ | Claude | Low | **MEDIUM** | Complexity classifier in `src/utils/task-classifier.ts`. Simple queries (weather, greetings, crypto) skip R2 reads for learnings, last-task, sessions. History capped at 5 for simple. 35 tests (27 unit + 8 integration). Inspired by §5.1 of spec. |
 | 7A.3 | **Destructive Op Guard** — wire Vex patterns into task processor | ✅ | Claude | Low | **LOW-MEDIUM** | `scanToolCallForRisks()` in `src/guardrails/destructive-op-guard.ts`. Reuses 14 RISKY_PATTERNS from Vex review. Critical/high → block, medium → warn+allow. Guards sandbox_exec, github_api, github_create_pr, cloudflare_api. 25 tests. Inspired by §4.2 of spec. |
 | 7A.4 | **Structured Step Decomposition** — planner outputs JSON steps | 🔲 | Claude | Medium | **MEDIUM** | Current plan phase: model thinks for 1 iteration, then starts executing (discovering files as it goes, wasting 3-4 iterations on reads). New: force planner to output structured JSON `{steps: [{action, files, description}]}`. Pre-load referenced files into context before executor starts. Reduces iteration count by 2-4. Inspired by §8.2 of spec. |
-| 7A.5 | **Prompt Caching** — `cache_control` for Anthropic direct API | 🔲 | Claude | Low | **MEDIUM** | Add `cache_control: { type: 'ephemeral' }` on system prompt blocks when using Anthropic models directly (not via OpenRouter). 90% cost savings on repeated system prompts. Only works for direct Anthropic API calls. Inspired by §5.3 of spec. |
+| 7A.5 | **Prompt Caching** — `cache_control` for Anthropic models | ✅ | Claude | Low | **MEDIUM** | `injectCacheControl()` in `src/openrouter/prompt-cache.ts`. Detects Anthropic models via `isAnthropicModel()`, injects `cache_control: {type:'ephemeral'}` on last system message content block. Works via OpenRouter (passes through to Anthropic API). Wired into task processor + client. 17 tests. Inspired by §5.3 of spec. |
 
 > 🧑 HUMAN CHECK 7A.6: Review CoVe verification results after 10+ tasks — does it catch real failures?
 
@@ -261,7 +261,7 @@
 
 1. ~~**7A.2** Smart Context Loading~~ ✅ Complete
 2. ~~**7A.3** Destructive Op Guard~~ ✅ Complete
-3. **7A.5** Prompt Caching (low effort, cost win)
+3. ~~**7A.5** Prompt Caching~~ ✅ Complete
 4. **7B.2** Model Routing by Complexity (medium effort, biggest speed win for simple queries)
 5. **7B.3** Pre-fetching Context (low effort, reduces tool call latency)
 6. **7A.4** Structured Step Decomposition (medium effort, enables 7B.4)
@@ -339,6 +339,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-22 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7A.5 Prompt Caching — cache_control on Anthropic system messages via OpenRouter, isAnthropicModel() helper, 17 new tests (1175 total) | src/openrouter/prompt-cache.ts, src/openrouter/prompt-cache.test.ts, src/openrouter/client.ts, src/openrouter/models.ts, src/durable-objects/task-processor.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(guardrails): 7A.3 Destructive Op Guard — scanToolCallForRisks() pre-execution check, reuses 14 Vex patterns, blocks critical/high, warns medium, 25 new tests (1158 total) | src/guardrails/destructive-op-guard.ts, src/guardrails/destructive-op-guard.test.ts, src/durable-objects/task-processor.ts, src/dream/vex-review.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7A.2 Smart Context Loading — task complexity classifier skips R2 reads for simple queries (~300-400ms saved), 35 new tests (1133 total) | src/utils/task-classifier.ts, src/utils/task-classifier.test.ts, src/telegram/handler.ts, src/telegram/smart-context.test.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01NzU1oFRadZHdJJkiKi2sY8) | docs(roadmap): add Phase 7 Performance & Quality Engine — 10 tasks (5 quality from Agent Skills Engine Spec §2.2/§4.2/§5.1/§5.3/§8.2, 5 speed optimizations: speculative tools, model routing, pre-fetch, iteration reduction, streaming feedback). Updated dependency graph, human checkpoints, references | claude-share/core/GLOBAL_ROADMAP.md, claude-share/core/WORK_STATUS.md, claude-share/core/next_prompt.md
@@ -418,7 +419,7 @@ graph TD
         P7A2[7A.2 Smart Context Loading ✅]
         P7A3[7A.3 Destructive Op Guard ✅]
         P7A4[7A.4 Step Decomposition 🔲]
-        P7A5[7A.5 Prompt Caching 🔲]
+        P7A5[7A.5 Prompt Caching ✅]
     end
 
     subgraph "Phase 7B: Speed Optimizations"

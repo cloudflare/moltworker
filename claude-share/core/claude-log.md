@@ -4,6 +4,40 @@
 
 ---
 
+## Session: 2026-02-22 | 7A.5 Prompt Caching (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7A.5 Prompt Caching. Injects `cache_control: { type: 'ephemeral' }` on the last content block of system messages when using Anthropic models. Works via OpenRouter which passes cache_control through to Anthropic's API, enabling ~90% cost savings on repeated system prompts.
+
+### Changes Made
+- Extended `ContentPart` interface with optional `cache_control` field in `src/openrouter/client.ts`
+- Added `isAnthropicModel()` helper in `src/openrouter/models.ts`
+- Created `injectCacheControl()` utility in `src/openrouter/prompt-cache.ts`
+- Wired into task processor request body construction (Durable Object path)
+- Wired into OpenRouter client `chatCompletion` + `chatCompletionStream` methods
+- Added mock for `isAnthropicModel` + `injectCacheControl` in task processor tests
+
+### Files Modified
+- `src/openrouter/prompt-cache.ts` (new)
+- `src/openrouter/prompt-cache.test.ts` (new)
+- `src/openrouter/client.ts` (ContentPart + import + 2 call sites)
+- `src/openrouter/models.ts` (isAnthropicModel)
+- `src/durable-objects/task-processor.ts` (imports + injection)
+- `src/durable-objects/task-processor.test.ts` (mocks)
+
+### Tests
+- [x] Tests pass (1175 total, 17 new)
+- [x] Typecheck passes
+
+### Notes for Next Session
+Next task in queue: **7B.2 Model Routing by Complexity** — fast models for simple queries (builds on 7A.2's classifier).
+
+---
+
 ## Session: 2026-02-22 | 7A.3 Destructive Op Guard (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6

@@ -3,48 +3,51 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-22 (7A.3 Destructive Op Guard completed — moving to 7A.5)
+**Last Updated:** 2026-02-22 (7A.5 Prompt Caching completed — moving to 7B.2)
 
 ---
 
-## Current Task: 7A.5 — Prompt Caching for Anthropic Direct API
+## Current Task: 7B.2 — Model Routing by Complexity
 
 ### Goal
 
-Add `cache_control: { type: 'ephemeral' }` on system prompt blocks when using Anthropic models directly (not via OpenRouter). This enables Anthropic's prompt caching, saving ~90% on repeated system prompts.
+Route simple queries (weather, crypto, "what time is it?") to fast/cheap models (Haiku/Flash) for 1-2s response, reserving expensive models (Sonnet/Opus) for complex multi-tool tasks. Uses the complexity classifier from 7A.2 (`src/utils/task-classifier.ts`).
 
 ### Context
 
-- Moltworker supports direct Anthropic API calls (bypassing OpenRouter) for some models
-- System prompts are largely identical across requests for the same user
-- Anthropic's prompt caching feature allows caching system prompt blocks to avoid re-processing them
-- Only applies to direct Anthropic API calls (not OpenRouter-proxied ones)
-- Phase 7 is the Performance & Quality Engine (see `GLOBAL_ROADMAP.md`)
-- Low effort task — just add the `cache_control` field to the right messages
+- 7A.2 built a `classifyTaskComplexity()` function in `src/utils/task-classifier.ts`
+- Simple queries already skip R2 reads (7A.2) — now we can also route them to faster models
+- Current behavior: user picks model (or uses default), all queries go to same model
+- New: for `simple` complexity tasks, override to a fast model unless user explicitly set one
+- Phase 7B is Speed Optimizations (see `GLOBAL_ROADMAP.md`)
 
 ### What Needs to Happen
 
-1. **Identify Anthropic direct API calls** — find where direct Anthropic API calls are made (check `getProvider()` / `getProviderConfig()` in `src/openrouter/models.ts`)
-2. **Add `cache_control`** — on system message blocks when the provider is Anthropic direct
-3. **Respect Anthropic's format** — `cache_control: { type: 'ephemeral' }` on the last system message content block
-4. **Tests**: Unit test confirming cache_control is added for Anthropic, NOT for other providers
+1. **Add fast model routing logic** — in the handler or task processor, after classifying complexity:
+   - If `simple` complexity AND user didn't explicitly set a model → route to haiku (fastest Anthropic) or a flash model
+   - If `complex` complexity → use user's chosen model as-is
+   - Respect explicit user model choice (via `/use` command) — never override explicit selection
+2. **Track routing decisions** — log when a model switch happens so we can measure impact
+3. **Add opt-out** — respect a flag or user preference to disable auto-routing
+4. **Tests**: Unit tests for routing logic, integration test confirming simple queries get fast model
 5. **Run `npm test` and `npm run typecheck`** before committing
 
 ### Key Files
 
-- `src/openrouter/models.ts` — `getProvider()`, `getProviderConfig()` for detecting Anthropic direct
-- `src/durable-objects/task-processor.ts` — where API calls are constructed
-- `src/openrouter/client.ts` — OpenRouter client (should NOT get cache_control)
+- `src/utils/task-classifier.ts` — existing `classifyTaskComplexity()` from 7A.2
+- `src/telegram/handler.ts` — where model selection happens before DO dispatch
+- `src/durable-objects/task-processor.ts` — where model alias is used for API calls
+- `src/openrouter/models.ts` — model definitions and utilities
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | 7B.2: Model Routing by Complexity — fast models for simple queries | Medium | Builds on 7A.2's classifier |
 | Next | 7B.3: Pre-fetching Context — parse file refs from user message | Low | Regex file paths → preload |
-| Later | 7A.4: Structured Step Decomposition | Medium | Planner outputs JSON steps |
+| Next | 7A.4: Structured Step Decomposition — planner outputs JSON steps | Medium | Planner outputs JSON steps |
 | Later | 7A.1: CoVe Verification Loop | Medium | Post-execution test runner |
 | Later | 7B.4: Reduce Iteration Count | Medium | Depends on 7A.4 |
+| Later | 7B.5: Streaming User Feedback | Medium | Progressive Telegram updates |
 
 ---
 
@@ -52,14 +55,10 @@ Add `cache_control: { type: 'ephemeral' }` on system prompt blocks when using An
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-22 | 7A.5: Prompt Caching — cache_control for Anthropic models (1175 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.3: Destructive Op Guard — block risky tool calls (1158 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.2: Smart Context Loading — skip R2 reads for simple queries (1133 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | Phase 7 roadmap: 10 tasks added to GLOBAL_ROADMAP.md (5 quality, 5 speed) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-22 | S48.1-fix: Phase budget wall-clock fix (8s/18s/3s → 120s/240s/60s) + auto-resume double-counting | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-22 | Deployment verification: DM.10, DM.12, shared secret, smoke test — all PASS | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.10-DM.14: Queue consumer, GitHubClient, JWT auth, shipper deploy, Vex review (1084 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | DM.8: Pre-PR code validation step (1031 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | DM.7: Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | DM.5: Add /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | DM.4: Wire real AI code generation into Dream Build (993 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | Audit Phase 2: P2 guardrails — tool result validation + No Fake Success enforcement | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
