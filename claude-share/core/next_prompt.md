@@ -3,42 +3,53 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-22 (S48.1-fix: phase budget wall-clock + auto-resume double-counting fix)
+**Last Updated:** 2026-02-22 (Phase 7 roadmap added — starting with low-effort wins)
 
 ---
 
-## Current Task: Phase 5.1 — Multi-Agent Review for Complex Tasks
+## Current Task: 7A.2 — Smart Context Loading
 
 ### Goal
 
-Route generated code (from Dream builds or task processor) through a secondary AI reviewer model before finalizing. This adds a safety net where a different model reviews code quality, security, and correctness.
+Add a complexity classifier to the Telegram handler so simple queries (weather, time, crypto prices) skip expensive R2 reads (learnings, past sessions), cutting ~300-400ms of latency on trivial messages.
 
 ### Context
 
-- DM.10-DM.14 are now complete AND deployed/verified in production (2026-02-22)
-- Deployment verification confirmed: DM.10 queue consumer, DM.12 JWT auth, shared secret auth, and smoke test all PASS
-- Test PRs created: https://github.com/PetrAnto/test-repo/pull/1 (JWT), https://github.com/PetrAnto/moltworker/pull/149 (smoke)
-- Worker URL: `moltbot-sandbox.petrantonft.workers.dev`
-- Vex review (DM.14) handles risky pattern detection but doesn't do full code review
-- Phase 5.1 would add a second model pass (e.g., Claude reviewing GPT output or vice versa) for complex tasks
-- Referenced in GLOBAL_ROADMAP.md as Phase 5.1
+- Currently `handleChat()` in `src/telegram/handler.ts` loads conversation history + learnings + session context for EVERY message
+- This costs ~300-400ms in R2 reads before the LLM even starts
+- Simple queries like "what's the weather?" or "convert 100 USD to EUR" don't need past learnings or session context
+- Phase 7 is the new Performance & Quality Engine (see `GLOBAL_ROADMAP.md`)
+- This is task #1 in the recommended implementation order (low effort, immediate win)
 
 ### What Needs to Happen
 
-1. **Design review protocol** — which tasks trigger review, which model reviews
-2. **Implement reviewer** in `src/openrouter/reviewer.ts` — takes generated code + spec, returns review assessment
-3. **Wire into task processor** — for tasks flagged as complex, add review phase
-4. **Wire into Dream builds** — optionally review generated files before PR creation
-5. **Tests**: Mock reviewer responses, test integration
+1. **Add complexity classifier** — in `src/telegram/handler.ts` or a new `src/utils/task-classifier.ts`
+   - Input: user message text + conversation history length
+   - Output: `'simple' | 'complex'`
+   - Heuristics: message length < 50 chars, no code keywords (file, function, class, bug, fix, refactor, implement, build, deploy, test), no file paths, no URLs, conversation < 3 messages → `simple`
+   - Presence of code keywords, file paths, multi-line messages, long conversation → `complex`
+2. **Gate expensive loads** — in `handleChat()`:
+   - `simple`: skip `getRelevantLearnings()`, skip `getSessionContext()`, keep only last 5 conversation messages
+   - `complex`: full load (current behavior)
+3. **Tests**: Unit tests for classifier, integration test confirming simple queries skip heavy loads
+4. **Run `npm test` and `npm run typecheck`** before committing
+
+### Key Files
+
+- `src/telegram/handler.ts` — `handleChat()` function, where R2 loads happen
+- `src/openrouter/learnings.ts` — `getRelevantLearnings()` function
+- `src/durable-objects/task-processor.ts` — may need awareness of task complexity
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | Phase 5.3: Acontext Sandbox for code execution | Medium | Replaces roadmap Priority 3.2 |
-| Next | Phase 5.4: Acontext Disk for file management | Medium | Replaces roadmap Priority 3.3 |
-| Later | Phase 6.2: Response streaming (Telegram) | Medium | Progressive message updates |
-| Later | Code Mode MCP Sprint A: storia-agent skill | High | See CODE_MODE_MCP_STORIA_SPEC.md |
+| Next | 7A.3: Destructive Op Guard — wire Vex patterns into task processor | Low | Wire existing `scanForRiskyPatterns()` from `src/dream/vex-review.ts` |
+| Next | 7A.5: Prompt Caching — `cache_control` for Anthropic direct API | Low | Only for direct Anthropic calls |
+| Next | 7B.2: Model Routing by Complexity — fast models for simple queries | Medium | Builds on 7A.2's classifier |
+| Next | 7B.3: Pre-fetching Context — parse file refs from user message | Low | Regex file paths → preload |
+| Later | 7A.4: Structured Step Decomposition | Medium | Planner outputs JSON steps |
+| Later | 7A.1: CoVe Verification Loop | Medium | Post-execution test runner |
 
 ---
 
@@ -46,6 +57,7 @@ Route generated code (from Dream builds or task processor) through a secondary A
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-22 | Phase 7 roadmap: 10 tasks added to GLOBAL_ROADMAP.md (5 quality, 5 speed) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-22 | S48.1-fix: Phase budget wall-clock fix (8s/18s/3s → 120s/240s/60s) + auto-resume double-counting | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-22 | Deployment verification: DM.10, DM.12, shared secret, smoke test — all PASS | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.10-DM.14: Queue consumer, GitHubClient, JWT auth, shipper deploy, Vex review (1084 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
@@ -54,8 +66,3 @@ Route generated code (from Dream builds or task processor) through a secondary A
 | 2026-02-21 | DM.5: Add /dream-build/:jobId/approve endpoint (1001 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.4: Wire real AI code generation into Dream Build (993 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | Audit Phase 2: P2 guardrails — tool result validation + No Fake Success enforcement | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | DM.1-DM.3: Dream Machine Build stage + auth + route fix (935 tests) | Claude Opus 4.6 | session_01QETPeWbuAmbGASZr8mqoYm |
-| 2026-02-20 | Phase 5.2: MCP integration — Cloudflare Code Mode MCP (38 tests, 872 total) | Claude Opus 4.6 | session_01QETPeWbuAmbGASZr8mqoYm |
-| 2026-02-20 | Phase 5.5: Web search tool (Brave Search API, cache, key plumbing, tests) | Codex (GPT-5.2-Codex) | codex-phase-5-5-web-search-001 |
-| 2026-02-20 | Phase 4.4: Cross-session context continuity (SessionSummary ring buffer) | Claude Opus 4.6 | session_01SE5WrUuc6LWTmZC8WBXKY4 |
-| 2026-02-20 | Phase 4.3: Tool result caching with in-flight dedup | Codex+Claude | session_01SE5WrUuc6LWTmZC8WBXKY4 |

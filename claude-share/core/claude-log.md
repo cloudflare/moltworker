@@ -4,6 +4,51 @@
 
 ---
 
+## Session: 2026-02-22 | Phase 7: Performance & Quality Engine Roadmap (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-Wh6Cx`
+**Status:** Completed
+
+### Summary
+Analyzed the 1455-line Agent Skills Engine Spec (`brainstorming/AGENT_SKILLS_ENGINE_SPEC.md`) against the actual codebase. Assessment: 30% gold, 70% over-engineering for the stated goal of "make the bot faster." Extracted 5 high-ROI quality items from the spec and added 5 speed optimizations identified through codebase analysis.
+
+### What Was Added (Phase 7: Performance & Quality Engine)
+
+**Phase 7A — Quality & Correctness (from spec):**
+- 7A.1: CoVe Verification Loop — post-execution test runner (no extra LLM call)
+- 7A.2: Smart Context Loading — skip heavy R2 reads for simple queries
+- 7A.3: Destructive Op Guard — wire Vex patterns into task processor
+- 7A.4: Structured Step Decomposition — planner outputs JSON steps + pre-loads files
+- 7A.5: Prompt Caching — `cache_control` for Anthropic direct API
+
+**Phase 7B — Speed Optimizations (beyond spec):**
+- 7B.1: Speculative Tool Execution — start read-only tools during streaming
+- 7B.2: Model Routing by Complexity — simple→Flash/Haiku, complex→Sonnet/Opus
+- 7B.3: Pre-fetching Context — regex file paths from user message, preload
+- 7B.4: Reduce Iteration Count — upfront file loading per plan step (depends on 7A.4)
+- 7B.5: Streaming User Feedback — progressive Telegram updates (subsumes 6.2)
+
+### What Was Skipped from Spec
+- Full /core + /transports directory refactor (~50 new files, no user benefit)
+- 4 separate agent types (4x latency, not faster)
+- Skill registry + keyword matching (LLM tool selection already does this)
+- Full hook system (95% redundant with existing code)
+- HTTP/SSE transport, BYOK passthrough (not Telegram bot speed concerns)
+
+### Files Modified
+- `claude-share/core/GLOBAL_ROADMAP.md` — Phase 7 section, dependency graph, human checkpoints, changelog, references
+- `claude-share/core/WORK_STATUS.md` — New priorities queue (7A.2 → 7B.1)
+- `claude-share/core/next_prompt.md` — Points to 7A.2 Smart Context Loading
+- `claude-share/core/claude-log.md` — This entry
+
+### Decision Log
+- Phase 5.1 (Multi-agent review) deferred — 7A.1 CoVe verification is a cheaper alternative that doesn't need a second LLM call
+- Phase 6.2 (Telegram streaming) subsumed by 7B.5 (Streaming User Feedback) with tool-level granularity
+- Implementation order prioritizes low-effort wins first: 7A.2 → 7A.3 → 7A.5 → 7B.2 → 7B.3 → 7A.4 → 7A.1 → 7B.4 → 7B.5 → 7B.1
+
+---
+
 ## Session: 2026-02-22 | S48.1-fix: Phase Budget Wall-Clock Fix + Auto-Resume Double-Counting (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
 
 **AI:** Claude Opus 4.6

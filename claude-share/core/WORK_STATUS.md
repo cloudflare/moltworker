@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-22 (S48.1-fix: phase budget wall-clock fix + auto-resume double-counting fix)
+**Last Updated:** 2026-02-22 (Phase 7: Performance & Quality Engine added to roadmap)
 
 ---
 
@@ -154,12 +154,21 @@
 ## Next Priorities Queue
 
 > Ordered by priority. Next AI session should pick the top item.
+> Phase 7 tasks prioritized by effort/impact ratio — low-effort wins first, then bigger items.
 
-1. **Phase 5.1** — Multi-agent review for complex tasks
-2. **Phase 3 Audit** — CI gates + policy tests (task router, guardrail regression)
-3. **Phase 5.3** — Acontext Sandbox for code execution
-4. **Phase 5.4** — Acontext Disk for file management
-5. **Phase 6.2** — Telegram response streaming
+1. **7A.2** — Smart Context Loading (low effort, immediate latency win)
+2. **7A.3** — Destructive Op Guard (low effort, safety win — wire existing Vex patterns)
+3. **7A.5** — Prompt Caching for Anthropic direct API (low effort, cost win)
+4. **7B.2** — Model Routing by Complexity (medium effort, biggest speed win for simple queries)
+5. **7B.3** — Pre-fetching Context from user message (low effort, reduces tool call latency)
+6. **7A.4** — Structured Step Decomposition (medium effort, enables 7B.4)
+7. **7A.1** — CoVe Verification Loop (medium effort, biggest quality win)
+8. **7B.4** — Reduce Iteration Count via upfront file loading (medium effort, depends on 7A.4)
+9. **7B.5** — Streaming User Feedback (medium effort, UX win — subsumes old 6.2)
+10. **7B.1** — Speculative Tool Execution (high effort, advanced optimization)
+11. **Phase 5.1** — Multi-agent review for complex tasks (deferred — 7A.1 CoVe is cheaper alternative)
+12. **Phase 5.3** — Acontext Sandbox for code execution
+13. **Phase 5.4** — Acontext Disk for file management
 
 ---
 

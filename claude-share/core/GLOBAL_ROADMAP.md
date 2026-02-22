@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-22 (DM.10-DM.14 deployed & verified — all features confirmed working in production)
+**Last Updated:** 2026-02-22 (Phase 7: Performance & Quality Engine added — 10 tasks from spec analysis + speed optimizations)
 
 ---
 
@@ -207,12 +207,77 @@
 
 ---
 
+### Phase 7: Performance & Quality Engine (Medium-High effort, transformative)
+
+> **Goal:** Make the bot faster and more reliable. Derived from honest assessment of the Agent Skills Engine Spec
+> (`brainstorming/AGENT_SKILLS_ENGINE_SPEC.md`) — extracting only the high-ROI pieces — plus
+> speed optimizations identified through codebase analysis.
+>
+> **Why this matters:** A typical multi-tool task takes 2-5 minutes end-to-end. Each LLM iteration
+> is 5-30s, and tasks need 5-10 iterations. The bot claims "done" with no verification. These
+> changes target fewer iterations, smarter context, and verified outputs.
+
+#### Phase 7A: Quality & Correctness (from Agent Skills Engine Spec)
+
+| ID | Task | Status | Owner | Effort | Priority | Notes |
+|----|------|--------|-------|--------|----------|-------|
+| 7A.1 | **CoVe Verification Loop** — post-execution verification step | 🔲 | Claude | Medium | **HIGH** | After work phase: read claimed files, run `npm test`, check `git diff`. No extra LLM call — just tool execution + simple pass/fail checks. If tests fail, inject results back into context and give model one retry iteration. Inspired by §2.2 of spec but drastically simplified (no separate verifier agent). |
+| 7A.2 | **Smart Context Loading** — task-aware context in handler | 🔲 | Claude | Low | **MEDIUM** | Currently loads conversation history + learnings + session context (~300-400ms) for EVERY message, including "what time is it?". Add complexity classifier: simple queries skip heavy R2 reads (learnings, past sessions). Use keyword heuristics + message length to classify. Inspired by §5.1 of spec. |
+| 7A.3 | **Destructive Op Guard** — wire Vex patterns into task processor | 🔲 | Claude | Low | **LOW-MEDIUM** | Vex review (DM.14) has 14 risk patterns but only runs in Dream builds. Wire the same `scanForRiskyPatterns()` into the task processor's tool execution path as a pre-execution check. Block/warn on `rm -rf`, `DROP TABLE`, `force push`, etc. before they execute. Inspired by §4.2 of spec. |
+| 7A.4 | **Structured Step Decomposition** — planner outputs JSON steps | 🔲 | Claude | Medium | **MEDIUM** | Current plan phase: model thinks for 1 iteration, then starts executing (discovering files as it goes, wasting 3-4 iterations on reads). New: force planner to output structured JSON `{steps: [{action, files, description}]}`. Pre-load referenced files into context before executor starts. Reduces iteration count by 2-4. Inspired by §8.2 of spec. |
+| 7A.5 | **Prompt Caching** — `cache_control` for Anthropic direct API | 🔲 | Claude | Low | **MEDIUM** | Add `cache_control: { type: 'ephemeral' }` on system prompt blocks when using Anthropic models directly (not via OpenRouter). 90% cost savings on repeated system prompts. Only works for direct Anthropic API calls. Inspired by §5.3 of spec. |
+
+> 🧑 HUMAN CHECK 7A.6: Review CoVe verification results after 10+ tasks — does it catch real failures?
+
+#### Phase 7B: Speed Optimizations (beyond spec)
+
+| ID | Task | Status | Owner | Effort | Priority | Notes |
+|----|------|--------|-------|--------|----------|-------|
+| 7B.1 | **Speculative Tool Execution** — start tools during streaming | 🔲 | Claude | High | **HIGH** | Current: wait for full LLM response → parse tool_calls → execute. New: parse tool_call names/args from streaming chunks as they arrive. For read-only tools (in `PARALLEL_SAFE_TOOLS`), start execution immediately while model is still generating. Saves 2-10s per iteration on multi-tool calls. Risk: model may change args in later chunks — only start after args are complete per tool_call. |
+| 7B.2 | **Model Routing by Complexity** — fast models for simple queries | 🔲 | Claude | Medium | **HIGH** | Simple questions (weather, crypto, "what time is it?") → Haiku/Flash (1-2s response). Only complex multi-file/multi-tool tasks → Sonnet/Opus. Implement complexity classifier: message length, keyword presence (code/file/github/fix/build), conversation history length. Override user model choice for trivial queries (with opt-out). |
+| 7B.3 | **Pre-fetching Context** — parse file refs from user message | 🔲 | Claude | Low | **MEDIUM** | When user says "fix the bug in auth.ts" or "update src/routes/api.ts", regex-extract file paths from the message. Start reading those files from GitHub/R2 immediately (before LLM even responds). Cache results so the tool call is instant. Works with existing tool cache infrastructure (Phase 4.3). |
+| 7B.4 | **Reduce Iteration Count** — upfront file loading per plan step | 🔲 | Claude | Medium | **HIGH** | Biggest speed win. After 7A.4 produces structured steps, load ALL referenced files into context before each step. Model gets `[FILE: src/foo.ts]\n<contents>` in its system message, doesn't need to call `github_read_file`. Typical task drops from 8 iterations to 3-4. Depends on 7A.4. |
+| 7B.5 | **Streaming User Feedback** — progressive Telegram updates | 🔲 | Claude | Medium | **MEDIUM** | Currently: "Thinking..." for 3 minutes, then wall of text. New: update Telegram message every ~15s with current phase (Planning step 2/4..., Executing: reading auth.ts..., Running tests...). Already have `editMessage` infrastructure (progress updates). Enhance with tool-level granularity. Subsumes Phase 6.2 (response streaming). |
+
+> 🧑 HUMAN CHECK 7B.6: Benchmark before/after — measure end-to-end latency on 5 representative tasks
+
+#### Phase 7 Dependency Graph
+
+```
+7A.2 (Smart Context) ─────────────────────── can be done independently
+7A.3 (Destructive Guard) ─────────────────── can be done independently
+7A.5 (Prompt Caching) ────────────────────── can be done independently
+7B.2 (Model Routing) ─────────────────────── can be done independently
+7B.3 (Pre-fetch Context) ─────────────────── can be done independently
+
+7A.1 (CoVe Verification) ─────────────────── depends on nothing, but best after 7A.4
+7A.4 (Step Decomposition) ──┬──────────────── depends on nothing
+                            └─→ 7B.4 (Reduce Iterations) ── depends on 7A.4
+7B.1 (Speculative Tools) ─────────────────── depends on nothing, but complex
+7B.5 (Streaming Feedback) ────────────────── depends on nothing, subsumes 6.2
+```
+
+#### Recommended Implementation Order
+
+1. **7A.2** Smart Context Loading (low effort, immediate latency win)
+2. **7A.3** Destructive Op Guard (low effort, safety win)
+3. **7A.5** Prompt Caching (low effort, cost win)
+4. **7B.2** Model Routing by Complexity (medium effort, biggest speed win for simple queries)
+5. **7B.3** Pre-fetching Context (low effort, reduces tool call latency)
+6. **7A.4** Structured Step Decomposition (medium effort, enables 7B.4)
+7. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
+8. **7B.4** Reduce Iteration Count (medium effort, biggest speed win for complex tasks)
+9. **7B.5** Streaming User Feedback (medium effort, UX win)
+10. **7B.1** Speculative Tool Execution (high effort, advanced optimization)
+
+---
+
 ### Phase 6: Platform Expansion (Future)
 
 | ID | Task | Status | Owner | Notes |
 |----|------|--------|-------|-------|
 | 6.1 | Telegram inline buttons | ✅ | Claude | /start feature buttons, model pick, start callbacks |
-| 6.2 | Response streaming (Telegram) | 🔲 | Any AI | Progressive message updates |
+| 6.2 | Response streaming (Telegram) | 🔲 → 7B.5 | Any AI | Moved to Phase 7B.5 (Streaming User Feedback) |
 | 6.3 | Voice messages (Whisper + TTS) | 🔲 | Any AI | High effort |
 | 6.4 | Calendar/reminder tools | 🔲 | Any AI | Cron-based |
 | 6.5 | Email integration | 🔲 | Any AI | Cloudflare Email Workers |
@@ -245,6 +310,8 @@
 | 4.5 | Validate Acontext context quality | ⏳ PENDING |
 | 5.7 | Evaluate MCP hosting options | ⏳ PENDING |
 | 5.8 | Security review of code execution | ⏳ PENDING |
+| 7A.6 | Review CoVe verification results after 10+ tasks | ⏳ PENDING |
+| 7B.6 | Benchmark before/after — measure latency on 5 representative tasks | ⏳ PENDING |
 
 ---
 
@@ -272,6 +339,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-22 | Claude Opus 4.6 (Session: session_01NzU1oFRadZHdJJkiKi2sY8) | docs(roadmap): add Phase 7 Performance & Quality Engine — 10 tasks (5 quality from Agent Skills Engine Spec §2.2/§4.2/§5.1/§5.3/§8.2, 5 speed optimizations: speculative tools, model routing, pre-fetch, iteration reduction, streaming feedback). Updated dependency graph, human checkpoints, references | claude-share/core/GLOBAL_ROADMAP.md, claude-share/core/WORK_STATUS.md, claude-share/core/next_prompt.md
 2026-02-22 | Claude Opus 4.6 (Session: session_01NzU1oFRadZHdJJkiKi2sY8) | fix(task-processor): increase phase budgets (plan=120s, work=240s, review=60s) — old budgets (8s/18s/3s) used wall-clock time but were sized for CPU time, causing 1-2 iter/resume on slow models. Also fix auto-resume double-counting (PhaseBudgetExceeded handler + alarm handler both incremented autoResumeCount, burning 2 slots per cycle). 1098 tests pass | src/durable-objects/phase-budget.ts, src/durable-objects/phase-budget.test.ts, src/durable-objects/task-processor.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01NzU1oFRadZHdJJkiKi2sY8) | verify(dream): Deployment verification — DM.10 queue consumer PASS, DM.12 JWT auth PASS, shared secret auth PASS, smoke test PASS. Both jobs completed with PRs created (test-repo#1, moltworker#149). Worker: moltbot-sandbox.petrantonft.workers.dev | (no code changes — verification only)
 2026-02-21 | Claude Opus 4.6 (Session: session_01NzU1oFRadZHdJJkiKi2sY8) | feat(dream): DM.10-DM.14 — queue consumer (dead-letter, batch metrics), GitHubClient (replaces raw fetch), JWT auth (HMAC-SHA256 dreamTrustLevel claim), shipper deploy (auto-merge + CF staging), Vex review (14-pattern scanner, AI+rules), 53 new tests (1084 total) | src/dream/queue-consumer.ts, src/dream/github-client.ts, src/dream/jwt-auth.ts, src/dream/vex-review.ts, src/dream/build-processor.ts, src/dream/types.ts, src/dream/callbacks.ts, src/routes/dream.ts, src/index.ts
@@ -333,14 +401,37 @@
 graph TD
     P0[Phase 0: Quick Wins ✅] --> P1[Phase 1: Tool-Calling ✅]
     P0 --> P15[Phase 1.5: Upstream Sync ✅]
-    P1 --> P2[Phase 2: Observability & Costs]
-    P1 --> P25[Phase 2.5: Free APIs 🔲]
-    P1 --> P3[Phase 3: Compound Engineering]
-    P2 --> P4[Phase 4: Context Engineering]
+    P1 --> P2[Phase 2: Observability & Costs ✅]
+    P1 --> P25[Phase 2.5: Free APIs ✅]
+    P1 --> P3[Phase 3: Compound Engineering ✅]
+    P2 --> P4[Phase 4: Context Engineering ✅]
     P3 --> P4
     P4 --> P5[Phase 5: Advanced Capabilities]
-    P5 --> P6[Phase 6: Platform Expansion]
-    P25 --> P6
+    P5 --> P7[Phase 7: Performance & Quality Engine]
+    P4 --> P7
+    P25 --> P6[Phase 6: Platform Expansion]
+
+    subgraph "Phase 7A: Quality & Correctness"
+        P7A1[7A.1 CoVe Verification 🔲]
+        P7A2[7A.2 Smart Context Loading 🔲]
+        P7A3[7A.3 Destructive Op Guard 🔲]
+        P7A4[7A.4 Step Decomposition 🔲]
+        P7A5[7A.5 Prompt Caching 🔲]
+    end
+
+    subgraph "Phase 7B: Speed Optimizations"
+        P7B1[7B.1 Speculative Tools 🔲]
+        P7B2[7B.2 Model Routing 🔲]
+        P7B3[7B.3 Pre-fetch Context 🔲]
+        P7B4[7B.4 Reduce Iterations 🔲]
+        P7B5[7B.5 Streaming Feedback 🔲]
+    end
+
+    P7A4 --> P7B4
+    P7A4 --> P7A1
+    P5 --> P7A1
+    P4 --> P7A2
+    P4 --> P7B3
 
     subgraph "Phase 1 (1.1-1.5 ✅)"
         P1_1[1.1 Parallel tools ✅]
@@ -350,34 +441,9 @@ graph TD
         P1_5[1.5 Structured output ✅]
     end
 
-    subgraph "Phase 2.5: Free APIs ($0 cost)"
-        P25_1[2.5.1 URL metadata - Microlink]
-        P25_2[2.5.2 Charts - QuickChart]
-        P25_3[2.5.3 Weather - Open-Meteo]
-        P25_5[2.5.5 News feeds - HN/Reddit/arXiv]
-        P25_7[2.5.7 Daily briefing aggregator]
-    end
-
-    subgraph "Phase 2 (Medium)"
-        P2_1[2.1 Cost tracking]
-        P2_3[2.3 Acontext observability]
-    end
-
-    subgraph "Phase 3 (Medium)"
-        P3_1[3.1 Learning loop]
-        P3_2[3.2 Task phases]
-    end
-
     P1_1 --> P5_1[5.1 Multi-agent review]
     P1_2 --> P1_3
-    P1_2 --> P2_1
-    P25_1 --> P25_7
-    P25_2 --> P25_7
-    P25_3 --> P25_7
-    P25_5 --> P25_7
-    P2_3 --> P4
-    P3_1 --> P3_2
-    P3_2 --> P5_1
+    P1_2 --> P2
 ```
 
 ---
@@ -385,6 +451,7 @@ graph TD
 ## References
 
 - [Tool-Calling Analysis](../../brainstorming/tool-calling-analysis.md) — Full analysis with 10 gaps and 13 recommendations
+- [Agent Skills Engine Spec](../../brainstorming/AGENT_SKILLS_ENGINE_SPEC.md) — Full spec (Phase 7 extracts high-ROI pieces only)
 - [Free APIs Catalog](storia-free-apis-catalog.md) — 25+ free APIs for zero-cost feature expansion
 - [Future Integrations](../../brainstorming/future-integrations.md) — Original roadmap (pre-analysis)
 - [README](../../README.md) — User-facing documentation
