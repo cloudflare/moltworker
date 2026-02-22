@@ -36,10 +36,11 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills \
     && mkdir -p /root/clawd/warm-memory \
     && mkdir -p /root/clawd/.modification-history \
-    && mkdir -p /root/clawd/brain-memory/reflections
+    && mkdir -p /root/clawd/brain-memory/reflections \
+    && mkdir -p /root/clawd/warm-memory/portfolio
 
 # Copy startup script
-# Build cache bust: 2026-02-21-v76-heartbeat-protection
+# Build cache bust: 2026-02-22-v77-cron-fix-portfolio
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
@@ -49,6 +50,9 @@ COPY skills/ /root/clawd/.skills-pristine/
 
 # Copy permanent memory seed file (built-in OpenClaw memory, no temporal decay)
 COPY MEMORY.md /root/clawd/MEMORY.md
+
+# Copy HVF portfolio companies list for portfolio-research cron
+COPY portfolio-companies.md /root/clawd/portfolio-companies.md
 
 # Copy agent communication scripts
 COPY scripts/ /root/clawd/moltworker/scripts/

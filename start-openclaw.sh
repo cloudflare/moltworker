@@ -711,12 +711,17 @@ fi
       echo "[CRON] Gateway ready, starting cron restoration..."
 
       TOKEN_FLAG=""
-      # Use operator token from device-auth.json (device pairing auth)
-      OPERATOR_TOKEN=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('/root/.openclaw/identity/device-auth.json','utf8'));console.log(d.tokens.operator.token)}catch(e){}" 2>/dev/null)
-      if [ -n "$OPERATOR_TOKEN" ]; then
-        TOKEN_FLAG="--token $OPERATOR_TOKEN"
+      # Prefer OPENCLAW_GATEWAY_TOKEN (always valid in startup script's env)
+      # device-auth.json token goes stale after gateway restarts
+      if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+        TOKEN_FLAG="--token $OPENCLAW_GATEWAY_TOKEN"
       elif [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
         TOKEN_FLAG="--token $CLAWDBOT_GATEWAY_TOKEN"
+      else
+        OPERATOR_TOKEN=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('/root/.openclaw/identity/device-auth.json','utf8'));console.log(d.tokens.operator.token)}catch(e){}" 2>/dev/null)
+        if [ -n "$OPERATOR_TOKEN" ]; then
+          TOKEN_FLAG="--token $OPERATOR_TOKEN"
+        fi
       fi
 
       ALLOWED_MODEL="github-copilot/gpt-5-mini"
@@ -808,6 +813,37 @@ fi
             --thinking off \
             $TOKEN_FLAG \
             --message "Read /root/clawd/warm-memory/inbox.md (work: astin@hashed.com) and /root/clawd/warm-memory/inbox-personal.md (personal: gkswlghks118@gmail.com). Summarize important emails from both accounts: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-$(date +%Y-%m-%d).md. If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary"
+        fi
+      fi
+
+      # 6. portfolio-research (daily HVF portfolio company tracking)
+      PORTFOLIO_LIST="/root/clawd/portfolio-companies.md"
+      if [ -f "$PORTFOLIO_LIST" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "portfolio-research "; then
+          register_cron "PORTFOLIO" \
+            --name "portfolio-research" \
+            --every "24h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Read /root/clawd/portfolio-companies.md for the full HVF portfolio company list. Pick ~10 companies that haven't been researched recently (check warm-memory/portfolio/ for last-researched dates). Prioritize [최우선] and [긴급] companies. For each company, search the web for recent news, funding, product updates, partnerships, leadership changes, and plans. Save findings per-company to warm-memory/portfolio/COMPANY-SLUG.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/portfolio/COMPANY-SLUG.md --content FINDINGS --keywords COMPANY,portfolio --reason portfolio-research. Include last-researched date at top of each file."
+        fi
+      fi
+
+      # 7. kimchi-premium-monitor (every 5m, no-deliver, ±5% alert only)
+      KIMCHI_SCRIPT="/root/clawd/clawd-memory/scripts/kimchi-premium.js"
+      if [ -f "$KIMCHI_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "kimchi-premium-monitor "; then
+          register_cron "KIMCHI" \
+            --name "kimchi-premium-monitor" \
+            --every "5m" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            --no-deliver \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/clawd-memory/scripts/kimchi-premium.js — Check the output. If the kimchi premium exceeds ±5%, alert via Telegram. Otherwise, silently log the result. Do NOT send a message unless the threshold is breached."
         fi
       fi
 
