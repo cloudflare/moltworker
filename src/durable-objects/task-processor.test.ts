@@ -213,6 +213,11 @@ describe('TaskProcessor phases', () => {
     it('should inject planning prompt in messages for new task', async () => {
       const mockState = createMockState();
       const capturedBodies: Array<Record<string, unknown>> = [];
+      // Use a complex message to trigger plan phase (simple queries skip it)
+      const complexMessages = [
+        { role: 'system', content: 'You are helpful.' },
+        { role: 'user', content: 'Implement a new authentication system with OAuth2 and JWT tokens for the user service' },
+      ];
 
       vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
         const urlStr = typeof url === 'string' ? url : url.url;
@@ -248,7 +253,7 @@ describe('TaskProcessor phases', () => {
       const processor = new TaskProcessorClass(mockState as never, {} as never);
       await processor.fetch(new Request('https://do/process', {
         method: 'POST',
-        body: JSON.stringify(createTaskRequest()),
+        body: JSON.stringify(createTaskRequest({ messages: complexMessages })),
       }));
 
       await vi.waitFor(
@@ -266,12 +271,68 @@ describe('TaskProcessor phases', () => {
       );
       expect(planMsg).toBeDefined();
     });
+
+    it('should skip planning prompt for simple queries', async () => {
+      const mockState = createMockState();
+      const capturedBodies: Array<Record<string, unknown>> = [];
+
+      vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('api.telegram.org')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+            text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+          });
+        }
+        if (init?.body) {
+          try { const p = JSON.parse(init.body as string); if (p.messages) capturedBodies.push(p); } catch { /* */ }
+        }
+        const body = JSON.stringify({
+          choices: [{ message: { content: 'Done.', tool_calls: undefined }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 },
+        });
+        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(body), json: () => Promise.resolve(JSON.parse(body)) });
+      }));
+
+      const processor = new TaskProcessorClass(mockState as never, {} as never);
+      await processor.fetch(new Request('https://do/process', {
+        method: 'POST',
+        // Default "Hello" message is simple — plan phase should be skipped
+        body: JSON.stringify(createTaskRequest()),
+      }));
+
+      await vi.waitFor(
+        () => {
+          const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+          if (!task || task.status !== 'completed') throw new Error('not completed yet');
+        },
+        { timeout: 10000, interval: 50 }
+      );
+
+      // No planning prompt should be injected for simple queries
+      expect(capturedBodies.length).toBeGreaterThan(0);
+      const firstCallMessages = capturedBodies[0].messages as Array<Record<string, unknown>>;
+      const planMsg = firstCallMessages.find(
+        (m) => typeof m.content === 'string' && m.content.includes('[PLANNING PHASE]')
+      );
+      expect(planMsg).toBeUndefined();
+
+      // Phase should start at 'work' directly
+      const task = mockState.storage._store.get('task') as Record<string, unknown>;
+      expect(task.phase).toBe('work');
+    });
   });
 
   describe('phase transitions', () => {
     it('should transition plan → work → review when tools are used', async () => {
       const mockState = createMockState();
       const phaseLog: string[] = [];
+      // Use complex message to trigger plan phase
+      const complexMessages = [
+        { role: 'system', content: 'You are helpful.' },
+        { role: 'user', content: 'Implement a new authentication system with OAuth2 and JWT tokens for the user service' },
+      ];
 
       const origPut = mockState.storage.put;
       mockState.storage.put = vi.fn(async (key: string, value: unknown) => {
@@ -296,7 +357,7 @@ describe('TaskProcessor phases', () => {
       const processor = new TaskProcessorClass(mockState as never, {} as never);
       await processor.fetch(new Request('https://do/process', {
         method: 'POST',
-        body: JSON.stringify(createTaskRequest()),
+        body: JSON.stringify(createTaskRequest({ messages: complexMessages })),
       }));
 
       await vi.waitFor(
@@ -432,7 +493,64 @@ describe('TaskProcessor phases', () => {
   });
 
   describe('progress messages', () => {
-    it('should show "Planning..." as initial status message', async () => {
+    it('should show "Planning..." as initial status for complex tasks', async () => {
+      const mockState = createMockState();
+      const telegramBodies: Array<{ url: string; body: Record<string, unknown> }> = [];
+      const complexMessages = [
+        { role: 'system', content: 'You are helpful.' },
+        { role: 'user', content: 'Implement a new authentication system with OAuth2 and JWT tokens for the user service' },
+      ];
+
+      vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+        const urlStr = typeof url === 'string' ? url : url.url;
+        if (urlStr.includes('api.telegram.org') && init?.body) {
+          try {
+            const parsed = JSON.parse(init.body as string);
+            telegramBodies.push({ url: urlStr, body: parsed });
+          } catch { /* ignore */ }
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+            text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+          });
+        }
+        const body = JSON.stringify({
+          choices: [{
+            message: { content: 'Done.', tool_calls: undefined },
+            finish_reason: 'stop',
+          }],
+          usage: { prompt_tokens: 100, completion_tokens: 50 },
+        });
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(body),
+          json: () => Promise.resolve(JSON.parse(body)),
+        });
+      }));
+
+      const processor = new TaskProcessorClass(mockState as never, {} as never);
+      await processor.fetch(new Request('https://do/process', {
+        method: 'POST',
+        body: JSON.stringify(createTaskRequest({ messages: complexMessages })),
+      }));
+
+      await vi.waitFor(
+        () => {
+          const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+          if (!task || task.status !== 'completed') throw new Error('not completed yet');
+        },
+        { timeout: 10000, interval: 50 }
+      );
+
+      // First Telegram sendMessage should contain "Planning..."
+      const sendCalls = telegramBodies.filter(c => c.url.includes('sendMessage'));
+      expect(sendCalls.length).toBeGreaterThan(0);
+      const firstSend = sendCalls[0];
+      expect(firstSend.body.text).toContain('Planning...');
+    });
+
+    it('should show "Working..." as initial status for simple queries', async () => {
       const mockState = createMockState();
       const telegramBodies: Array<{ url: string; body: Record<string, unknown> }> = [];
 
@@ -467,6 +585,7 @@ describe('TaskProcessor phases', () => {
       const processor = new TaskProcessorClass(mockState as never, {} as never);
       await processor.fetch(new Request('https://do/process', {
         method: 'POST',
+        // Default "Hello" is a simple query — should skip plan phase
         body: JSON.stringify(createTaskRequest()),
       }));
 
@@ -478,11 +597,11 @@ describe('TaskProcessor phases', () => {
         { timeout: 10000, interval: 50 }
       );
 
-      // First Telegram sendMessage should contain "Planning..."
+      // First Telegram sendMessage should contain "Working..." (not "Planning...")
       const sendCalls = telegramBodies.filter(c => c.url.includes('sendMessage'));
       expect(sendCalls.length).toBeGreaterThan(0);
       const firstSend = sendCalls[0];
-      expect(firstSend.body.text).toContain('Planning...');
+      expect(firstSend.body.text).toContain('Working...');
     });
   });
 

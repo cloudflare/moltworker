@@ -2203,11 +2203,16 @@ export class TelegramHandler {
     // Inject relevant session history for cross-session continuity (Phase 4.4)
     const sessionContext = await this.getSessionContext(userId, messageText);
 
+    // Add conversation boundary hint when history exists to prevent context bleed
+    const conversationBoundary = history.length > 0
+      ? '\n\nIMPORTANT: Previous messages are provided for context only. Answer ONLY the latest user message. Do NOT re-execute tools or repeat answers from previous turns.'
+      : '';
+
     // Build messages array
     const messages: ChatMessage[] = [
       {
         role: 'system',
-        content: systemPrompt + toolHint + learningsHint + lastTaskHint + sessionContext,
+        content: systemPrompt + toolHint + learningsHint + lastTaskHint + sessionContext + conversationBoundary,
       },
       ...history.map(msg => ({
         role: msg.role as 'user' | 'assistant',

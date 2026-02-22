@@ -21,6 +21,31 @@ export type TaskPhase = 'plan' | 'work' | 'review';
 
 // Phase-aware prompts injected at each stage
 const PLAN_PHASE_PROMPT = 'Before starting, briefly outline your approach (2-3 bullet points): what tools you\'ll use and in what order. Then proceed immediately with execution.';
+
+/**
+ * Detect if the user's latest message is a simple query that doesn't need a planning phase.
+ * Simple queries: short factual lookups, conversions, greetings, single-tool tasks.
+ * Complex queries: multi-step coding tasks, analysis, research requiring multiple tools.
+ */
+function isSimpleQuery(messages: ChatMessage[]): boolean {
+  // Find the last user message (the actual query)
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+  if (!lastUserMsg) return false;
+  const text = typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '';
+  // Skip plan-phase injection messages
+  if (text.includes('[PLANNING PHASE]')) return false;
+
+  // Short messages (under 150 chars) that are conversational/lookup are simple
+  const trimmed = text.trim();
+  if (trimmed.length < 150) {
+    // Check for multi-step coding indicators
+    const complexPatterns = /\b(implement|refactor|create .+ (app|project|service)|build .+ (system|feature)|write .+ (test|code)|debug|fix .+ (bug|issue)|review .+ (code|pr)|analyze .+ (codebase|repo))\b/i;
+    if (!complexPatterns.test(trimmed)) {
+      return true;
+    }
+  }
+  return false;
+}
 const REVIEW_PHASE_PROMPT = 'Before delivering your final answer, briefly verify: (1) Did you answer the complete question? (2) Are all data points current and accurate? (3) Is anything missing?';
 const CODING_REVIEW_PROMPT = 'Before delivering your final answer, verify with evidence:\n(1) Did you answer the complete question? Cite specific tool outputs or file contents that support your answer.\n(2) If you made code changes, did you verify them with the relevant tool (github_read_file, web_fetch, etc.)? Do NOT claim changes were made unless a tool confirmed it.\n(3) If you ran commands or created PRs, check the tool result — did it actually succeed? If a tool returned an error, say so.\n(4) For any claim about repository state (files exist, code works, tests pass), you MUST have observed it from a tool output in this session. Do not assert repo state from memory.\n(5) If you could not fully complete the task, say what remains and why — do not claim completion.\nLabel your confidence: High (tool-verified), Medium (partially verified), or Low (inferred without tool confirmation).';
 const ORCHESTRA_REVIEW_PROMPT = 'CRITICAL REVIEW — verify before reporting:\n(1) Did github_create_pr SUCCEED? Check the tool result — if it returned an error (422, 403, etc.), you MUST retry with a different branch name or fix the issue. Do NOT claim success if the PR was not created.\n(2) Does your ORCHESTRA_RESULT block contain a REAL PR URL (https://github.com/...)? If not, the task is NOT complete.\n(3) Did you update ROADMAP.md and WORK_LOG.md in the same PR?\n(4) INCOMPLETE REFACTOR CHECK: If you created new module files (extracted code into separate files), did you ALSO update the SOURCE file to import from the new modules and remove the duplicated code? Creating new files without updating the original is dead code and the task is NOT complete. Check the github_create_pr tool result for "INCOMPLETE REFACTOR" warnings.\nIf any of these fail, fix the issue NOW before reporting.';
@@ -796,9 +821,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     task.autoResume = request.autoResume;
     task.reasoningLevel = request.reasoningLevel;
     task.responseFormat = request.responseFormat;
-    // Initialize structured task phase
-    task.phase = 'plan';
+    // Initialize structured task phase — skip plan for simple queries
+    const skipPlan = isSimpleQuery(request.messages);
+    task.phase = skipPlan ? 'work' : 'plan';
     task.phaseStartIteration = 0;
+    if (skipPlan) {
+      console.log('[TaskProcessor] Simple query detected — skipping plan phase');
+    }
     // Keep existing resume/stall counters only if resuming the SAME task
     const existingTask = await this.doState.storage.get<TaskState>('task');
     if (existingTask?.taskId === request.taskId) {
@@ -819,7 +848,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     const statusMessageId = await this.sendTelegramMessage(
       request.telegramToken,
       request.chatId,
-      '⏳ Planning...'
+      skipPlan ? '⏳ Working...' : '⏳ Planning...'
     );
 
     // Store status message ID for cancel cleanup
@@ -912,8 +941,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       }
     }
 
-    // Inject planning prompt for fresh tasks (not resumed from checkpoint)
-    if (!resumedFromCheckpoint) {
+    // Inject planning prompt for fresh tasks (not resumed from checkpoint, not simple queries)
+    if (!resumedFromCheckpoint && !skipPlan) {
       conversationMessages.push({
         role: 'user',
         content: `[PLANNING PHASE] ${PLAN_PHASE_PROMPT}`,
