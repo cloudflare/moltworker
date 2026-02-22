@@ -85,6 +85,9 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   // GitHub Copilot token for OpenClaw model auth
   if (env.GITHUB_COPILOT_TOKEN) envVars.GITHUB_COPILOT_TOKEN = env.GITHUB_COPILOT_TOKEN;
 
+  // Notion API key
+  if (env.NOTION_API_KEY) envVars.NOTION_API_KEY = env.NOTION_API_KEY;
+
   // Google AI API key for embeddings (memory_search)
   if (env.GOOGLE_AI_API_KEY) envVars.GOOGLE_AI_API_KEY = env.GOOGLE_AI_API_KEY;
 

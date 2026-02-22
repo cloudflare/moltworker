@@ -229,6 +229,15 @@ if [ -f "/root/clawd/moltworker/TOOLS.md" ] && [ ! -f "/root/clawd/TOOLS.md" ]; 
   echo "Symlinked TOOLS.md -> moltworker/TOOLS.md"
 fi
 
+# Write Notion API key to a file so any process can access it
+if [ -n "${NOTION_API_KEY:-}" ]; then
+  cat > /root/.notion.env << EOF
+NOTION_API_KEY=$NOTION_API_KEY
+EOF
+  chmod 600 /root/.notion.env
+  echo "Notion API key written to /root/.notion.env"
+fi
+
 # Write Google Calendar credentials to a file so any process can access them
 # (sandbox.startProcess doesn't inherit env vars from parent)
 if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
