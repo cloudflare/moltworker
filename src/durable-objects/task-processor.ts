@@ -190,6 +190,8 @@ interface TaskState {
   // Structured task phases (plan → work → review)
   phase?: TaskPhase;
   phaseStartIteration?: number;
+  // The actual answer from work phase, preserved so review doesn't replace it
+  workPhaseContent?: string;
 }
 
 // Task request from the worker
@@ -1602,6 +1604,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           task.phase = 'review';
           task.phaseStartIteration = task.iterations;
           phaseStartTime = Date.now(); // Reset phase budget clock
+          // Save the work-phase answer — this is the real content the user should see
+          task.workPhaseContent = choice.message.content || '';
           await this.doState.storage.put('task', task);
           console.log(`[TaskProcessor] Phase transition: work → review (iteration ${task.iterations})`);
 
@@ -1615,13 +1619,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             : REVIEW_PHASE_PROMPT;
 
           // Add the model's current response and inject review prompt
+          // Ask the model to revise its answer if issues are found, not just output a checklist
           conversationMessages.push({
             role: 'assistant',
             content: choice.message.content || '',
           });
           conversationMessages.push({
             role: 'user',
-            content: `[REVIEW PHASE] ${reviewPrompt}`,
+            content: `[REVIEW PHASE] ${reviewPrompt}\n\nIMPORTANT: If everything checks out, respond with exactly "LGTM". If there are issues, provide a REVISED version of your complete answer (not a review checklist). Do NOT output a review checklist — either say "LGTM" or give the corrected answer.`,
           });
           continue; // One more iteration for the review response
         }
@@ -1631,6 +1636,19 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         if (!hasContent && task.toolsUsed.length > 0) {
           // Construct fallback from tool data instead of "No response generated"
           task.result = this.constructFallbackResponse(conversationMessages, task.toolsUsed);
+        } else if (task.phase === 'review' && task.workPhaseContent) {
+          // Review phase completed — decide whether to use the work-phase answer or the revised one
+          const reviewContent = (choice.message.content || '').trim();
+          const isLgtm = /^\s*"?LGTM"?\s*\.?\s*$/i.test(reviewContent) || reviewContent.length < 20;
+          if (isLgtm) {
+            // Review approved — use the original work-phase answer
+            task.result = task.workPhaseContent;
+          } else {
+            // Review produced a revised answer — use the revision
+            let content = reviewContent;
+            content = content.replace(/<tool_call>\s*\{[\s\S]*?(?:\}\s*<\/tool_call>|\}[\s\S]*$)/g, '').trim();
+            task.result = content || task.workPhaseContent;
+          }
         } else {
           // Strip raw tool_call markup that weak models emit as text instead of using function calling
           let content = choice.message.content || 'No response generated.';
