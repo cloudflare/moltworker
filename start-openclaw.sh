@@ -293,6 +293,24 @@ BROWSEREOF
   echo "Browser instructions appended to TOOLS.md"
 fi
 
+# Inject Browser instructions into CLAUDE.md (agent instructions)
+CLAUDE_MD="/root/clawd/skills/CLAUDE.md"
+if [ -f "$CLAUDE_MD" ] && [ -n "$CDP_SECRET" ] && ! grep -q "read-page.js" "$CLAUDE_MD" 2>/dev/null; then
+  # Dereference symlink if needed
+  if [ -L "$CLAUDE_MD" ]; then
+    cp -L "$CLAUDE_MD" "${CLAUDE_MD}.tmp" && mv "${CLAUDE_MD}.tmp" "$CLAUDE_MD"
+  fi
+  sed -i '/## Self-Evolution/i\
+## Browser (IMPORTANT)\
+- 웹페이지 읽기 (JS 렌더링 포함): `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/read-page.js "URL" --max-chars 5000` 실행\
+- 스크린샷: `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js "URL" /tmp/screenshot.png` 실행\
+- **내장 browser 툴 사용하지 마라.** 페어링 오류 발생함. 반드시 위 exec 스크립트만 사용.\
+' "$CLAUDE_MD"
+  # Also copy to workspace root (OpenClaw reads from workspace)
+  cp -f "$CLAUDE_MD" "/root/clawd/CLAUDE.md" 2>/dev/null || true
+  echo "Browser instructions injected into CLAUDE.md"
+fi
+
 # ============================================================
 # ONBOARD (only if no config exists yet)
 # ============================================================
