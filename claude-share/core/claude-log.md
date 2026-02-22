@@ -4,6 +4,40 @@
 
 ---
 
+## Session: 2026-02-22 | S48.1-fix: Phase Budget Wall-Clock Fix + Auto-Resume Double-Counting (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-Wh6Cx`
+**Status:** Completed
+
+### Summary
+Fixed two bugs in the task processor that caused orchestra tasks to spin through 10 auto-resumes with minimal progress (5 iterations, 10 tools in 30 minutes):
+
+1. **Phase budgets used wall-clock time but were sized for CPU time** — budgets were plan=8s, work=18s, review=3s using `Date.now()`. But Cloudflare's 30s limit is CPU time, and API calls spend 10-30s in I/O wait (not CPU). A single Kimi API call exceeded the 18s work budget. Increased to plan=120s, work=240s, review=60s.
+
+2. **Auto-resume double-counting** — Both `PhaseBudgetExceededError` handler and alarm handler incremented `autoResumeCount`, burning 2 slots per resume cycle. This explains gap pattern in user messages (2→4→5→7→8→10). Removed increment from PhaseBudgetExceeded handler (alarm handler owns resume lifecycle).
+
+### Changes Made
+- Increased phase budgets: plan 8s→120s, work 18s→240s, review 3s→60s
+- Removed `autoResumeCount` increment from PhaseBudgetExceededError handler
+- Updated all 15 phase-budget tests to match new values
+
+### Files Modified
+- `src/durable-objects/phase-budget.ts`
+- `src/durable-objects/phase-budget.test.ts`
+- `src/durable-objects/task-processor.ts`
+
+### Tests
+- [x] Tests pass (1098/1098)
+- [x] Typecheck not explicitly run (no type changes)
+
+### Notes for Next Session
+- Monitor orchestra tasks after deploy — should see 10-15 iterations per resume instead of 1-2
+- The 10 auto-resume budget should now give ~100-150 total iterations (vs ~10 before)
+- If Cloudflare actually kills DOs at 30s CPU, the budgets may need tuning (but CPU usage per iteration is ~50-100ms, so 240s wall-clock ≈ 1-2s CPU)
+
+---
+
 ## Session: 2026-02-22 | Deployment Verification — Dream Machine Pipeline (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
 
 **AI:** Claude Opus 4.6

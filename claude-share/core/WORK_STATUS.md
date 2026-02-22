@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-22 (DM.10-DM.14 deployed & verified in production — all endpoints confirmed working)
+**Last Updated:** 2026-02-22 (S48.1-fix: phase budget wall-clock fix + auto-resume double-counting fix)
 
 ---
 
@@ -38,7 +38,8 @@
 | 2.3 | Acontext observability integration | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 | 2.5.9 | Holiday awareness (Nager.Date) | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 | 4.1 | Token-budgeted context retrieval | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-NF641` |
-| S48.1 | Phase budget circuit breakers (plan=8s, work=18s, review=3s) | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
+| S48.1 | Phase budget circuit breakers (plan=120s, work=240s, review=60s) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
+| S48.1-fix | Fix phase budgets (wall-clock vs CPU) + auto-resume double-counting | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-Wh6Cx` |
 | S48.2 | Parallel tools allSettled + PARALLEL_SAFE_TOOLS whitelist | Claude Opus 4.6 | ✅ Complete | `claude/budget-circuit-breakers-parallel-bAtHI` |
 | 4.2 | Replace estimateTokens with real tokenizer (gpt-tokenizer cl100k_base) | Claude Opus 4.6 | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
 | 2.4 | Acontext sessions dashboard in admin UI | Codex+Claude | ✅ Complete | `claude/implement-p1-guardrails-DcOgI` |
