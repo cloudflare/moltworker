@@ -153,6 +153,11 @@ if [ -n "$GITHUB_REPO_URL" ]; then
     git -C "$CLONE_DIR" remote set-url origin "$CLONE_URL"
     git -C "$CLONE_DIR" pull --ff-only || echo "[WARN] git pull failed, continuing with existing version"
   else
+    # R2 restore may have created this directory without .git — remove it so clone succeeds
+    if [ -d "$CLONE_DIR" ]; then
+      echo "Removing stale $CLONE_DIR (no .git, likely from R2 restore)..."
+      rm -rf "$CLONE_DIR"
+    fi
     echo "Cloning $GITHUB_REPO_URL into $CLONE_DIR..."
     git clone "$CLONE_URL" "$CLONE_DIR" || echo "[WARN] git clone failed, continuing without repo"
   fi
@@ -160,15 +165,50 @@ if [ -n "$GITHUB_REPO_URL" ]; then
 fi
 
 # Symlink repo contents into workspace
-if [ -n "$CLONE_DIR" ] && [ -d "$CLONE_DIR" ]; then
-  for item in "$CLONE_DIR"/*; do
+# Use GITHUB_REPO_SUBDIR (e.g. "moltworker") to scope memory to a subdirectory
+REPO_LINK_DIR="$CLONE_DIR"
+if [ -n "${GITHUB_REPO_SUBDIR:-}" ] && [ -d "$CLONE_DIR/$GITHUB_REPO_SUBDIR" ]; then
+  REPO_LINK_DIR="$CLONE_DIR/$GITHUB_REPO_SUBDIR"
+  echo "Using repo subdirectory: $GITHUB_REPO_SUBDIR"
+
+  # Ensure key memory directories exist in repo subdirectory
+  for memdir in brain-memory warm-memory memory scripts; do
+    mkdir -p "$REPO_LINK_DIR/$memdir"
+  done
+
+  # Merge R2-restored workspace content INTO repo subdirectory, then symlink back.
+  # This ensures agent writes go to the git repo (via symlinks) and R2 data is preserved.
+  for memdir in brain-memory warm-memory memory; do
+    WS_DIR="/root/clawd/$memdir"
+    REPO_DIR="$REPO_LINK_DIR/$memdir"
+    if [ -d "$WS_DIR" ] && [ ! -L "$WS_DIR" ]; then
+      # Real directory from R2 restore — merge contents into repo dir
+      cp -rn "$WS_DIR"/* "$REPO_DIR/" 2>/dev/null || true
+      rm -rf "$WS_DIR"
+      ln -sfn "$REPO_DIR" "$WS_DIR"
+      echo "Merged $memdir into repo and symlinked back"
+    elif [ ! -e "$WS_DIR" ]; then
+      ln -sfn "$REPO_DIR" "$WS_DIR"
+      echo "Symlinked $memdir -> repo"
+    fi
+  done
+fi
+if [ -n "$REPO_LINK_DIR" ] && [ -d "$REPO_LINK_DIR" ]; then
+  for item in "$REPO_LINK_DIR"/*; do
     name=$(basename "$item")
     [ "$name" = ".git" ] && continue
     [ "$name" = "README.md" ] && continue
+    # Skip dirs already handled by merge logic above
+    case "$name" in brain-memory|warm-memory|memory) continue ;; esac
+    WS_TARGET="/root/clawd/$name"
     if [ -d "$item" ]; then
-      ln -sfn "$item" "/root/clawd/$name"
+      if [ -d "$WS_TARGET" ] && [ ! -L "$WS_TARGET" ]; then
+        cp -rn "$WS_TARGET"/* "$item/" 2>/dev/null || true
+        rm -rf "$WS_TARGET"
+      fi
+      ln -sfn "$item" "$WS_TARGET"
     else
-      ln -sf "$item" "/root/clawd/$name"
+      ln -sf "$item" "$WS_TARGET"
     fi
     echo "Symlinked $name -> $item"
   done
@@ -626,6 +666,8 @@ echo "password=${GITHUB_PAT}"
 CREDEOF
   chmod +x /usr/local/bin/git-credential-pat
   git config --global credential.helper "/usr/local/bin/git-credential-pat"
+  git config --global user.name "moltbot"
+  git config --global user.email "moltbot@astin-43b.workers.dev"
   echo "Git credential helper configured (GITHUB_PAT for github.com)"
 fi
 

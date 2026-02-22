@@ -40,7 +40,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/warm-memory/portfolio
 
 # Copy startup script
-# Build cache bust: 2026-02-22-v77-cron-fix-portfolio
+# Build cache bust: 2026-02-22-v79-fix-r2-git-conflict
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 

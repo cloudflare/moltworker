@@ -49,6 +49,7 @@ export interface MoltbotEnv {
   GITHUB_REPO_URL?: string; // GitHub repo URL to clone on startup
   GITHUB_TOKEN?: string; // GitHub personal access token for private repos
   GITHUB_PAT?: string; // GitHub personal access token (fallback for GITHUB_TOKEN)
+  GITHUB_REPO_SUBDIR?: string; // Subdirectory within the GitHub repo to scope memory to (e.g. "moltworker")
   TELEGRAM_OWNER_ID?: string; // Telegram user ID to auto-allowlist on startup
   // Google Calendar OAuth 2.0 credentials
   GOOGLE_CLIENT_ID?: string;
