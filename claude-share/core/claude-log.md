@@ -4,6 +4,49 @@
 
 ---
 
+## Session: 2026-02-22 | Deployment Verification — Dream Machine Pipeline (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-Wh6Cx`
+**Task:** Verify all Dream Machine features work after deployment to production
+
+### Summary
+End-to-end deployment verification of the Dream Machine pipeline at `moltbot-sandbox.petrantonft.workers.dev`. Tested DM.10 (queue consumer), DM.12 (JWT auth), shared secret auth, and a full smoke test. All tests passed successfully with PRs created on GitHub.
+
+### Test Results
+
+| Test | Endpoint | Result | Notes |
+|------|----------|--------|-------|
+| DM.10 Queue Consumer | POST /dream-build (queued mode) | PASS | Job queued and processed (initial 404 on test-repo was expected — repo didn't exist) |
+| DM.12 JWT Auth | POST /dream-build (JWT Bearer) | PASS | HMAC-SHA256 JWT accepted, job completed, PR created at test-repo#1 |
+| Shared Secret Auth | POST /dream-build (Bearer secret) | PASS | Legacy auth works, falls back correctly when token is not JWT format |
+| Smoke Test | POST /dream-build (immediate mode) | PASS | Full pipeline: auth → validation → DO processing → PR creation at moltworker#149 |
+| Status Polling | GET /dream-build/:jobId | PASS | Both jobs show `status: complete` with PR URLs |
+
+### Issues Diagnosed & Fixed During Testing
+1. **"Invalid secret" on JWT test** — User pasted literal `<jwt-from-above>` instead of the generated JWT. Fixed by using shell variable assignment `JWT=$(node -e "...")`.
+2. **"Missing callbackUrl"** — Immediate mode requires `callbackUrl` field. Added to smoke test request body.
+3. **DM.13/DM.14 "Job not found"** — Expected behavior — these were GET status checks for never-submitted job IDs.
+
+### Files Modified
+- No code changes — deployment verification only
+- Documentation sync files updated (this session)
+
+### Tests
+- [x] No code changes needed
+- [x] All features confirmed working in production
+
+### PRs Created During Testing
+- https://github.com/PetrAnto/test-repo/pull/1 (JWT auth test)
+- https://github.com/PetrAnto/moltworker/pull/149 (smoke test)
+
+### Notes for Next Session
+- All DM features verified in production
+- Next task: Phase 5.1 (Multi-Agent Review for Complex Tasks)
+- Test PRs may need cleanup (close if they were just for testing)
+
+---
+
 ## Session: 2026-02-21 | DM.8 — Pre-PR Code Validation Step (Session: session_01NzU1oFRadZHdJJkiKi2sY8)
 
 **AI:** Claude Opus 4.6

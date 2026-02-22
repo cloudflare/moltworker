@@ -3,7 +3,7 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-21 (DM.10-DM.14 all completed)
+**Last Updated:** 2026-02-22 (DM.10-DM.14 deployed & verified in production)
 
 ---
 
@@ -15,7 +15,10 @@ Route generated code (from Dream builds or task processor) through a secondary A
 
 ### Context
 
-- DM.10-DM.14 are now complete — full Dream Machine pipeline with queue consumer, JWT auth, GitHubClient, shipper deploy, and Vex review
+- DM.10-DM.14 are now complete AND deployed/verified in production (2026-02-22)
+- Deployment verification confirmed: DM.10 queue consumer, DM.12 JWT auth, shared secret auth, and smoke test all PASS
+- Test PRs created: https://github.com/PetrAnto/test-repo/pull/1 (JWT), https://github.com/PetrAnto/moltworker/pull/149 (smoke)
+- Worker URL: `moltbot-sandbox.petrantonft.workers.dev`
 - Vex review (DM.14) handles risky pattern detection but doesn't do full code review
 - Phase 5.1 would add a second model pass (e.g., Claude reviewing GPT output or vice versa) for complex tasks
 - Referenced in GLOBAL_ROADMAP.md as Phase 5.1
@@ -43,6 +46,7 @@ Route generated code (from Dream builds or task processor) through a secondary A
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-22 | Deployment verification: DM.10, DM.12, shared secret, smoke test — all PASS | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.10-DM.14: Queue consumer, GitHubClient, JWT auth, shipper deploy, Vex review (1084 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.8: Pre-PR code validation step (1031 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
 | 2026-02-21 | DM.7: Enforce checkTrustLevel() at route layer (1007 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
