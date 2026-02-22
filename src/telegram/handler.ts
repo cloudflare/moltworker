@@ -28,6 +28,7 @@ import {
 } from '../orchestra/orchestra';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import { fetchDOWithRetry } from '../utils/do-retry';
+import { markdownToTelegramHtml } from '../utils/telegram-format';
 import {
   MODELS,
   getModel,
@@ -2396,15 +2397,23 @@ export class TelegramHandler {
       await this.storage.addMessage(userId, 'user', messageText);
       await this.storage.addMessage(userId, 'assistant', responseText);
 
-      // Send response (handle long messages)
+      // Send response with HTML formatting (handle long messages)
       if (responseText.length > 4000) {
         // Split into chunks for long responses
         const chunks = this.splitMessage(responseText, 4000);
         for (const chunk of chunks) {
-          await this.bot.sendMessage(chatId, chunk);
+          try {
+            await this.bot.sendMessage(chatId, markdownToTelegramHtml(chunk), { parseMode: 'HTML' });
+          } catch {
+            await this.bot.sendMessage(chatId, chunk); // Fallback: plain text
+          }
         }
       } else {
-        await this.bot.sendMessage(chatId, responseText);
+        try {
+          await this.bot.sendMessage(chatId, markdownToTelegramHtml(responseText), { parseMode: 'HTML' });
+        } catch {
+          await this.bot.sendMessage(chatId, responseText); // Fallback: plain text
+        }
       }
     } catch (error) {
       await this.bot.sendMessage(chatId, `Error: ${error instanceof Error ? error.message : 'Unknown error'}`);

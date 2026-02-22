@@ -9,6 +9,7 @@ import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '.
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
+import { markdownToTelegramHtml } from '../utils/telegram-format';
 import { extractLearning, storeLearning, storeLastTaskSummary, storeSessionSummary, type SessionSummary } from '../openrouter/learnings';
 import { UserStorage } from '../openrouter/storage';
 import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
@@ -2098,17 +2099,34 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     text: string
   ): Promise<number | null> {
     try {
+      // Try HTML parse mode first for rendered markdown
+      const html = markdownToTelegramHtml(text);
       const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
-          text: text.slice(0, 4000), // Telegram limit
+          text: html.slice(0, 4000),
+          parse_mode: 'HTML',
         }),
       });
 
       const result = await response.json() as { ok: boolean; result?: { message_id: number } };
-      return result.ok ? result.result?.message_id || null : null;
+      if (result.ok) {
+        return result.result?.message_id || null;
+      }
+
+      // Fallback: send as plain text if HTML parsing failed
+      const fallback = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: text.slice(0, 4000),
+        }),
+      });
+      const fbResult = await fallback.json() as { ok: boolean; result?: { message_id: number } };
+      return fbResult.ok ? fbResult.result?.message_id || null : null;
     } catch {
       return null;
     }
@@ -2124,7 +2142,27 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     buttons: Array<Array<{ text: string; callback_data: string }>>
   ): Promise<number | null> {
     try {
+      const html = markdownToTelegramHtml(text);
       const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: html.slice(0, 4000),
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: buttons,
+          },
+        }),
+      });
+
+      const result = await response.json() as { ok: boolean; result?: { message_id: number } };
+      if (result.ok) {
+        return result.result?.message_id || null;
+      }
+
+      // Fallback: plain text without parse_mode
+      const fallback = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2135,9 +2173,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           },
         }),
       });
-
-      const result = await response.json() as { ok: boolean; result?: { message_id: number } };
-      return result.ok ? result.result?.message_id || null : null;
+      const fbResult = await fallback.json() as { ok: boolean; result?: { message_id: number } };
+      return fbResult.ok ? fbResult.result?.message_id || null : null;
     } catch {
       return null;
     }
