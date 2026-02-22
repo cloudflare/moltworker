@@ -258,9 +258,10 @@ export class OpenRouterClient {
         }
 
         // Add assistant message with tool calls to conversation
+        // Use placeholder for empty content — some providers reject empty assistant messages
         const assistantMsg: ChatMessage = {
           role: 'assistant',
-          content: choice.message.content,
+          content: choice.message.content || '(calling tools)',
           tool_calls: choice.message.tool_calls,
         };
         if (choice.message.reasoning_content) {

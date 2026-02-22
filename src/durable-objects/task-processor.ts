@@ -283,6 +283,28 @@ function getAutoResumeLimit(modelAlias: string): number {
   return model?.isFree ? MAX_AUTO_RESUMES_FREE : MAX_AUTO_RESUMES_DEFAULT;
 }
 
+/**
+ * Sanitize messages before sending to API providers.
+ * Some providers (Moonshot/Kimi) reject assistant messages with empty content.
+ * - Assistant messages with tool_calls: set content to null (valid per OpenAI spec)
+ * - Assistant messages without tool_calls and empty content: set to "(empty)"
+ */
+function sanitizeMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map(msg => {
+    if (msg.role !== 'assistant') return msg;
+    const content = msg.content;
+    const isEmpty = content === '' || content === null || content === undefined;
+    if (!isEmpty) return msg;
+    if (msg.tool_calls && msg.tool_calls.length > 0) {
+      // Tool-calling message: null content is valid per spec, but some providers
+      // still reject it. Use a minimal placeholder.
+      return { ...msg, content: '(calling tools)' };
+    }
+    // Non-tool assistant message with empty content
+    return { ...msg, content: '(empty)' };
+  });
+}
+
 export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private doState: DurableObjectState;
   private r2?: R2Bucket;
@@ -1077,7 +1099,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               let progressCount = 0;
               result = await client.chatCompletionStreamingWithTools(
                 task.modelAlias, // Pass alias - method will resolve to model ID (supports rotation)
-                conversationMessages,
+                sanitizeMessages(conversationMessages),
                 {
                   maxTokens: 16384,
                   temperature: getTemperature(task.modelAlias),
@@ -1125,7 +1147,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
                 const requestBody: Record<string, unknown> = {
                     model: getModelId(task.modelAlias),
-                    messages: conversationMessages,
+                    messages: sanitizeMessages(conversationMessages),
                     max_tokens: clampMaxTokens(task.modelAlias, 16384),
                     temperature: getTemperature(task.modelAlias),
                   };
@@ -1348,7 +1370,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           // Add assistant message with tool calls (preserve reasoning_content for Moonshot thinking mode)
           const assistantMsg: ChatMessage = {
             role: 'assistant',
-            content: choice.message.content,
+            content: choice.message.content || null,
             tool_calls: choice.message.tool_calls,
           };
           if (choice.message.reasoning_content) {
