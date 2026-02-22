@@ -17,6 +17,7 @@ import { createAcontextClient, toOpenAIMessages } from '../acontext/client';
 import { estimateTokens, compressContextBudgeted, sanitizeToolPairs } from './context-budget';
 import { checkPhaseBudget, PhaseBudgetExceededError } from './phase-budget';
 import { validateToolResult, createToolErrorTracker, trackToolError, generateCompletionWarning, adjustConfidence, type ToolErrorTracker } from '../guardrails/tool-validator';
+import { scanToolCallForRisks } from '../guardrails/destructive-op-guard';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -356,6 +357,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         const shared = await inFlight;
         return { tool_call_id: toolCall.id, content: shared.content };
       }
+    }
+
+    // Destructive operation guard (Phase 7A.3): block critical/high-risk tool calls
+    const riskCheck = scanToolCallForRisks(toolCall);
+    if (riskCheck.blocked) {
+      console.log(`[TaskProcessor] BLOCKED destructive op: ${toolName} — ${riskCheck.flags.map(f => f.category).join(', ')}`);
+      return { tool_call_id: toolCall.id, content: riskCheck.message! };
     }
 
     // Execute the tool (wrapped in a promise for in-flight dedup)

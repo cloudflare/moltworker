@@ -4,6 +4,37 @@
 
 ---
 
+## Session: 2026-02-22 | 7A.3 Destructive Op Guard (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7A.3 Destructive Op Guard. Reused the 14 RISKY_PATTERNS from Vex review (DM.14) to create a pre-execution safety check in the task processor's tool execution path. Critical/high severity patterns (rm -rf, DROP TABLE, --force, eval, child_process) block tool execution. Medium severity patterns (.env, process.exit, SECRET) log warnings but allow execution.
+
+### Changes Made
+- Created `src/guardrails/destructive-op-guard.ts` — `scanToolCallForRisks()` function
+- Exported `RISKY_PATTERNS` and `FlaggedItem` from `src/dream/vex-review.ts` for reuse
+- Wired guard into `executeToolWithCache()` in `src/durable-objects/task-processor.ts`
+- Guards 4 mutation-capable tools: sandbox_exec, github_api, github_create_pr, cloudflare_api
+- 25 unit tests covering all severity levels, safe ops, multiple flags, message format
+
+### Files Modified
+- `src/guardrails/destructive-op-guard.ts` (new)
+- `src/guardrails/destructive-op-guard.test.ts` (new)
+- `src/dream/vex-review.ts` (export RISKY_PATTERNS + FlaggedItem)
+- `src/durable-objects/task-processor.ts` (wire guard)
+
+### Tests
+- [x] Tests pass (1158 total, 25 new)
+- [x] Typecheck passes
+
+### Notes for Next Session
+Next task in queue: **7A.5 Prompt Caching** — add `cache_control` for Anthropic direct API calls. Low effort.
+
+---
+
 ## Session: 2026-02-22 | 7A.2 Smart Context Loading (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6

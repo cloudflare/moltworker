@@ -12,7 +12,7 @@ import type { WorkItem, VexReviewResult } from './types';
 import type { OpenRouterClient, ChatMessage } from '../openrouter/client';
 
 /** Patterns that trigger Vex review (superset of destructive ops) */
-const RISKY_PATTERNS = [
+export const RISKY_PATTERNS = [
   { pattern: /DROP\s+TABLE/i, category: 'database', severity: 'critical' as const },
   { pattern: /DROP\s+DATABASE/i, category: 'database', severity: 'critical' as const },
   { pattern: /TRUNCATE\s+TABLE/i, category: 'database', severity: 'high' as const },
@@ -29,7 +29,7 @@ const RISKY_PATTERNS = [
   { pattern: /SECRET|PASSWORD|TOKEN/i, category: 'secrets', severity: 'medium' as const },
 ];
 
-interface FlaggedItem {
+export interface FlaggedItem {
   path: string;
   pattern: string;
   category: string;
