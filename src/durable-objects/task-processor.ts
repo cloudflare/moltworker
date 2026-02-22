@@ -5,7 +5,7 @@
  */
 
 import { DurableObject } from 'cloudflare:workers';
-import { createOpenRouterClient, type ChatMessage, type ResponseFormat } from '../openrouter/client';
+import { createOpenRouterClient, parseSSEStream, type ChatMessage, type ResponseFormat } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
@@ -1128,62 +1128,49 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               break; // Success! Exit retry loop
 
             } else {
-              // Non-OpenRouter providers: use standard fetch (with timeout/heartbeat)
-              let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-              let response: Response;
+              // Non-OpenRouter providers: use SSE streaming (same as OpenRouter)
+              // This prevents DO termination during long Kimi/DeepSeek API calls
               const abortController = new AbortController();
-              // 2 minute timeout — actually cancels the connection via AbortController
               const fetchTimeout = setTimeout(() => abortController.abort(), 120000);
 
+              const requestBody: Record<string, unknown> = {
+                model: getModelId(task.modelAlias),
+                messages: sanitizeMessages(conversationMessages),
+                max_tokens: clampMaxTokens(task.modelAlias, 16384),
+                temperature: getTemperature(task.modelAlias),
+                stream: true,
+              };
+              if (useTools) {
+                requestBody.tools = TOOLS_WITHOUT_BROWSER;
+                requestBody.tool_choice = 'auto';
+              }
+              if (request.responseFormat) {
+                requestBody.response_format = request.responseFormat;
+              }
+
+              // Inject reasoning parameter for direct API models (DeepSeek V3.2, etc.)
+              const reasoningLevel = request.reasoningLevel ?? detectReasoningLevel(conversationMessages);
+              const reasoningParam = getReasoningParam(task.modelAlias, reasoningLevel);
+              if (reasoningParam) {
+                requestBody.reasoning = reasoningParam;
+              }
+
+              let response: Response;
               try {
-                // Heartbeat every 10 seconds to keep DO active
-                let heartbeatCount = 0;
-                heartbeatInterval = setInterval(() => {
-                  heartbeatCount++;
-                  console.log(`[TaskProcessor] Heartbeat #${heartbeatCount} - API call in progress (${heartbeatCount * 10}s)`);
-                  task.lastUpdate = Date.now();
-                  this.doState.storage.put('task', task).catch(() => {});
-                }, 10000);
-
-                const requestBody: Record<string, unknown> = {
-                    model: getModelId(task.modelAlias),
-                    messages: sanitizeMessages(conversationMessages),
-                    max_tokens: clampMaxTokens(task.modelAlias, 16384),
-                    temperature: getTemperature(task.modelAlias),
-                  };
-                if (useTools) {
-                  requestBody.tools = TOOLS_WITHOUT_BROWSER;
-                  requestBody.tool_choice = 'auto';
-                }
-                if (request.responseFormat) {
-                  requestBody.response_format = request.responseFormat;
-                }
-
-                // Inject reasoning parameter for direct API models (DeepSeek V3.2, etc.)
-                const reasoningLevel = request.reasoningLevel ?? detectReasoningLevel(conversationMessages);
-                const reasoningParam = getReasoningParam(task.modelAlias, reasoningLevel);
-                if (reasoningParam) {
-                  requestBody.reasoning = reasoningParam;
-                }
-
                 response = await fetch(providerConfig.baseUrl, {
                   method: 'POST',
                   headers,
                   body: JSON.stringify(requestBody),
                   signal: abortController.signal,
                 });
-                console.log(`[TaskProcessor] API call completed with status: ${response.status}`);
+                clearTimeout(fetchTimeout);
+                console.log(`[TaskProcessor] ${provider} streaming response: ${response.status}`);
               } catch (fetchError) {
                 clearTimeout(fetchTimeout);
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
-                // Convert AbortError to a clear timeout message
                 if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
                   throw new Error(`${provider} API timeout (2 min) — connection aborted`);
                 }
                 throw fetchError;
-              } finally {
-                clearTimeout(fetchTimeout);
-                if (heartbeatInterval) clearInterval(heartbeatInterval);
               }
 
               if (!response.ok) {
@@ -1191,30 +1178,25 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 throw new Error(`${provider} API error (${response.status}): ${errorText.slice(0, 200)}`);
               }
 
-              // Read response body with timeout
-              let readHeartbeat: ReturnType<typeof setInterval> | null = null;
-              try {
-                let readHeartbeatCount = 0;
-                readHeartbeat = setInterval(() => {
-                  readHeartbeatCount++;
-                  console.log(`[TaskProcessor] Reading body heartbeat #${readHeartbeatCount} (${readHeartbeatCount * 2}s)`);
+              if (!response.body) {
+                throw new Error(`${provider} API returned no response body`);
+              }
+
+              // Parse SSE stream with progress callback for watchdog heartbeat
+              let directProgressCount = 0;
+              result = await parseSSEStream(response.body, 45000, () => {
+                directProgressCount++;
+                if (directProgressCount % 10 === 0) {
                   task.lastUpdate = Date.now();
                   this.doState.storage.put('task', task).catch(() => {});
-                }, 2000);
+                }
+                if (directProgressCount % 100 === 0) {
+                  console.log(`[TaskProcessor] ${provider} streaming: ${directProgressCount} chunks`);
+                }
+              });
 
-                const textPromise = response.text();
-                const textTimeoutPromise = new Promise<never>((_, reject) => {
-                  setTimeout(() => reject(new Error('response.text() timeout after 30s')), 30000);
-                });
-
-                const responseText = await Promise.race([textPromise, textTimeoutPromise]);
-                console.log(`[TaskProcessor] Response size: ${responseText.length} chars`);
-                result = JSON.parse(responseText);
-                console.log(`[TaskProcessor] JSON parsed successfully`);
-                break; // Success!
-              } finally {
-                if (readHeartbeat) clearInterval(readHeartbeat);
-              }
+              console.log(`[TaskProcessor] ${provider} streaming complete: ${directProgressCount} chunks`);
+              break; // Success!
             }
 
           } catch (apiError) {

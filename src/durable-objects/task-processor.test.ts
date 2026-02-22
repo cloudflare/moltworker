@@ -13,13 +13,17 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 
-// Mock the openrouter modules
-vi.mock('../openrouter/client', () => ({
-  createOpenRouterClient: vi.fn(() => ({
-    chat: vi.fn(),
-    chatCompletionStreamingWithTools: vi.fn(),
-  })),
-}));
+// Mock the openrouter modules (keep parseSSEStream real — used by direct API streaming)
+vi.mock('../openrouter/client', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../openrouter/client')>();
+  return {
+    createOpenRouterClient: vi.fn(() => ({
+      chat: vi.fn(),
+      chatCompletionStreamingWithTools: vi.fn(),
+    })),
+    parseSSEStream: original.parseSSEStream,
+  };
+});
 
 vi.mock('../openrouter/tools', () => ({
   executeTool: vi.fn().mockResolvedValue({
@@ -116,6 +120,52 @@ function createTaskRequest(overrides: Record<string, unknown> = {}) {
 }
 
 /**
+ * Build an SSE Response from a simple API response object.
+ * Used by test mocks to simulate streaming responses from direct API providers.
+ * Accepts either simple {content, tool_calls} or old-style {choices: [{message: ...}]} format.
+ */
+function buildSSEResponse(r: {
+  content?: string | null;
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+}): Response {
+  const chunks: string[] = [];
+  if (r.content) {
+    chunks.push(`data: ${JSON.stringify({
+      id: 'test',
+      choices: [{ delta: { content: r.content } }],
+    })}\n\n`);
+  }
+  if (r.tool_calls) {
+    const toolCallDeltas = r.tool_calls.map((tc, i) => ({
+      index: i, id: tc.id, type: tc.type, function: tc.function,
+    }));
+    chunks.push(`data: ${JSON.stringify({
+      id: 'test',
+      choices: [{ delta: { tool_calls: toolCallDeltas } }],
+    })}\n\n`);
+  }
+  chunks.push(`data: ${JSON.stringify({
+    id: 'test',
+    choices: [{ finish_reason: r.tool_calls ? 'tool_calls' : 'stop' }],
+    usage: { prompt_tokens: 100, completion_tokens: 50 },
+  })}\n\n`);
+  chunks.push('data: [DONE]\n\n');
+  return new Response(chunks.join(''), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+}
+
+/**
+ * Convert old-style responseData (with choices[].message) to an SSE Response.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function responseDataToSSE(responseData: Record<string, any>): Response {
+  const msg = responseData.choices[0].message;
+  return buildSSEResponse({ content: msg.content ?? undefined, tool_calls: msg.tool_calls });
+}
+
+/**
  * Build a mock fetch function that returns sequential API responses.
  * fetch() is called as fetch(url: string, init: RequestInit) in the deepseek path.
  */
@@ -136,25 +186,43 @@ function buildApiResponses(responses: Array<{
       });
     }
 
-    // API calls (deepseek path uses response.text() then JSON.parse)
+    // API calls (deepseek path uses SSE streaming via parseSSEStream)
     const r = responses[Math.min(apiCallIndex, responses.length - 1)];
     apiCallIndex++;
-    const body = JSON.stringify({
-      choices: [{
-        message: {
-          content: r.content ?? '',
-          tool_calls: r.tool_calls,
-        },
-        finish_reason: r.tool_calls ? 'tool_calls' : 'stop',
-      }],
+    // Build SSE chunks: content chunk + optional tool_calls chunk + done
+    const chunks: string[] = [];
+    if (r.content) {
+      chunks.push(`data: ${JSON.stringify({
+        id: `test-${apiCallIndex}`,
+        choices: [{ delta: { content: r.content } }],
+      })}\n\n`);
+    }
+    if (r.tool_calls) {
+      // SSE tool_calls use delta format with index field
+      const toolCallDeltas = r.tool_calls.map((tc, i) => ({
+        index: i,
+        id: tc.id,
+        type: tc.type,
+        function: tc.function,
+      }));
+      chunks.push(`data: ${JSON.stringify({
+        id: `test-${apiCallIndex}`,
+        choices: [{ delta: { tool_calls: toolCallDeltas } }],
+      })}\n\n`);
+    }
+    // Final chunk with finish_reason and usage
+    chunks.push(`data: ${JSON.stringify({
+      id: `test-${apiCallIndex}`,
+      choices: [{ finish_reason: r.tool_calls ? 'tool_calls' : 'stop' }],
       usage: { prompt_tokens: 100, completion_tokens: 50 },
-    });
-    return Promise.resolve({
-      ok: true,
+    })}\n\n`);
+    chunks.push('data: [DONE]\n\n');
+
+    // Return a real Response object so .body is a proper ReadableStream
+    return Promise.resolve(new Response(chunks.join(''), {
       status: 200,
-      json: () => Promise.resolve(JSON.parse(body)),
-      text: () => Promise.resolve(body),
-    });
+      headers: { 'Content-Type': 'text/event-stream' },
+    }));
   });
 }
 
@@ -235,19 +303,7 @@ describe('TaskProcessor phases', () => {
             if (parsed.messages) capturedBodies.push(parsed);
           } catch { /* ignore */ }
         }
-        const body = JSON.stringify({
-          choices: [{
-            message: { content: 'Done.', tool_calls: undefined },
-            finish_reason: 'stop',
-          }],
-          usage: { prompt_tokens: 100, completion_tokens: 50 },
-        });
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(buildSSEResponse({ content: 'Done.' }));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -288,11 +344,7 @@ describe('TaskProcessor phases', () => {
         if (init?.body) {
           try { const p = JSON.parse(init.body as string); if (p.messages) capturedBodies.push(p); } catch { /* */ }
         }
-        const body = JSON.stringify({
-          choices: [{ message: { content: 'Done.', tool_calls: undefined }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 100, completion_tokens: 50 },
-        });
-        return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(body), json: () => Promise.resolve(JSON.parse(body)) });
+        return Promise.resolve(buildSSEResponse({ content: 'Done.' }));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -459,13 +511,7 @@ describe('TaskProcessor phases', () => {
           };
         }
 
-        const body = JSON.stringify(responseData);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(responseDataToSSE(responseData));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -514,19 +560,7 @@ describe('TaskProcessor phases', () => {
             text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
           });
         }
-        const body = JSON.stringify({
-          choices: [{
-            message: { content: 'Done.', tool_calls: undefined },
-            finish_reason: 'stop',
-          }],
-          usage: { prompt_tokens: 100, completion_tokens: 50 },
-        });
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(buildSSEResponse({ content: 'Done.' }));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -567,19 +601,7 @@ describe('TaskProcessor phases', () => {
             text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
           });
         }
-        const body = JSON.stringify({
-          choices: [{
-            message: { content: 'Done.', tool_calls: undefined },
-            finish_reason: 'stop',
-          }],
-          usage: { prompt_tokens: 100, completion_tokens: 50 },
-        });
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(buildSSEResponse({ content: 'Done.' }));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -639,16 +661,7 @@ describe('TaskProcessor phases', () => {
           });
         }
         // After rotation, succeed
-        const body = JSON.stringify({
-          choices: [{ message: { content: 'Done.', tool_calls: undefined }, finish_reason: 'stop' }],
-          usage: { prompt_tokens: 100, completion_tokens: 50 },
-        });
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(buildSSEResponse({ content: 'Done.' }));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -772,13 +785,7 @@ describe('TaskProcessor phases', () => {
           };
         }
 
-        const body = JSON.stringify(responseData);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(responseDataToSSE(responseData));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -939,13 +946,7 @@ describe('TaskProcessor phases', () => {
           };
         }
 
-        const body = JSON.stringify(responseData);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(responseDataToSSE(responseData));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -1031,13 +1032,7 @@ describe('TaskProcessor phases', () => {
           };
         }
 
-        const body = JSON.stringify(responseData);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(responseDataToSSE(responseData));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -1107,13 +1102,7 @@ describe('TaskProcessor phases', () => {
           };
         }
 
-        const body = JSON.stringify(responseData);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(responseDataToSSE(responseData));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -1191,13 +1180,7 @@ describe('TaskProcessor phases', () => {
           };
         }
 
-        const body = JSON.stringify(responseData);
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          text: () => Promise.resolve(body),
-          json: () => Promise.resolve(JSON.parse(body)),
-        });
+        return Promise.resolve(responseDataToSSE(responseData));
       }));
 
       const processor = new TaskProcessorClass(mockState as never, {} as never);
@@ -1548,13 +1531,7 @@ describe('Parallel tools execution', () => {
         };
       }
 
-      const body = JSON.stringify(responseData);
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve(body),
-        json: () => Promise.resolve(JSON.parse(body)),
-      });
+      return Promise.resolve(responseDataToSSE(responseData));
     }));
 
     const processor = new TaskProcessorClass(mockState as never, {} as never);

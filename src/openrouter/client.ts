@@ -63,6 +63,148 @@ export interface ChatCompletionResponse {
   };
 }
 
+/**
+ * Parse an SSE stream from any OpenAI-compatible API into a ChatCompletionResponse.
+ * Works with OpenRouter, Moonshot, DeepSeek, DashScope, etc.
+ *
+ * @param body - ReadableStream from fetch response
+ * @param idleTimeoutMs - Max ms without data before aborting (default 45s)
+ * @param onProgress - Called on each chunk (use for heartbeat/watchdog)
+ */
+export async function parseSSEStream(
+  body: ReadableStream<Uint8Array>,
+  idleTimeoutMs = 45000,
+  onProgress?: () => void,
+): Promise<ChatCompletionResponse> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  // Accumulated state
+  let id = '';
+  let created = 0;
+  let model = '';
+  let content = '';
+  let reasoningContent = '';
+  const toolCalls: (ToolCall | undefined)[] = [];
+  let finishReason: string | null = null;
+  let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
+  let chunksReceived = 0;
+
+  const readWithTimeout = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('STREAM_READ_TIMEOUT')), idleTimeoutMs);
+    });
+    return Promise.race([reader.read(), timeoutPromise]);
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await readWithTimeout();
+      if (done) break;
+
+      chunksReceived++;
+      if (onProgress) onProgress();
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const parts = buffer.split('\n');
+      buffer = parts.pop() || '';
+
+      for (const part of parts) {
+        const trimmed = part.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+
+        const data = trimmed.slice(6).trim();
+        if (data === '[DONE]') continue;
+
+        try {
+          const chunk: {
+            id?: string;
+            created?: number;
+            model?: string;
+            usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+            choices?: Array<{
+              finish_reason?: string | null;
+              delta?: {
+                content?: string;
+                reasoning_content?: string;
+                tool_calls?: Array<{
+                  index?: number;
+                  id?: string;
+                  type?: string;
+                  function?: { name?: string; arguments?: string };
+                }>;
+              };
+            }>;
+          } = JSON.parse(data);
+
+          if (chunk.id) id = chunk.id;
+          if (chunk.created) created = chunk.created;
+          if (chunk.model) model = chunk.model;
+          if (chunk.usage) usage = chunk.usage;
+
+          const choice = chunk.choices?.[0];
+          if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+          const delta = choice?.delta;
+          if (delta?.content) content += delta.content;
+          if (delta?.reasoning_content) reasoningContent += delta.reasoning_content;
+
+          if (delta?.tool_calls) {
+            for (const tcDelta of delta.tool_calls) {
+              const index = tcDelta.index ?? toolCalls.length;
+              let tc = toolCalls[index];
+
+              if (!tc) {
+                tc = { id: '', type: 'function', function: { name: '', arguments: '' } };
+                toolCalls[index] = tc;
+              }
+
+              if (tcDelta.id) tc.id = tcDelta.id;
+              if (tcDelta.type) tc.type = tcDelta.type as 'function';
+              if (tcDelta.function?.name) tc.function.name = tcDelta.function.name;
+              if (tcDelta.function?.arguments !== undefined) {
+                tc.function.arguments += tcDelta.function.arguments;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('[parseSSEStream] Failed to parse SSE chunk:', data, e);
+        }
+      }
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message === 'STREAM_READ_TIMEOUT') {
+      throw new Error(`Streaming read timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks), content_length: ${content.length}`);
+    }
+    throw err;
+  }
+
+  const message: ChatCompletionResponse['choices'][0]['message'] = {
+    role: 'assistant',
+    content: content || null,
+    tool_calls: toolCalls.length > 0
+      ? toolCalls.filter((tc): tc is ToolCall => tc !== undefined)
+      : undefined,
+  };
+  if (reasoningContent) {
+    message.reasoning_content = reasoningContent;
+  }
+
+  console.log(`[parseSSEStream] Complete: ${chunksReceived} chunks, content: ${content.length} chars, tools: ${toolCalls.length}${created ? `, model: ${model}` : ''}`);
+
+  return {
+    id: id || `stream-${Date.now()}`,
+    choices: [{
+      index: 0,
+      message,
+      finish_reason: finishReason ?? 'stop',
+    }],
+    usage,
+  };
+}
+
 export interface ImageGenerationRequest {
   model: string;
   prompt: string;
@@ -496,22 +638,18 @@ export class OpenRouterClient {
     }
   ): Promise<ChatCompletionResponse> {
     const modelId = getModelId(modelAlias);
-    const idleTimeoutMs = options?.idleTimeoutMs ?? 45000; // 45s default for network resilience
+    const idleTimeoutMs = options?.idleTimeoutMs ?? 45000;
 
     const controller = new AbortController();
-    let chunksReceived = 0;
-    let content = ''; // Declare here for error reporting
+
+    // Set a timeout for the initial fetch (in case connection hangs)
+    const fetchTimeout = setTimeout(() => controller.abort(), 60000);
 
     try {
-      // Set a timeout for the initial fetch (in case connection hangs)
-      const fetchTimeout = setTimeout(() => controller.abort(), 60000); // 60s for initial connection
-
       // Add unique query param to bypass stale pooled connections
-      // Cloudflare Workers aggressively pool connections; stale ones cause hangs
       const url = new URL(`${OPENROUTER_BASE_URL}/chat/completions`);
-      url.searchParams.append('_nc', crypto.randomUUID().slice(0, 8)); // no-cache bust
+      url.searchParams.append('_nc', crypto.randomUUID().slice(0, 8));
 
-      // Compute reasoning parameter for configurable models
       const level = options?.reasoningLevel ?? detectReasoningLevel(messages);
       const reasoning = getReasoningParam(modelAlias, level);
 
@@ -541,153 +679,19 @@ export class OpenRouterClient {
         body: JSON.stringify(requestBody),
       });
 
-      clearTimeout(fetchTimeout); // Clear fetch timeout once we have response
+      clearTimeout(fetchTimeout);
 
       if (!response.ok || !response.body) {
         const errorText = await response.text().catch(() => 'unknown');
         throw new Error(`OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`);
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      // Accumulated state
-      let id = '';
-      let created = 0;
-      let model = '';
-      const toolCalls: (ToolCall | undefined)[] = [];
-      let finishReason: string | null = null;
-      let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
-
-      // Helper to timeout reader.read() - AbortController only affects fetch(), not stream reading
-      const readWithTimeout = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error('STREAM_READ_TIMEOUT')), idleTimeoutMs);
-        });
-        return Promise.race([reader.read(), timeoutPromise]);
-      };
-
-      while (true) {
-        const { done, value } = await readWithTimeout();
-
-        if (done) {
-          break;
-        }
-
-        // Progress received - notify caller
-        chunksReceived++;
-        if (options?.onProgress) {
-          options.onProgress();
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines
-        const parts = buffer.split('\n');
-        buffer = parts.pop() || ''; // Last part may be incomplete
-
-        for (const part of parts) {
-          const trimmed = part.trim();
-          if (!trimmed) continue;
-
-          if (trimmed.startsWith('data: ')) {
-            const data = trimmed.slice(6).trim();
-
-            if (data === '[DONE]') continue;
-
-            try {
-              const chunk: {
-                id?: string;
-                created?: number;
-                model?: string;
-                usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-                choices?: Array<{
-                  finish_reason?: string | null;
-                  delta?: {
-                    content?: string;
-                    tool_calls?: Array<{
-                      index?: number;
-                      id?: string;
-                      type?: string;
-                      function?: {
-                        name?: string;
-                        arguments?: string;
-                      };
-                    }>;
-                  };
-                }>;
-              } = JSON.parse(data);
-
-              // Top-level metadata
-              if (chunk.id) id = chunk.id;
-              if (chunk.created) created = chunk.created;
-              if (chunk.model) model = chunk.model;
-              if (chunk.usage) usage = chunk.usage;
-
-              const choice = chunk.choices?.[0];
-              if (choice?.finish_reason) finishReason = choice.finish_reason;
-
-              const delta = choice?.delta;
-              if (delta?.content) content += delta.content;
-
-              if (delta?.tool_calls) {
-                for (const tcDelta of delta.tool_calls) {
-                  const index = tcDelta.index ?? toolCalls.length;
-                  let tc = toolCalls[index];
-
-                  if (!tc) {
-                    tc = { id: '', type: 'function', function: { name: '', arguments: '' } };
-                    toolCalls[index] = tc;
-                  }
-
-                  if (tcDelta.id) tc.id = tcDelta.id;
-                  if (tcDelta.type) tc.type = tcDelta.type as 'function';
-                  if (tcDelta.function?.name) tc.function.name = tcDelta.function.name;
-                  if (tcDelta.function?.arguments !== undefined) {
-                    tc.function.arguments += tcDelta.function.arguments;
-                  }
-                }
-              }
-            } catch (e) {
-              console.error('[OpenRouterClient] Failed to parse SSE chunk:', data, e);
-              // Continue — malformed chunks are rare but recoverable
-            }
-          }
-        }
-      }
-
-      // Build final response matching ChatCompletionResponse structure
-      const completion: ChatCompletionResponse = {
-        id: id || 'unknown',
-        choices: [{
-          index: 0,
-          message: {
-            role: 'assistant',
-            content: content || null,
-            tool_calls: toolCalls.length > 0
-              ? toolCalls.filter((tc): tc is ToolCall => tc !== undefined)
-              : undefined,
-          },
-          finish_reason: finishReason ?? 'stop',
-        }],
-        usage,
-      };
-
-      console.log(`[OpenRouterClient] Streaming complete: ${chunksReceived} chunks received`);
-      return completion;
+      return await parseSSEStream(response.body, idleTimeoutMs, options?.onProgress);
 
     } catch (err: unknown) {
-      // Handle different timeout scenarios
-      if (err instanceof Error) {
-        if (err.message === 'STREAM_READ_TIMEOUT') {
-          // reader.read() hung - this is the new timeout mechanism
-          throw new Error(`Streaming read timeout (no data for ${idleTimeoutMs / 1000}s after ${chunksReceived} chunks) - model: ${modelId}, content_length: ${content.length}`);
-        }
-        if (err.name === 'AbortError') {
-          // Initial fetch timed out
-          throw new Error(`Streaming connection timeout (no response after 60s) - model: ${modelId}`);
-        }
+      clearTimeout(fetchTimeout);
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new Error(`Streaming connection timeout (no response after 60s) - model: ${modelId}`);
       }
       throw err;
     }
