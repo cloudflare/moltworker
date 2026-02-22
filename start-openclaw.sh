@@ -204,7 +204,6 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
 
     if (baseUrl && apiKey) {
         if (gwProvider === 'google-ai-studio') baseUrl += '/v1beta';
-        const api = gwProvider === 'anthropic' ? 'anthropic-messages' : gwProvider === 'google-ai-studio' ? 'google-generative-ai' : 'openai-completions';
         // Map Cloudflare AI Gateway provider to OpenClaw ModelApi type
         // CF providers: https://developers.cloudflare.com/ai-gateway/usage/providers
         // OpenClaw API types: https://github.com/openclaw/openclaw/blob/main/src/config/types.models.ts
