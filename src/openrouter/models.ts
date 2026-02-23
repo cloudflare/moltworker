@@ -604,10 +604,16 @@ export const MODELS: Record<string, ModelInfo> = {
 // === DYNAMIC MODELS (synced from OpenRouter at runtime) ===
 
 /**
- * Dynamic models discovered via /syncmodels.
+ * Dynamic models discovered via /syncmodels (interactive free-model picker).
  * Checked first by getModel() — overrides static catalog.
  */
 const DYNAMIC_MODELS: Record<string, ModelInfo> = {};
+
+/**
+ * Auto-synced models from the full catalog sync (cron + /syncall).
+ * Lowest priority — curated and /syncmodels dynamic models take precedence.
+ */
+const AUTO_SYNCED_MODELS: Record<string, ModelInfo> = {};
 
 /**
  * Blocked model aliases (hidden at runtime).
@@ -649,18 +655,36 @@ export function getBlockedAliases(): string[] {
 }
 
 /**
- * Get the count of dynamically registered models.
+ * Register auto-synced models from the full catalog sync.
+ * These are lowest priority — curated and /syncmodels dynamic models override them.
+ */
+export function registerAutoSyncedModels(models: Record<string, ModelInfo>): void {
+  for (const key of Object.keys(AUTO_SYNCED_MODELS)) {
+    delete AUTO_SYNCED_MODELS[key];
+  }
+  Object.assign(AUTO_SYNCED_MODELS, models);
+}
+
+/**
+ * Get the count of dynamically registered models (/syncmodels interactive).
  */
 export function getDynamicModelCount(): number {
   return Object.keys(DYNAMIC_MODELS).length;
 }
 
 /**
- * Get all models (static + dynamic merged, dynamic wins on conflict).
+ * Get the count of auto-synced models (full catalog sync).
+ */
+export function getAutoSyncedModelCount(): number {
+  return Object.keys(AUTO_SYNCED_MODELS).length;
+}
+
+/**
+ * Get all models merged: curated < auto-synced < dynamic (dynamic wins on conflict).
  * Excludes blocked models.
  */
 export function getAllModels(): Record<string, ModelInfo> {
-  const all = { ...MODELS, ...DYNAMIC_MODELS };
+  const all = { ...AUTO_SYNCED_MODELS, ...MODELS, ...DYNAMIC_MODELS };
   for (const alias of BLOCKED_ALIASES) {
     delete all[alias];
   }
@@ -668,12 +692,20 @@ export function getAllModels(): Record<string, ModelInfo> {
 }
 
 /**
- * Get model by alias (checks blocked list, then dynamic, then static)
+ * Get model by alias.
+ * Priority: blocked → dynamic (/syncmodels) → curated (static) → auto-synced (full catalog)
  */
 export function getModel(alias: string): ModelInfo | undefined {
   const lower = alias.toLowerCase();
   if (BLOCKED_ALIASES.has(lower)) return undefined;
-  return DYNAMIC_MODELS[lower] || MODELS[lower];
+  return DYNAMIC_MODELS[lower] || MODELS[lower] || AUTO_SYNCED_MODELS[lower];
+}
+
+/**
+ * Check if a model is from the auto-synced full catalog (not curated or manual-synced).
+ */
+export function isAutoSyncedModel(alias: string): boolean {
+  return alias.toLowerCase() in AUTO_SYNCED_MODELS;
 }
 
 /**
@@ -887,6 +919,13 @@ export function formatModelsList(): string {
       const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
       lines.push(`  /${m.alias} — ${m.name} ${features}`);
     }
+  }
+
+  // Auto-synced models summary (not listed individually — too many)
+  const autoSyncedCount = getAutoSyncedModelCount();
+  if (autoSyncedCount > 0) {
+    lines.push(`\n🌐 +${autoSyncedCount} more models auto-synced from OpenRouter`);
+    lines.push('  Use /use <model-alias> to switch — /syncall to refresh');
   }
 
   lines.push('\n━━━ Legend ━━━');

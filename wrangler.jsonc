@@ -76,7 +76,7 @@
     }
   ],
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["*/5 * * * *", "0 */6 * * *"]
   },
   "browser": {
     "binding": "BROWSER"

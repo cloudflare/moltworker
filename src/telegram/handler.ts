@@ -44,6 +44,7 @@ import {
   supportsStructuredOutput,
   registerDynamicModels,
   getDynamicModelCount,
+  getAutoSyncedModelCount,
   blockModels,
   unblockModels,
   getBlockedAliases,
@@ -543,6 +544,7 @@ export class TelegramHandler {
 
   /**
    * Load previously synced dynamic models and blocked list from R2 into runtime.
+   * Also loads auto-synced full catalog models.
    */
   private async loadDynamicModelsFromR2(): Promise<void> {
     try {
@@ -559,6 +561,17 @@ export class TelegramHandler {
       }
     } catch (error) {
       console.error('[Telegram] Failed to load dynamic models from R2:', error);
+    }
+
+    // Also load auto-synced full catalog models
+    try {
+      const { loadAutoSyncedModels } = await import('../openrouter/model-sync/sync');
+      const count = await loadAutoSyncedModels(this.r2Bucket);
+      if (count > 0) {
+        console.log(`[Telegram] Loaded ${count} auto-synced models from R2`);
+      }
+    } catch (error) {
+      console.error('[Telegram] Failed to load auto-synced models from R2:', error);
     }
   }
 
@@ -1098,6 +1111,10 @@ export class TelegramHandler {
       case '/syncmodels':
       case '/sync':
         await this.handleSyncModelsCommand(chatId, userId);
+        break;
+
+      case '/syncall':
+        await this.handleSyncAllCommand(chatId);
         break;
 
       case '/syncreset': {
@@ -3021,6 +3038,40 @@ export class TelegramHandler {
   }
 
   /**
+   * Handle /syncall — run full model catalog sync from OpenRouter.
+   * Syncs ALL models (not just free), updates R2, and registers in runtime.
+   */
+  private async handleSyncAllCommand(chatId: number): Promise<void> {
+    await this.bot.sendChatAction(chatId, 'typing');
+    await this.bot.sendMessage(chatId, '🌐 Running full model catalog sync from OpenRouter...');
+
+    try {
+      const { runFullSync } = await import('../openrouter/model-sync/sync');
+      const result = await runFullSync(this.r2Bucket, this.openrouterKey);
+
+      if (result.success) {
+        const lines = [
+          '✅ Full catalog sync complete!\n',
+          `📊 ${result.totalFetched} models fetched from OpenRouter`,
+          `📦 ${result.totalSynced} models synced (explore tier)`,
+          `🆕 ${result.newModels} new models`,
+          `⏳ ${result.staleModels} stale/deprecated`,
+          `🗑️ ${result.removedModels} removed`,
+          `⚡ ${result.durationMs}ms`,
+          '',
+          'Auto-synced models are now available via /use <alias>.',
+          'Curated + /syncmodels models take priority.',
+        ];
+        await this.bot.sendMessage(chatId, lines.join('\n'));
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Sync failed: ${result.error}`);
+      }
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `❌ Sync error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
    * Handle sync picker callback queries (toggle, validate, cancel).
    */
   private async handleSyncCallback(
@@ -3427,7 +3478,8 @@ Paid:  /deep /grok /gpt /sonnet /haiku /flash /mimo
 Free:  /trinity /deepfree /qwencoderfree /devstral
 Direct: /dcode /dreason /q3coder /kimidirect
 All:   /models for full list
-/syncmodels — Fetch latest free models from OpenRouter
+/syncmodels — Fetch latest free models (interactive picker)
+/syncall — Full catalog sync from OpenRouter (all models)
 
 ━━━ Cloudflare API ━━━
 /cloudflare search <query> — Search CF API endpoints
