@@ -3,14 +3,14 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-22 (7A.2 + 7A.3 + 7A.5 complete — 1175 tests)
+**Last Updated:** 2026-02-23 (7B.2 Model Routing complete — 1242 tests)
 
 ---
 
 ## Project Overview
 
 **Moltworker** is a multi-platform AI assistant gateway deployed on Cloudflare Workers. It provides:
-- 30+ AI models via OpenRouter + direct provider APIs (with capability metadata)
+- 30+ curated AI models + automated full-catalog sync from OpenRouter (with capability metadata)
 - 16 tools (fetch_url, github_read_file, github_list_files, github_api, github_create_pr, url_metadata, generate_chart, get_weather, fetch_news, convert_currency, get_crypto, geolocate_ip, browse_url, sandbox_exec, web_search, cloudflare_api) — parallel execution with safety whitelist
 - Durable Objects for unlimited-time task execution
 - Multi-platform chat (Telegram, Discord, Slack)
@@ -234,7 +234,7 @@
 | ID | Task | Status | Owner | Effort | Priority | Notes |
 |----|------|--------|-------|--------|----------|-------|
 | 7B.1 | **Speculative Tool Execution** — start tools during streaming | 🔲 | Claude | High | **HIGH** | Current: wait for full LLM response → parse tool_calls → execute. New: parse tool_call names/args from streaming chunks as they arrive. For read-only tools (in `PARALLEL_SAFE_TOOLS`), start execution immediately while model is still generating. Saves 2-10s per iteration on multi-tool calls. Risk: model may change args in later chunks — only start after args are complete per tool_call. |
-| 7B.2 | **Model Routing by Complexity** — fast models for simple queries | 🔲 | Claude | Medium | **HIGH** | Simple questions (weather, crypto, "what time is it?") → Haiku/Flash (1-2s response). Only complex multi-file/multi-tool tasks → Sonnet/Opus. Implement complexity classifier: message length, keyword presence (code/file/github/fix/build), conversation history length. Override user model choice for trivial queries (with opt-out). |
+| 7B.2 | **Model Routing by Complexity** — fast models for simple queries | ✅ | Claude | Medium | **HIGH** | `routeByComplexity()` in `src/openrouter/model-router.ts`. Simple queries on default 'auto' model → GPT-4o Mini. FAST_MODEL_CANDIDATES: mini > flash > haiku. `autoRoute` user preference (default: true), `/autoroute` toggle. 15 tests. |
 | 7B.3 | **Pre-fetching Context** — parse file refs from user message | 🔲 | Claude | Low | **MEDIUM** | When user says "fix the bug in auth.ts" or "update src/routes/api.ts", regex-extract file paths from the message. Start reading those files from GitHub/R2 immediately (before LLM even responds). Cache results so the tool call is instant. Works with existing tool cache infrastructure (Phase 4.3). |
 | 7B.4 | **Reduce Iteration Count** — upfront file loading per plan step | 🔲 | Claude | Medium | **HIGH** | Biggest speed win. After 7A.4 produces structured steps, load ALL referenced files into context before each step. Model gets `[FILE: src/foo.ts]\n<contents>` in its system message, doesn't need to call `github_read_file`. Typical task drops from 8 iterations to 3-4. Depends on 7A.4. |
 | 7B.5 | **Streaming User Feedback** — progressive Telegram updates | 🔲 | Claude | Medium | **MEDIUM** | Currently: "Thinking..." for 3 minutes, then wall of text. New: update Telegram message every ~15s with current phase (Planning step 2/4..., Executing: reading auth.ts..., Running tests...). Already have `editMessage` infrastructure (progress updates). Enhance with tool-level granularity. Subsumes Phase 6.2 (response streaming). |
@@ -247,7 +247,7 @@
 7A.2 (Smart Context) ─────────────────────── can be done independently
 7A.3 (Destructive Guard) ─────────────────── can be done independently
 7A.5 (Prompt Caching) ────────────────────── can be done independently
-7B.2 (Model Routing) ─────────────────────── can be done independently
+7B.2 (Model Routing) ─────────────────────── ✅ COMPLETE
 7B.3 (Pre-fetch Context) ─────────────────── can be done independently
 
 7A.1 (CoVe Verification) ─────────────────── depends on nothing, but best after 7A.4
@@ -262,13 +262,28 @@
 1. ~~**7A.2** Smart Context Loading~~ ✅ Complete
 2. ~~**7A.3** Destructive Op Guard~~ ✅ Complete
 3. ~~**7A.5** Prompt Caching~~ ✅ Complete
-4. **7B.2** Model Routing by Complexity (medium effort, biggest speed win for simple queries)
+4. ~~**7B.2** Model Routing by Complexity~~ ✅ Complete
 5. **7B.3** Pre-fetching Context (low effort, reduces tool call latency)
 6. **7A.4** Structured Step Decomposition (medium effort, enables 7B.4)
 7. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
 8. **7B.4** Reduce Iteration Count (medium effort, biggest speed win for complex tasks)
 9. **7B.5** Streaming User Feedback (medium effort, UX win)
 10. **7B.1** Speculative Tool Execution (high effort, advanced optimization)
+
+---
+
+### Model Catalog Auto-Sync (Off-Roadmap, Completed)
+
+> **Goal:** Automatically discover and register ALL OpenRouter models, not just the 30+ curated ones.
+
+| ID | Task | Status | Owner | Notes |
+|----|------|--------|-------|-------|
+| MS.1 | Full model catalog sync module (`src/openrouter/model-sync/`) | ✅ | Claude | Types, 3-level capability detection, stable alias generation, deprecation lifecycle, atomic R2 publish, 52 tests |
+| MS.2 | 3-tier model merge at runtime | ✅ | Claude | `AUTO_SYNCED < MODELS (curated) < DYNAMIC_MODELS` — auto-synced fills gaps, curated always wins |
+| MS.3 | 6h cron trigger for automated sync | ✅ | Claude | `0 */6 * * *` in `wrangler.jsonc`, differentiated by `event.cron` in scheduled handler |
+| MS.4 | `/syncall` Telegram command + admin API | ✅ | Claude | Manual trigger via Telegram, `POST /api/admin/models/sync`, `GET /api/admin/models/catalog` |
+| MS.5 | Dynamic `/pick` model picker | ✅ | Claude | Scores models by SWE-Bench + capabilities, shows top 3 per tier (free/value/premium) |
+| MS.6 | `/syncall` in Telegram bot menu + `/start` sync button | ✅ | Claude | `setMyCommands` + inline keyboard button |
 
 ---
 
@@ -339,6 +354,9 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.2 Model Routing by Complexity — routeByComplexity() routes simple queries on default 'auto' to GPT-4o Mini, FAST_MODEL_CANDIDATES (mini/flash/haiku), autoRoute user pref + /autoroute toggle, 15 new tests (1242 total) | src/openrouter/model-router.ts, src/openrouter/model-router.test.ts, src/openrouter/storage.ts, src/telegram/handler.ts
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(telegram): add /syncall to menu, sync button, dynamic model picker — sendModelPicker() scores models by SWE-Bench + capabilities, top 3 per tier (free/value/premium), sync button in /start | src/telegram/handler.ts, src/routes/telegram.ts
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(sync): automated full model catalog sync from OpenRouter — 3-level capability detection, stable aliases, deprecation lifecycle, atomic R2 publish, 6h cron, /syncall command, admin API, 52 new tests (1227 total) | src/openrouter/model-sync/*.ts, src/openrouter/models.ts, src/index.ts, wrangler.jsonc, src/telegram/handler.ts, src/routes/api.ts, src/routes/telegram.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7A.5 Prompt Caching — cache_control on Anthropic system messages via OpenRouter, isAnthropicModel() helper, 17 new tests (1175 total) | src/openrouter/prompt-cache.ts, src/openrouter/prompt-cache.test.ts, src/openrouter/client.ts, src/openrouter/models.ts, src/durable-objects/task-processor.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(guardrails): 7A.3 Destructive Op Guard — scanToolCallForRisks() pre-execution check, reuses 14 Vex patterns, blocks critical/high, warns medium, 25 new tests (1158 total) | src/guardrails/destructive-op-guard.ts, src/guardrails/destructive-op-guard.test.ts, src/durable-objects/task-processor.ts, src/dream/vex-review.ts
 2026-02-22 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7A.2 Smart Context Loading — task complexity classifier skips R2 reads for simple queries (~300-400ms saved), 35 new tests (1133 total) | src/utils/task-classifier.ts, src/utils/task-classifier.test.ts, src/telegram/handler.ts, src/telegram/smart-context.test.ts

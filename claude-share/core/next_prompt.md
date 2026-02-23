@@ -3,47 +3,43 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-22 (7A.5 Prompt Caching completed — moving to 7B.2)
+**Last Updated:** 2026-02-23 (7B.2 Model Routing complete — moving to 7B.3)
 
 ---
 
-## Current Task: 7B.2 — Model Routing by Complexity
+## Current Task: 7B.3 — Pre-fetching Context
 
 ### Goal
 
-Route simple queries (weather, crypto, "what time is it?") to fast/cheap models (Haiku/Flash) for 1-2s response, reserving expensive models (Sonnet/Opus) for complex multi-tool tasks. Uses the complexity classifier from 7A.2 (`src/utils/task-classifier.ts`).
+When user says "fix the bug in auth.ts" or "update src/routes/api.ts", regex-extract file paths from the message. Start reading those files from GitHub/R2 immediately (before LLM even responds). Cache results so the tool call is instant. Works with existing tool cache infrastructure (Phase 4.3).
 
 ### Context
 
-- 7A.2 built a `classifyTaskComplexity()` function in `src/utils/task-classifier.ts`
-- Simple queries already skip R2 reads (7A.2) — now we can also route them to faster models
-- Current behavior: user picks model (or uses default), all queries go to same model
-- New: for `simple` complexity tasks, override to a fast model unless user explicitly set one
 - Phase 7B is Speed Optimizations (see `GLOBAL_ROADMAP.md`)
+- 7B.2 (Model Routing) is complete — simple queries now route to fast models
+- 7A.2 (Smart Context Loading) and 7A.5 (Prompt Caching) are already done
+- Tool result caching exists from Phase 4.3 (`src/openrouter/tools.ts`)
+- Pre-fetching reduces latency by loading file content before the LLM requests it
 
 ### What Needs to Happen
 
-1. **Add fast model routing logic** — in the handler or task processor, after classifying complexity:
-   - If `simple` complexity AND user didn't explicitly set a model → route to haiku (fastest Anthropic) or a flash model
-   - If `complex` complexity → use user's chosen model as-is
-   - Respect explicit user model choice (via `/use` command) — never override explicit selection
-2. **Track routing decisions** — log when a model switch happens so we can measure impact
-3. **Add opt-out** — respect a flag or user preference to disable auto-routing
-4. **Tests**: Unit tests for routing logic, integration test confirming simple queries get fast model
+1. **Regex extraction** — detect file paths in user messages (e.g. `src/foo.ts`, `auth.ts:42`, `/path/to/file.py`)
+2. **Pre-fetch** — start reading those files via GitHub API before LLM even responds
+3. **Cache integration** — store results in the existing tool cache so `github_read_file` tool calls are instant
+4. **Tests**: Unit tests for path extraction, integration test confirming pre-fetched files skip API calls
 5. **Run `npm test` and `npm run typecheck`** before committing
 
 ### Key Files
 
-- `src/utils/task-classifier.ts` — existing `classifyTaskComplexity()` from 7A.2
-- `src/telegram/handler.ts` — where model selection happens before DO dispatch
-- `src/durable-objects/task-processor.ts` — where model alias is used for API calls
-- `src/openrouter/models.ts` — model definitions and utilities
+- `src/telegram/handler.ts` — where pre-fetch logic would run (before DO dispatch)
+- `src/openrouter/tools.ts` — existing tool cache infrastructure
+- `src/durable-objects/task-processor.ts` — where tool calls execute
+- `src/utils/task-classifier.ts` — complexity classifier (reference for pattern matching)
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | 7B.3: Pre-fetching Context — parse file refs from user message | Low | Regex file paths → preload |
 | Next | 7A.4: Structured Step Decomposition — planner outputs JSON steps | Medium | Planner outputs JSON steps |
 | Later | 7A.1: CoVe Verification Loop | Medium | Post-execution test runner |
 | Later | 7B.4: Reduce Iteration Count | Medium | Depends on 7A.4 |
@@ -55,6 +51,9 @@ Route simple queries (weather, crypto, "what time is it?") to fast/cheap models 
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-23 | 7B.2: Model Routing by Complexity — fast model for simple queries (1242 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
+| 2026-02-23 | MS.5-6: Dynamic /pick picker + /syncall menu + /start sync button | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
+| 2026-02-23 | MS.1-4: Full model catalog auto-sync from OpenRouter (1227 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.5: Prompt Caching — cache_control for Anthropic models (1175 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.3: Destructive Op Guard — block risky tool calls (1158 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.2: Smart Context Loading — skip R2 reads for simple queries (1133 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
