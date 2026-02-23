@@ -40,7 +40,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/warm-memory/portfolio
 
 # Copy startup script
-# Build cache bust: 2026-02-22-v80-notion-api
+# Build cache bust: 2026-02-22-v81-notion-tools-inject
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 

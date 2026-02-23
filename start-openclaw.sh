@@ -360,6 +360,24 @@ if [ -f "$CLAUDE_MD" ] && [ -n "$CDP_SECRET" ] && ! grep -q "read-page.js" "$CLA
   echo "Browser instructions injected into CLAUDE.md"
 fi
 
+# Inject Notion instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ] && [ -n "${NOTION_API_KEY:-}" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'NOTIONEOF'
+
+## Notion API (노션)
+- API 키: `/root/.notion.env` 파일에서 읽기 (`source /root/.notion.env`)
+- 페이지 검색: `curl -s -X POST https://api.notion.com/v1/search -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{"query":"검색어"}'`
+- 페이지 읽기: `curl -s https://api.notion.com/v1/pages/PAGE_ID -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28"`
+- 블록 내용 읽기: `curl -s https://api.notion.com/v1/blocks/BLOCK_ID/children -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28"`
+- 데이터베이스 쿼리: `curl -s -X POST https://api.notion.com/v1/databases/DB_ID/query -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{}'`
+- 페이지 생성: `curl -s -X POST https://api.notion.com/v1/pages -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{"parent":{"database_id":"DB_ID"},"properties":{...}}'`
+- 반드시 `exec` tool로 실행. 스크립트에서는 `source /root/.notion.env`로 키 로드.
+NOTIONEOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Notion instructions appended to TOOLS.md"
+fi
+
 # ============================================================
 # ONBOARD (only if no config exists yet)
 # ============================================================
