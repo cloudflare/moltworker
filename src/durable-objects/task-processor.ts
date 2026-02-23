@@ -24,6 +24,7 @@ import { shouldVerify, verifyWorkPhase, formatVerificationFailures } from '../gu
 import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, awaitAndFormatPrefetchedFiles, type StructuredPlan } from './step-decomposition';
 import { formatProgressMessage, extractToolContext, shouldSendUpdate, type ProgressState } from './progress-formatter';
 import { createSpeculativeExecutor } from './speculative-tools';
+import { selectReviewerModel, buildReviewMessages, parseReviewResponse, shouldUseMultiAgentReview } from '../openrouter/reviewer';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -231,6 +232,8 @@ interface TaskState {
   structuredPlan?: StructuredPlan;
   // 7A.1: CoVe verification retry flag (only one retry allowed)
   coveRetried?: boolean;
+  // 5.1: Multi-agent review — which model reviewed the work
+  reviewerAlias?: string;
 }
 
 // Task request from the worker
@@ -768,6 +771,49 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   }
 
   /**
+   * 5.1: Multi-agent review — call a different model to review the work.
+   * Makes a single streaming API call to the reviewer model via OpenRouter.
+   * Returns the reviewer's raw response text, or null if the call fails.
+   */
+  private async executeMultiAgentReview(
+    reviewerAlias: string,
+    reviewMessages: ChatMessage[],
+    openrouterKey: string,
+    task: TaskState,
+  ): Promise<string | null> {
+    try {
+      const client = createOpenRouterClient(openrouterKey, 'https://moltworker.dev');
+      const result = await client.chatCompletionStreamingWithTools(
+        reviewerAlias,
+        reviewMessages,
+        {
+          maxTokens: 4096,
+          temperature: 0.3, // Low temperature for focused review
+          // No tools — reviewer just analyzes text
+          idleTimeoutMs: 30000,
+          onProgress: () => {
+            // Keep watchdog alive during reviewer call
+            task.lastUpdate = Date.now();
+          },
+        },
+      );
+
+      const content = result.choices?.[0]?.message?.content;
+      if (!content) return null;
+
+      // Track reviewer token usage
+      if (result.usage) {
+        console.log(`[TaskProcessor] 5.1 Reviewer (${reviewerAlias}): ${result.usage.prompt_tokens}+${result.usage.completion_tokens} tokens`);
+      }
+
+      return content;
+    } catch (err) {
+      console.error(`[TaskProcessor] 5.1 Multi-agent review failed (${reviewerAlias}):`, err);
+      return null; // Fall back to same-model review
+    }
+  }
+
+  /**
    * Construct a fallback response from tool results when model returns empty.
    * Extracts useful data instead of showing "No response generated."
    */
@@ -1087,6 +1133,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       structuredPlan: task.structuredPlan || null,
       workPhaseStartIteration: task.phaseStartIteration || 0,
       coveRetrying: task.coveRetried === true && task.phase === 'work',
+      reviewerAlias: task.reviewerAlias || null,
     });
 
     /** Send a throttled progress update to Telegram (non-fatal). */
@@ -1886,38 +1933,92 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             }
           }
 
-          task.phase = 'review';
-          task.phaseStartIteration = task.iterations;
-          phaseStartTime = Date.now(); // Reset phase budget clock
-          // Save the work-phase answer — this is the real content the user should see
+          // Save the work-phase answer before review
           task.workPhaseContent = choice.message.content || '';
-          await this.doState.storage.put('task', task);
-          console.log(`[TaskProcessor] Phase transition: work → review (iteration ${task.iterations})`);
 
-          // Select review prompt: orchestra > coding > general
-          const systemMsg = request.messages.find(m => m.role === 'system');
-          const sysContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
-          const isOrchestraTask = sysContent.includes('Orchestra INIT Mode') || sysContent.includes('Orchestra RUN Mode') || sysContent.includes('Orchestra REDO Mode');
-          const reviewPrompt = isOrchestraTask ? ORCHESTRA_REVIEW_PROMPT
-            : taskCategory === 'coding' ? CODING_REVIEW_PROMPT
-            : REVIEW_PHASE_PROMPT;
+          // 5.1: Multi-agent review — route to a different model for independent verification.
+          // Only for complex tasks where a second opinion adds value.
+          const reviewerAlias = shouldUseMultiAgentReview(task.toolsUsed, taskCategory, task.iterations)
+            ? selectReviewerModel(task.modelAlias, taskCategory)
+            : null;
 
-          // Add the model's current response and inject review prompt
-          // Ask the model to revise its answer if issues are found, not just output a checklist
-          conversationMessages.push({
-            role: 'assistant',
-            content: choice.message.content || '',
-          });
-          conversationMessages.push({
-            role: 'user',
-            content: `[REVIEW PHASE] ${reviewPrompt}\n\nIMPORTANT: If everything checks out, respond with exactly "LGTM". If there are issues, provide a REVISED version of your complete answer (not a review checklist). Do NOT output a review checklist — either say "LGTM" or give the corrected answer.`,
-          });
-          continue; // One more iteration for the review response
+          if (reviewerAlias) {
+            console.log(`[TaskProcessor] 5.1 Multi-agent review: ${task.modelAlias} → ${reviewerAlias}`);
+            task.phase = 'review';
+            task.phaseStartIteration = task.iterations;
+            task.reviewerAlias = reviewerAlias;
+            phaseStartTime = Date.now();
+            await this.doState.storage.put('task', task);
+
+            // Send progress update showing reviewer model
+            currentTool = null;
+            currentToolContext = null;
+            await sendProgressUpdate(true);
+
+            // Build focused review context and call reviewer model
+            const reviewMessages = buildReviewMessages(conversationMessages, task.workPhaseContent, taskCategory);
+            const reviewContent = await this.executeMultiAgentReview(
+              reviewerAlias, reviewMessages, request.openrouterKey, task,
+            );
+
+            if (reviewContent) {
+              const reviewResult = parseReviewResponse(reviewContent, reviewerAlias);
+              console.log(`[TaskProcessor] 5.1 Review decision: ${reviewResult.decision} (by ${reviewerAlias})`);
+
+              if (reviewResult.decision === 'approve') {
+                // Reviewer approved — use work-phase answer directly, skip self-review loop
+                task.result = task.workPhaseContent;
+                task.status = 'completed';
+              } else {
+                // Reviewer revised — use their version
+                task.result = reviewResult.content;
+                task.status = 'completed';
+              }
+              // Fall through to task completion below (status = 'completed' exits the while loop)
+            } else {
+              // Reviewer call failed — fall through to same-model review below
+              console.log('[TaskProcessor] 5.1 Review failed — falling back to self-review');
+              task.reviewerAlias = undefined;
+            }
+          }
+
+          // Same-model review fallback (existing behavior) — used when:
+          // - Task is too simple for multi-agent review
+          // - No reviewer model is available
+          // - Reviewer API call failed
+          if (task.status !== 'completed') {
+            task.phase = 'review';
+            task.phaseStartIteration = task.iterations;
+            phaseStartTime = Date.now();
+            await this.doState.storage.put('task', task);
+            console.log(`[TaskProcessor] Phase transition: work → review (iteration ${task.iterations})`);
+
+            // Select review prompt: orchestra > coding > general
+            const systemMsg = request.messages.find(m => m.role === 'system');
+            const sysContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
+            const isOrchestraTask = sysContent.includes('Orchestra INIT Mode') || sysContent.includes('Orchestra RUN Mode') || sysContent.includes('Orchestra REDO Mode');
+            const reviewPrompt = isOrchestraTask ? ORCHESTRA_REVIEW_PROMPT
+              : taskCategory === 'coding' ? CODING_REVIEW_PROMPT
+              : REVIEW_PHASE_PROMPT;
+
+            // Add the model's current response and inject review prompt
+            conversationMessages.push({
+              role: 'assistant',
+              content: choice.message.content || '',
+            });
+            conversationMessages.push({
+              role: 'user',
+              content: `[REVIEW PHASE] ${reviewPrompt}\n\nIMPORTANT: If everything checks out, respond with exactly "LGTM". If there are issues, provide a REVISED version of your complete answer (not a review checklist). Do NOT output a review checklist — either say "LGTM" or give the corrected answer.`,
+            });
+            continue; // One more iteration for the review response
+          }
         }
 
         // Final response
         task.status = 'completed';
-        if (!hasContent && task.toolsUsed.length > 0) {
+        if (task.result) {
+          // Already set by multi-agent review (5.1) — skip result assignment
+        } else if (!hasContent && task.toolsUsed.length > 0) {
           // Construct fallback from tool data instead of "No response generated"
           task.result = this.constructFallbackResponse(conversationMessages, task.toolsUsed);
         } else if (task.phase === 'review' && task.workPhaseContent) {
@@ -1974,6 +2075,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           }
 
           task.result += `\n\n📊 Confidence: ${baseConfidence} (${reason})`;
+        }
+
+        // 5.1: Append reviewer attribution if multi-agent review was used
+        if (task.reviewerAlias && task.result) {
+          const reviewerModel = getModel(task.reviewerAlias);
+          const reviewerName = reviewerModel?.name || task.reviewerAlias;
+          task.result += `\n🔍 Reviewed by ${reviewerName}`;
         }
 
         await this.doState.storage.put('task', task);

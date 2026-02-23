@@ -31,6 +31,8 @@ export interface ProgressState {
   workPhaseStartIteration: number;
   /** Whether CoVe verification is running (post-work). */
   coveRetrying: boolean;
+  /** 5.1: Reviewer model alias if multi-agent review is in progress. */
+  reviewerAlias?: string | null;
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -217,6 +219,11 @@ export function formatProgressMessage(state: ProgressState): string {
   // CoVe verification override
   if (state.coveRetrying) {
     return `⏳ 🔄 Verifying results… (${elapsedStr})`;
+  }
+
+  // 5.1: Multi-agent review override — show which model is reviewing
+  if (state.phase === 'review' && state.reviewerAlias) {
+    return `⏳ 🔍 Reviewing (${state.reviewerAlias})… (${elapsedStr})`;
   }
 
   const { emoji, label } = PHASE_LABELS[state.phase];

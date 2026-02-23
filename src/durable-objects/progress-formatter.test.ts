@@ -259,6 +259,25 @@ describe('formatProgressMessage', () => {
     expect(msg).toContain('Verifying');
   });
 
+  it('shows reviewer model alias during multi-agent review (5.1)', () => {
+    const msg = formatProgressMessage(makeState({
+      phase: 'review',
+      reviewerAlias: 'sonnet',
+    }));
+    expect(msg).toContain('🔍');
+    expect(msg).toContain('Reviewing');
+    expect(msg).toContain('sonnet');
+  });
+
+  it('does not show reviewer alias when not set', () => {
+    const msg = formatProgressMessage(makeState({
+      phase: 'review',
+      reviewerAlias: null,
+    }));
+    expect(msg).toContain('Reviewing');
+    expect(msg).not.toContain('sonnet');
+  });
+
   it('shows step progress when structured plan is available', () => {
     const plan: StructuredPlan = {
       steps: [
