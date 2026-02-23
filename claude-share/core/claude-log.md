@@ -4,6 +4,37 @@
 
 ---
 
+## Session: 2026-02-23 | Fix orchestra tool descriptions + partial failure handling (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Fixed issues observed in real bot conversations where the model (a) incorrectly claimed it couldn't edit/append to existing files via `github_create_pr`, (b) said files were "too large" when they were within tool limits, and (c) silently gave up without logging partial failures. Root causes: tool descriptions didn't explain the read-modify-write update workflow, `github_read_file` didn't mention its 50KB limit, large file thresholds were overly conservative, and orchestra prompts had no guidance for handling partial task failures.
+
+### Changes Made
+- Improved `github_create_pr` tool description: now explains to read file first with `github_read_file`, modify content, then pass COMPLETE new content with `action: "update"` — clarifies the "append" workflow
+- Improved `changes` parameter description: explicitly states content must be full file content for updates
+- Improved `github_read_file` tool description: now mentions 50KB support
+- Raised `LARGE_FILE_THRESHOLD_LINES` from 300→500 and `LARGE_FILE_THRESHOLD_KB` from 15→30 (tools support 50KB, 15KB was overly conservative)
+- Added "How to Update Existing Files" section to orchestra run and redo prompts
+- Added "Step 4.5: HANDLE PARTIAL FAILURES" to orchestra run prompt with guidance for logging blocked/partial tasks
+- Added "Handle Partial Failures" to orchestra redo prompt
+- 12 new tests covering tool descriptions and prompt content
+
+### Files Modified
+- `src/openrouter/tools.ts` (improved descriptions for `github_create_pr` and `github_read_file`)
+- `src/orchestra/orchestra.ts` (thresholds + run/redo prompt improvements)
+- `src/openrouter/tools.test.ts` (4 new tests)
+- `src/orchestra/orchestra.test.ts` (10 new tests, 2 updated threshold assertions)
+
+### Tests
+- 1348 tests passing (12 new)
+- TypeScript typecheck: clean
+
+---
+
 ## Session: 2026-02-23 | 7A.1 CoVe Verification Loop (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6

@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-23 (7A.1 CoVe Verification Loop complete — 1336 tests)
+**Last Updated:** 2026-02-23 (Fix orchestra tool descriptions + partial failure handling — 1348 tests)
 
 ---
 
@@ -354,6 +354,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | fix(orchestra+tools): Improve tool descriptions + partial failure handling — github_create_pr description now explains read-modify-write update workflow and append pattern, github_read_file mentions 50KB limit, LARGE_FILE_THRESHOLD raised (300→500 lines, 15→30KB), orchestra run/redo prompts get "How to Update Existing Files" section and "Step 4.5: HANDLE PARTIAL FAILURES" for logging blocked/partial tasks, 12 new tests (1348 total) | src/openrouter/tools.ts, src/orchestra/orchestra.ts, src/openrouter/tools.test.ts, src/orchestra/orchestra.test.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.1 CoVe Verification Loop — shouldVerify() + verifyWorkPhase() at work→review transition, scans for mutation errors/test failures/missing PRs/unverified claims, one retry iteration on failure, smart test success exclusion ("0 failed"), 24 new tests (1336 total) | src/guardrails/cove-verification.ts, src/guardrails/cove-verification.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.4 Reduce Iteration Count — awaitAndFormatPrefetchedFiles() awaits prefetch promises at plan→work transition, injects [FILE: path] blocks into context, binary/empty skip, 8KB/file + 50KB total caps, model skips github_read_file for pre-loaded files, 13 new tests (1312 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.4 Structured Step Decomposition — STRUCTURED_PLAN_PROMPT requests JSON steps, parseStructuredPlan() with 3-tier parsing (code block → raw JSON → free-form fallback), prefetchPlanFiles() pre-loads all files at plan→work transition, 26 new tests (1299 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts

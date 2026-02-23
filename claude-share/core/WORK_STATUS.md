@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-23 (7A.1 CoVe Verification Loop complete — 1336 tests)
+**Last Updated:** 2026-02-23 (Fix orchestra tool descriptions + partial failure handling — 1348 tests)
 
 ---
 
@@ -68,6 +68,7 @@
 | 7B.3 | Pre-fetch Context — extract file paths, prefetch from GitHub (1273 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | 7B.4 | Reduce Iteration Count — inject pre-loaded files into context (1312 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | 7A.1 | CoVe Verification Loop — post-work verification (1336 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
+| — | Fix orchestra tool descriptions + partial failure handling (1348 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 
 ---
 
@@ -75,7 +76,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | 7A.1 CoVe Verification Loop ✅ | `claude/execute-next-prompt-psdEX` | 2026-02-23 |
+| Claude | Fix orchestra tool descriptions ✅ | `claude/execute-next-prompt-psdEX` | 2026-02-23 |
 | Codex | — | — | — |
 | Other | — | — | — |
 

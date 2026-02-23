@@ -338,11 +338,11 @@ describe('buildRunPrompt', () => {
 
 describe('LARGE_FILE_THRESHOLD constants', () => {
   it('exports line threshold', () => {
-    expect(LARGE_FILE_THRESHOLD_LINES).toBe(300);
+    expect(LARGE_FILE_THRESHOLD_LINES).toBe(500);
   });
 
   it('exports KB threshold', () => {
-    expect(LARGE_FILE_THRESHOLD_KB).toBe(15);
+    expect(LARGE_FILE_THRESHOLD_KB).toBe(30);
   });
 });
 
@@ -1148,5 +1148,79 @@ describe('anti-rewrite rules in prompts', () => {
   it('redo prompt rules section includes anti-rewrite rule', () => {
     const prompt = buildRedoPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [], taskToRedo: 'fix dark mode' });
     expect(prompt).toContain('NEVER regenerate entire files');
+  });
+});
+
+// --- File update workflow instructions ---
+
+describe('file update workflow in prompts', () => {
+  it('run prompt includes How to Update Existing Files section', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('How to Update Existing Files');
+    expect(prompt).toContain('github_read_file');
+    expect(prompt).toContain('action: "update"');
+    expect(prompt).toContain('COMPLETE modified content');
+  });
+
+  it('run prompt explains the append workflow', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('append');
+    expect(prompt).toContain('read the original');
+  });
+
+  it('redo prompt includes How to Update Existing Files section', () => {
+    const prompt = buildRedoPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [], taskToRedo: 'fix auth' });
+    expect(prompt).toContain('How to Update Existing Files');
+    expect(prompt).toContain('github_read_file');
+    expect(prompt).toContain('COMPLETE modified content');
+  });
+
+  it('update workflow comes before surgical edits section in run prompt', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    const updateIdx = prompt.indexOf('How to Update Existing Files');
+    const surgicalIdx = prompt.indexOf('CRITICAL — Surgical Edits Only');
+    expect(updateIdx).toBeGreaterThan(0);
+    expect(surgicalIdx).toBeGreaterThan(0);
+    expect(updateIdx).toBeLessThan(surgicalIdx);
+  });
+});
+
+// --- Partial failure handling ---
+
+describe('partial failure handling in prompts', () => {
+  it('run prompt includes HANDLE PARTIAL FAILURES step', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('HANDLE PARTIAL FAILURES');
+    expect(prompt).toContain('Do NOT silently give up');
+  });
+
+  it('run prompt explains how to log partial failures', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('partial');
+    expect(prompt).toContain('blocked');
+    expect(prompt).toContain('WORK_LOG.md');
+  });
+
+  it('run prompt lists common failure patterns', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('File too large');
+    expect(prompt).toContain('API errors');
+    expect(prompt).toContain('Task dependencies not met');
+  });
+
+  it('partial failure step comes between Step 4 and Step 5', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    const step4Idx = prompt.indexOf('## Step 4: IMPLEMENT');
+    const failIdx = prompt.indexOf('## Step 4.5: HANDLE PARTIAL FAILURES');
+    const step5Idx = prompt.indexOf('## Step 5: UPDATE ROADMAP & WORK LOG');
+    expect(step4Idx).toBeLessThan(failIdx);
+    expect(failIdx).toBeLessThan(step5Idx);
+  });
+
+  it('redo prompt includes partial failure handling', () => {
+    const prompt = buildRedoPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [], taskToRedo: 'fix auth' });
+    expect(prompt).toContain('Handle Partial Failures');
+    expect(prompt).toContain('WORK_LOG.md');
+    expect(prompt).toContain('partial');
   });
 });
