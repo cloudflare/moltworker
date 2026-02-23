@@ -838,7 +838,7 @@ fi
             --model "$ALLOWED_MODEL" \
             --thinking off \
             $TOKEN_FLAG \
-            --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study"
+            --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study. After saving, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: auto-study update' && git push"
         fi
       fi
 
@@ -852,7 +852,7 @@ fi
             --model "$ALLOWED_MODEL" \
             --thinking off \
             $TOKEN_FLAG \
-            --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update"
+            --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update. After saving, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: brain-memory update' && git push"
         fi
       fi
 
@@ -866,7 +866,7 @@ fi
             --model "$ALLOWED_MODEL" \
             --thinking off \
             $TOKEN_FLAG \
-            --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md"
+            --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md. After all changes, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: self-reflect update' && git push"
         fi
       fi
 
@@ -881,7 +881,7 @@ fi
             --model "$ALLOWED_MODEL" \
             --thinking off \
             $TOKEN_FLAG \
-            --message "Read /root/clawd/warm-memory/inbox.md (work: astin@hashed.com) and /root/clawd/warm-memory/inbox-personal.md (personal: gkswlghks118@gmail.com). Summarize important emails from both accounts: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-$(date +%Y-%m-%d).md. If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary"
+            --message "Read /root/clawd/warm-memory/inbox.md (work: astin@hashed.com) and /root/clawd/warm-memory/inbox-personal.md (personal: gkswlghks118@gmail.com). Summarize important emails from both accounts: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-YYYY-MM-DD.md (use today's date). If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary. After saving, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: email summary update' && git push"
         fi
       fi
 
@@ -896,7 +896,7 @@ fi
             --model "$ALLOWED_MODEL" \
             --thinking off \
             $TOKEN_FLAG \
-            --message "Read /root/clawd/portfolio-companies.md for the full HVF portfolio company list. Pick ~10 companies that haven't been researched recently (check warm-memory/portfolio/ for last-researched dates). Prioritize [최우선] and [긴급] companies. For each company, search the web for recent news, funding, product updates, partnerships, leadership changes, and plans. Save findings per-company to warm-memory/portfolio/COMPANY-SLUG.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/portfolio/COMPANY-SLUG.md --content FINDINGS --keywords COMPANY,portfolio --reason portfolio-research. Include last-researched date at top of each file."
+            --message "Read /root/clawd/portfolio-companies.md for the full HVF portfolio company list. Pick ~10 companies that haven't been researched recently (check warm-memory/portfolio/ for last-researched dates). Prioritize [최우선] and [긴급] companies. For each company, search the web for recent news, funding, product updates, partnerships, leadership changes, and plans. Save findings per-company to warm-memory/portfolio/COMPANY-SLUG.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/portfolio/COMPANY-SLUG.md --content FINDINGS --keywords COMPANY,portfolio --reason portfolio-research. Include last-researched date at top of each file. After all files are written, commit and push to GitHub: cd /root/clawd/clawd-memory && git add moltworker/warm-memory/portfolio/ && git commit -m 'moltbot: portfolio research update' && git push"
         fi
       fi
 
