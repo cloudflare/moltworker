@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-23 (Fix orchestra tool descriptions + partial failure handling — 1348 tests)
+**Last Updated:** 2026-02-23 (7B.1 Speculative Tool Execution complete — 1411 tests — all Phase 7 done!)
 
 ---
 
@@ -233,11 +233,11 @@
 
 | ID | Task | Status | Owner | Effort | Priority | Notes |
 |----|------|--------|-------|--------|----------|-------|
-| 7B.1 | **Speculative Tool Execution** — start tools during streaming | 🔲 | Claude | High | **HIGH** | Current: wait for full LLM response → parse tool_calls → execute. New: parse tool_call names/args from streaming chunks as they arrive. For read-only tools (in `PARALLEL_SAFE_TOOLS`), start execution immediately while model is still generating. Saves 2-10s per iteration on multi-tool calls. Risk: model may change args in later chunks — only start after args are complete per tool_call. |
+| 7B.1 | **Speculative Tool Execution** — start tools during streaming | ✅ | Claude | High | **HIGH** | `onToolCallReady` callback in `parseSSEStream()` fires when tool_call is complete during streaming. `createSpeculativeExecutor()` in `speculative-tools.ts` starts PARALLEL_SAFE tools immediately. Task-processor checks speculative cache before executing — reuses results from streaming phase. Fires on: new tool_call index (previous done), finish_reason='tool_calls' (all done). Safety: only PARALLEL_SAFE_TOOLS, max 5 speculative, 30s timeout. 19 new tests (1411 total). |
 | 7B.2 | **Model Routing by Complexity** — fast models for simple queries | ✅ | Claude | Medium | **HIGH** | `routeByComplexity()` in `src/openrouter/model-router.ts`. Simple queries on default 'auto' model → GPT-4o Mini. FAST_MODEL_CANDIDATES: mini > flash > haiku. `autoRoute` user preference (default: true), `/autoroute` toggle. 15 tests. |
 | 7B.3 | **Pre-fetching Context** — parse file refs from user message | ✅ | Claude | Low | **MEDIUM** | `extractFilePaths()` + `extractGitHubContext()` in `src/utils/file-path-extractor.ts`. `startFilePrefetch()` in task-processor fires GitHub reads in parallel with first LLM call. Prefetch cache checked in `executeToolWithCache()`. 31 tests. |
 | 7B.4 | **Reduce Iteration Count** — upfront file loading per plan step | ✅ | Claude | Medium | **HIGH** | `awaitAndFormatPrefetchedFiles()` in step-decomposition.ts. After plan→work transition, awaits all prefetch promises and injects `[FILE: path]\n<contents>` into conversation context. Skips binary/empty, truncates >8KB, total cap 50KB. Model sees files already loaded, doesn't call github_read_file. Also injects user-message prefetch files (7B.3 fallback). 13 new tests (1312 total). |
-| 7B.5 | **Streaming User Feedback** — progressive Telegram updates | 🔲 | Claude | Medium | **MEDIUM** | Currently: "Thinking..." for 3 minutes, then wall of text. New: update Telegram message every ~15s with current phase (Planning step 2/4..., Executing: reading auth.ts..., Running tests...). Already have `editMessage` infrastructure (progress updates). Enhance with tool-level granularity. Subsumes Phase 6.2 (response streaming). |
+| 7B.5 | **Streaming User Feedback** — progressive Telegram updates | ✅ | Claude | Medium | **MEDIUM** | `formatProgressMessage()` in `progress-formatter.ts`. Phase-aware emoji labels (📋 Planning, 🔨 Working, 🔍 Reviewing, 🔄 Verifying), tool-level granularity (`Reading src/App.tsx…`, `Running commands: npm test`), plan step progress (`step 2/5: Add JWT validation`), `extractToolContext()` humanizes tool args, `shouldSendUpdate()` throttle (15s). Wired into task-processor iteration loop with `sendProgressUpdate()` helper. 44 new tests (1392 total). |
 
 > 🧑 HUMAN CHECK 7B.6: Benchmark before/after — measure end-to-end latency on 5 representative tasks
 
@@ -253,8 +253,8 @@
 7A.1 (CoVe Verification) ─────────────────── depends on nothing, but best after 7A.4
 7A.4 (Step Decomposition) ──┬──────────────── depends on nothing
                             └─→ 7B.4 (Reduce Iterations) ── depends on 7A.4
-7B.1 (Speculative Tools) ─────────────────── depends on nothing, but complex
-7B.5 (Streaming Feedback) ────────────────── depends on nothing, subsumes 6.2
+7B.1 (Speculative Tools) ─────────────────── ✅ COMPLETE
+7B.5 (Streaming Feedback) ────────────────── ✅ COMPLETE
 ```
 
 #### Recommended Implementation Order
@@ -267,8 +267,8 @@
 6. ~~**7A.4** Structured Step Decomposition~~ ✅ Complete
 7. ~~**7B.4** Reduce Iteration Count~~ ✅ Complete
 8. ~~**7A.1** CoVe Verification Loop~~ ✅ Complete
-9. **7B.5** Streaming User Feedback (medium effort, UX win)
-10. **7B.1** Speculative Tool Execution (high effort, advanced optimization)
+9. ~~**7B.5** Streaming User Feedback~~ ✅ Complete
+10. ~~**7B.1** Speculative Tool Execution~~ ✅ Complete
 
 ---
 
@@ -354,6 +354,8 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.1 Speculative Tool Execution — onToolCallReady callback in parseSSEStream fires when tool_call complete during streaming, createSpeculativeExecutor() starts PARALLEL_SAFE tools immediately, task-processor checks speculative cache before executing, fires on new index (previous done) and finish_reason='tool_calls' (all done), safety: only PARALLEL_SAFE_TOOLS + max 5 + 30s timeout, 19 new tests (1411 total) | src/openrouter/client.ts, src/openrouter/client.test.ts, src/durable-objects/speculative-tools.ts, src/durable-objects/speculative-tools.test.ts, src/durable-objects/task-processor.ts, src/durable-objects/task-processor.test.ts
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(ux): 7B.5 Streaming User Feedback — formatProgressMessage() with phase-aware emoji labels (📋/🔨/🔍/🔄), tool-level granularity (humanizeToolName + extractToolContext), plan step progress (step N/M), shouldSendUpdate() 15s throttle, wired into task-processor iteration loop, sendProgressUpdate() helper for forced updates on tool start, 44 new tests (1392 total) | src/durable-objects/progress-formatter.ts, src/durable-objects/progress-formatter.test.ts, src/durable-objects/task-processor.ts, src/durable-objects/task-processor.test.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | fix(orchestra+tools): Improve tool descriptions + partial failure handling — github_create_pr description now explains read-modify-write update workflow and append pattern, github_read_file mentions 50KB limit, LARGE_FILE_THRESHOLD raised (300→500 lines, 15→30KB), orchestra run/redo prompts get "How to Update Existing Files" section and "Step 4.5: HANDLE PARTIAL FAILURES" for logging blocked/partial tasks, 12 new tests (1348 total) | src/openrouter/tools.ts, src/orchestra/orchestra.ts, src/openrouter/tools.test.ts, src/orchestra/orchestra.test.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.1 CoVe Verification Loop — shouldVerify() + verifyWorkPhase() at work→review transition, scans for mutation errors/test failures/missing PRs/unverified claims, one retry iteration on failure, smart test success exclusion ("0 failed"), 24 new tests (1336 total) | src/guardrails/cove-verification.ts, src/guardrails/cove-verification.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.4 Reduce Iteration Count — awaitAndFormatPrefetchedFiles() awaits prefetch promises at plan→work transition, injects [FILE: path] blocks into context, binary/empty skip, 8KB/file + 50KB total caps, model skips github_read_file for pre-loaded files, 13 new tests (1312 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
@@ -446,11 +448,11 @@ graph TD
     end
 
     subgraph "Phase 7B: Speed Optimizations"
-        P7B1[7B.1 Speculative Tools 🔲]
+        P7B1[7B.1 Speculative Tools ✅]
         P7B2[7B.2 Model Routing ✅]
         P7B3[7B.3 Pre-fetch Context ✅]
         P7B4[7B.4 Reduce Iterations ✅]
-        P7B5[7B.5 Streaming Feedback 🔲]
+        P7B5[7B.5 Streaming Feedback ✅]
     end
 
     P7A4 --> P7B4

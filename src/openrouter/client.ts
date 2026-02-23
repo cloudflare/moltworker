@@ -78,6 +78,7 @@ export async function parseSSEStream(
   body: ReadableStream<Uint8Array>,
   idleTimeoutMs = 45000,
   onProgress?: () => void,
+  onToolCallReady?: (toolCall: ToolCall) => void,
 ): Promise<ChatCompletionResponse> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -93,6 +94,20 @@ export async function parseSSEStream(
   let finishReason: string | null = null;
   let usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined;
   let chunksReceived = 0;
+
+  // 7B.1: Track which tool_call indices have been fired to onToolCallReady
+  const firedToolCallIndices = new Set<number>();
+
+  /** Fire onToolCallReady for a tool_call if it hasn't been fired yet and has id+name. */
+  const maybeFireToolReady = (index: number): void => {
+    if (!onToolCallReady) return;
+    if (firedToolCallIndices.has(index)) return;
+    const tc = toolCalls[index];
+    if (tc && tc.id && tc.function.name) {
+      firedToolCallIndices.add(index);
+      onToolCallReady(tc);
+    }
+  };
 
   const readWithTimeout = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -159,9 +174,15 @@ export async function parseSSEStream(
               const index = tcDelta.index ?? toolCalls.length;
               let tc = toolCalls[index];
 
+              // 7B.1: If a NEW tool_call index appears, previous ones are complete
               if (!tc) {
                 tc = { id: '', type: 'function', function: { name: '', arguments: '' } };
                 toolCalls[index] = tc;
+
+                // Fire callback for all preceding completed tool_calls
+                for (let i = 0; i < index; i++) {
+                  maybeFireToolReady(i);
+                }
               }
 
               if (tcDelta.id) tc.id = tcDelta.id;
@@ -170,6 +191,13 @@ export async function parseSSEStream(
               if (tcDelta.function?.arguments !== undefined) {
                 tc.function.arguments += tcDelta.function.arguments;
               }
+            }
+          }
+
+          // 7B.1: When finish_reason='tool_calls', all tool_calls are complete
+          if (choice?.finish_reason === 'tool_calls') {
+            for (let i = 0; i < toolCalls.length; i++) {
+              maybeFireToolReady(i);
             }
           }
         } catch (e) {
@@ -639,6 +667,7 @@ export class OpenRouterClient {
       toolChoice?: 'auto' | 'none';
       idleTimeoutMs?: number;
       onProgress?: () => void; // Called when chunks received - use for heartbeat
+      onToolCallReady?: (toolCall: ToolCall) => void; // 7B.1: Called when a tool_call is complete during streaming
       reasoningLevel?: ReasoningLevel;
       responseFormat?: ResponseFormat;
     }
@@ -695,7 +724,7 @@ export class OpenRouterClient {
         throw new Error(`OpenRouter API error (${response.status}): ${errorText.slice(0, 200)}`);
       }
 
-      return await parseSSEStream(response.body, idleTimeoutMs, options?.onProgress);
+      return await parseSSEStream(response.body, idleTimeoutMs, options?.onProgress, options?.onToolCallReady);
 
     } catch (err: unknown) {
       clearTimeout(fetchTimeout);

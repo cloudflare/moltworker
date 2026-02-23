@@ -4,6 +4,82 @@
 
 ---
 
+## Session: 2026-02-23 | 7B.1 Speculative Tool Execution (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7B.1 Speculative Tool Execution — the last and most complex Phase 7 task. Start executing read-only tools during LLM streaming, before the full response is received. When SSE chunks reveal a complete tool_call (name + args), the `onToolCallReady` callback fires. A `SpeculativeExecutor` starts PARALLEL_SAFE tools immediately. When the full response arrives, the task-processor checks the speculative cache and reuses results, saving 2-10s per iteration on multi-tool calls.
+
+### Changes Made
+- Modified `src/openrouter/client.ts`:
+  - Added `onToolCallReady` parameter to `parseSSEStream()` and `chatCompletionStreamingWithTools()`
+  - Added `firedToolCallIndices` Set and `maybeFireToolReady()` helper
+  - Detection: fires when new tool_call index appears (previous done), fires on finish_reason='tool_calls' (all done)
+- Created `src/durable-objects/speculative-tools.ts`:
+  - `createSpeculativeExecutor(isSafe, execute)` factory pattern
+  - Safety: only PARALLEL_SAFE_TOOLS, max 5 speculative, 30s timeout
+  - Error handling: failures return `Error: message` (same as normal tools)
+- Modified `src/durable-objects/task-processor.ts`:
+  - Creates `specExec` before API retry loop
+  - Passes `specExec.onToolCallReady` to both OpenRouter and direct provider streaming paths
+  - Checks speculative cache before executing in both parallel and sequential tool paths
+- Created `src/openrouter/client.test.ts` — 7 tests for streaming tool detection
+- Created `src/durable-objects/speculative-tools.test.ts` — 12 tests for speculative executor
+
+### Test Results
+- 1411 tests total (19 net new)
+- Typecheck clean
+
+---
+
+## Session: 2026-02-23 | 7B.5 Streaming User Feedback (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7B.5 Streaming User Feedback — replaces generic "Thinking..." progress messages with rich, tool-level status updates in Telegram. Users now see exactly what the bot is doing in real-time: which phase (Planning/Working/Reviewing/Verifying), which tool is executing, what file is being read, which plan step is active, and elapsed time.
+
+### Changes Made
+- Created `src/durable-objects/progress-formatter.ts` with:
+  - `formatProgressMessage()` — builds phase-aware progress string with emoji labels
+  - `humanizeToolName()` — maps 16 tool names to human-readable labels
+  - `extractToolContext()` — extracts display context from tool args (file paths, URLs, commands)
+  - `estimateCurrentStep()` — estimates plan step from iteration count
+  - `shouldSendUpdate()` — throttle gate (15s interval)
+- Modified `task-processor.ts`:
+  - Added `currentTool`/`currentToolContext` tracking variables
+  - Replaced inline progress formatting with `formatProgressMessage()`
+  - Added `sendProgressUpdate()` helper (throttled, non-fatal)
+  - Tool execution paths (parallel + sequential) now update progress before execution
+  - Initial status messages use phase-specific emoji (📋/🔨)
+  - Resume checkpoint message uses 🔄 emoji
+
+### Example Progress Messages
+- `⏳ 📋 Planning… (iter 1, 0 tools, 5s)`
+- `⏳ 🔨 Reading: src/App.tsx (12s)`
+- `⏳ 🔨 Working (step 2/5: Add JWT validation) (iter 4, 6 tools, 35s)`
+- `⏳ 🔨 Running commands: npm test (48s)`
+- `⏳ 🔨 Creating PR: Add dark mode (1m15s)`
+- `⏳ 🔄 Verifying results… (1m30s)`
+- `⏳ 🔍 Reviewing… (iter 8, 12 tools, 1m45s)`
+
+### Files Modified
+- `src/durable-objects/progress-formatter.ts` (new — 260 lines)
+- `src/durable-objects/progress-formatter.test.ts` (new — 44 tests)
+- `src/durable-objects/task-processor.ts` (import + progress wiring + tool tracking)
+- `src/durable-objects/task-processor.test.ts` (updated 2 existing tests for new format)
+
+### Tests
+- 1392 tests passing (44 new)
+- TypeScript typecheck: clean
+
+---
+
 ## Session: 2026-02-23 | Fix orchestra tool descriptions + partial failure handling (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6
