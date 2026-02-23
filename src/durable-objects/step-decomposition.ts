@@ -205,3 +205,123 @@ export function formatPlanSummary(plan: StructuredPlan): string {
     .map((s, i) => `${i + 1}. [${s.action}] ${s.description}${s.files.length > 0 ? ` (${s.files.join(', ')})` : ''}`)
     .join('\n');
 }
+
+// ─── File Injection (7B.4) ──────────────────────────────────────────────────
+
+/** Max characters per injected file (same as MAX_TOOL_RESULT_LENGTH in task-processor). */
+const MAX_FILE_INJECT_SIZE = 8000;
+/** Max total characters for all injected files combined (keeps context manageable). */
+const MAX_TOTAL_INJECT_SIZE = 50000;
+
+/** Binary-looking content heuristic: high ratio of non-printable characters. */
+function isBinaryContent(content: string): boolean {
+  if (content.length === 0) return false;
+  const sample = content.slice(0, 512);
+  let nonPrintable = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const code = sample.charCodeAt(i);
+    // Allow tabs, newlines, carriage returns, and printable ASCII/unicode
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) nonPrintable++;
+  }
+  return nonPrintable / sample.length > 0.1;
+}
+
+/**
+ * Result of awaiting and formatting pre-fetched files for context injection.
+ */
+export interface FileInjectionResult {
+  /** Formatted context string with all loaded file contents. */
+  contextMessage: string;
+  /** Number of files successfully loaded. */
+  loadedCount: number;
+  /** Number of files that failed or were skipped. */
+  skippedCount: number;
+  /** File paths that were successfully loaded (for logging). */
+  loadedFiles: string[];
+}
+
+/**
+ * Await all pre-fetched file promises and format them for context injection (7B.4).
+ *
+ * Takes the prefetch map (keyed by "owner/repo/path"), awaits all promises,
+ * and formats resolved contents as `[FILE: path]\n<contents>` blocks.
+ * Skips binary files, truncates large files, and respects a total size budget.
+ *
+ * @param prefetchMap - Map of cache keys to content promises
+ * @returns Formatted injection result with context message and stats
+ */
+export async function awaitAndFormatPrefetchedFiles(
+  prefetchMap: Map<string, Promise<string | null>>,
+): Promise<FileInjectionResult> {
+  if (prefetchMap.size === 0) {
+    return { contextMessage: '', loadedCount: 0, skippedCount: 0, loadedFiles: [] };
+  }
+
+  // Await all promises in parallel
+  const entries = [...prefetchMap.entries()];
+  const settled = await Promise.allSettled(entries.map(([, p]) => p));
+
+  const fileSections: string[] = [];
+  const loadedFiles: string[] = [];
+  let totalSize = 0;
+  let skippedCount = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const [cacheKey] = entries[i];
+    const outcome = settled[i];
+
+    // Extract file path from cache key (format: "owner/repo/path")
+    const parts = cacheKey.split('/');
+    const filePath = parts.length > 2 ? parts.slice(2).join('/') : cacheKey;
+
+    // Skip failed/null results
+    if (outcome.status === 'rejected' || outcome.value === null) {
+      skippedCount++;
+      continue;
+    }
+
+    let content = outcome.value;
+
+    // Skip binary content
+    if (isBinaryContent(content)) {
+      skippedCount++;
+      continue;
+    }
+
+    // Skip empty files
+    if (content.trim().length === 0) {
+      skippedCount++;
+      continue;
+    }
+
+    // Truncate large files
+    if (content.length > MAX_FILE_INJECT_SIZE) {
+      content = content.slice(0, MAX_FILE_INJECT_SIZE) + '\n... [truncated, ' + content.length + ' chars total]';
+    }
+
+    // Check total size budget
+    const sectionSize = filePath.length + content.length + 20; // overhead for [FILE: ...]\n
+    if (totalSize + sectionSize > MAX_TOTAL_INJECT_SIZE) {
+      skippedCount++;
+      continue;
+    }
+
+    fileSections.push(`[FILE: ${filePath}]\n${content}`);
+    loadedFiles.push(filePath);
+    totalSize += sectionSize;
+  }
+
+  if (fileSections.length === 0) {
+    return { contextMessage: '', loadedCount: 0, skippedCount, loadedFiles: [] };
+  }
+
+  const header = `[PRE-LOADED FILES] The following ${fileSections.length} file(s) from your plan are already loaded into context. Do NOT call github_read_file for these — use the content below directly.\n`;
+  const contextMessage = header + '\n' + fileSections.join('\n\n');
+
+  return {
+    contextMessage,
+    loadedCount: fileSections.length,
+    skippedCount,
+    loadedFiles,
+  };
+}

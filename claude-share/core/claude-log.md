@@ -4,6 +4,35 @@
 
 ---
 
+## Session: 2026-02-23 | 7B.4 Reduce Iteration Count (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7B.4 Reduce Iteration Count — the biggest speed optimization in Phase 7. After the plan→work transition, all pre-fetched file contents are awaited and injected directly into the conversation context as `[FILE: path]\n<contents>` blocks. The model sees files already loaded and doesn't need to call `github_read_file`, reducing typical multi-file tasks from ~8 iterations to 3-4.
+
+### Changes Made
+- Added `awaitAndFormatPrefetchedFiles()` to `step-decomposition.ts` — awaits all prefetch promises, formats as context blocks
+- Added `isBinaryContent()` heuristic — skips binary files (>10% non-printable chars in first 512 bytes)
+- Added `FileInjectionResult` interface for typed return values
+- Modified plan→work transition in `task-processor.ts` to call `awaitAndFormatPrefetchedFiles()` and inject a user message with pre-loaded file contents
+- Also injects files for free-form fallback path (when no structured plan is parsed but user-message prefetch exists)
+- Constants: MAX_FILE_INJECT_SIZE=8KB/file, MAX_TOTAL_INJECT_SIZE=50KB total
+- 13 new tests: empty map, single/multi file, null/rejected promises, empty files, binary skip, large file truncation, total size budget, deep paths, all-fail graceful, normal code/tab handling
+
+### Files Modified
+- `src/durable-objects/step-decomposition.ts` (added awaitAndFormatPrefetchedFiles + helpers)
+- `src/durable-objects/step-decomposition.test.ts` (13 new tests)
+- `src/durable-objects/task-processor.ts` (import + plan→work injection)
+
+### Tests
+- 1312 tests passing (13 new)
+- TypeScript typecheck: clean
+
+---
+
 ## Session: 2026-02-22 | 7A.5 Prompt Caching (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6
