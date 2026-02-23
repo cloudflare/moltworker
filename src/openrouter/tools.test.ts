@@ -2440,6 +2440,25 @@ describe('github_create_pr tool', () => {
     expect(tool!.function.parameters.required).toEqual(['owner', 'repo', 'title', 'branch', 'changes']);
   });
 
+  it('description explains the update workflow', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'github_create_pr')!;
+    expect(tool.function.description).toContain('github_read_file');
+    expect(tool.function.description).toContain('COMPLETE new content');
+    expect(tool.function.description).toContain('append');
+  });
+
+  it('changes parameter clarifies update requires full content', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'github_create_pr')!;
+    const changesParam = tool.function.parameters.properties['changes'];
+    expect(changesParam.description).toContain('COMPLETE new file content');
+    expect(changesParam.description).toContain('read the file first');
+  });
+
+  it('github_read_file description mentions 50KB limit', () => {
+    const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'github_read_file')!;
+    expect(tool.function.description).toContain('50KB');
+  });
+
   it('should be included in TOOLS_WITHOUT_BROWSER (available in DOs)', () => {
     const tool = TOOLS_WITHOUT_BROWSER.find(t => t.function.name === 'github_create_pr');
     expect(tool).toBeDefined();

@@ -41,8 +41,8 @@ const MAX_HISTORY_TASKS = 30;
 
 // Repo health check thresholds — files above these limits should be split
 // before the bot attempts modifications
-export const LARGE_FILE_THRESHOLD_LINES = 300;
-export const LARGE_FILE_THRESHOLD_KB = 15;
+export const LARGE_FILE_THRESHOLD_LINES = 500;
+export const LARGE_FILE_THRESHOLD_KB = 30;
 
 // Common file names the model should look for as existing roadmaps
 const ROADMAP_FILE_CANDIDATES = [
@@ -286,6 +286,13 @@ This health check prevents failed or broken implementations caused by editing fi
 - Include proper types (no \`any\`)
 - Write tests if the repo has a test pattern
 
+### How to Update Existing Files
+To modify an existing file (append content, edit a section, etc.):
+1. **Read first**: Use \`github_read_file\` to get the current content
+2. **Modify in memory**: Add/change/remove the parts you need
+3. **Write full content**: Use \`github_create_pr\` with \`action: "update"\` and the COMPLETE modified content
+This is how you "append" to files — read the original, add new content at the end, provide the full result.
+
 ### CRITICAL — Surgical Edits Only
 **NEVER regenerate or rewrite an entire file from scratch.** This is the most common failure mode.
 - Make TARGETED, SURGICAL changes — add/modify/remove only the specific lines needed for your task
@@ -294,6 +301,21 @@ This health check prevents failed or broken implementations caused by editing fi
 - Before writing file content, mentally verify: "Does my new version still contain every function and export from the original?"
 - If you cannot make targeted edits because the file is too complex or large, STOP and do a file-splitting refactor instead (see Step 3.5)
 - The \`github_create_pr\` tool will BLOCK updates that lose more than 60% of original identifiers — so regenerating from scratch will fail
+
+## Step 4.5: HANDLE PARTIAL FAILURES
+If you CANNOT complete the task (file too large for your context, API errors, complex dependency issues):
+
+1. **Do NOT silently give up** — always create a PR with at least documentation updates
+2. **Update WORK_LOG.md**: Append a row with status \`⚠️ partial\` or \`❌ blocked\` explaining what went wrong
+3. **Update ROADMAP.md**: Add a note under the task (keep it as \`- [ ]\`) explaining the blocker:
+   \`- [ ] **Task 2.1**: Add destinations\`
+   \`  - ⚠️ Blocked: src/App.jsx too large (~800 lines). Needs file split first.\`
+4. **Report clearly** in ORCHESTRA_RESULT with \`pr: FAILED\` or the partial PR URL
+
+Common failure patterns and how to handle them:
+- **File too large to edit safely**: Create a file-split refactor PR instead (see Step 3.5)
+- **API errors / permission denied**: Log the error in WORK_LOG.md, report in summary
+- **Task dependencies not met**: Note the missing dependency, skip to next available task
 
 ## Step 5: UPDATE ROADMAP & WORK LOG
 In the SAME PR, also include:
@@ -956,6 +978,13 @@ Update the roadmap to reflect the split as a completed prerequisite task.
 - Include proper types (no \`any\`)
 - Write/fix tests if the repo has a test pattern
 
+### How to Update Existing Files
+To modify an existing file (append content, edit a section, etc.):
+1. **Read first**: Use \`github_read_file\` to get the current content
+2. **Modify in memory**: Add/change/remove the parts you need
+3. **Write full content**: Use \`github_create_pr\` with \`action: "update"\` and the COMPLETE modified content
+This is how you "append" to files — read the original, add new content at the end, provide the full result.
+
 ### CRITICAL — Surgical Edits Only
 **NEVER regenerate or rewrite an entire file from scratch.** This is the most common failure mode.
 - Make TARGETED, SURGICAL changes — add/modify/remove only the specific lines needed
@@ -963,6 +992,12 @@ Update the roadmap to reflect the split as a completed prerequisite task.
 - Before writing file content, mentally verify: "Does my new version still contain every function and export from the original?"
 - If you cannot make targeted edits, STOP and do a file-splitting refactor first
 - The \`github_create_pr\` tool will BLOCK updates that lose more than 60% of original identifiers
+
+### Handle Partial Failures
+If you CANNOT complete the redo (file too large, complex dependencies):
+1. Still create a PR with WORK_LOG.md update (\`⚠️ partial\` or \`❌ blocked\`)
+2. Add a note to ROADMAP.md explaining the blocker (keep task as \`- [ ]\`)
+3. Report clearly in ORCHESTRA_RESULT with \`pr: FAILED\` or partial PR URL
 
 ## Step 4: UPDATE ROADMAP & WORK LOG
 In the SAME PR:

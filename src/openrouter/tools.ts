@@ -94,7 +94,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_read_file',
-      description: 'Read a file from a GitHub repository. Authentication is handled automatically. Works with both public and private repos.',
+      description: 'Read a file from a GitHub repository. Supports files up to 50KB (truncated beyond that). Authentication is handled automatically. Works with both public and private repos.',
       parameters: {
         type: 'object',
         properties: {
@@ -375,7 +375,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_create_pr',
-      description: 'Create a GitHub Pull Request with file changes. Creates a branch, commits file changes (create/update/delete), and opens a PR. Authentication is handled automatically. Use for simple multi-file changes (up to ~10 files, 1MB total).',
+      description: 'Create a GitHub Pull Request with file changes. Creates a branch, commits file changes (create/update/delete), and opens a PR. Authentication is handled automatically. Use for simple multi-file changes (up to ~10 files, 1MB total). To UPDATE an existing file: first read it with github_read_file, modify the content, then pass the COMPLETE new content with action "update". This is how you append to or edit existing files.',
       parameters: {
         type: 'object',
         properties: {
@@ -401,7 +401,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
           },
           changes: {
             type: 'string',
-            description: 'JSON array of file changes: [{"path":"file.ts","content":"...","action":"create|update|delete"}]',
+            description: 'JSON array of file changes: [{"path":"file.ts","content":"...full file content...","action":"create|update|delete"}]. For "update", content must be the COMPLETE new file content (read the file first with github_read_file, modify it, then provide the full result). For "create", provide the full new file content. For "delete", content is not needed.',
           },
           body: {
             type: 'string',
