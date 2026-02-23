@@ -1675,7 +1675,7 @@ describe('Tool result caching', () => {
 
     const callsAfter = vi.mocked(executeTool).mock.calls.length;
     expect(callsAfter - callsBefore).toBe(1);
-    expect(processor.getToolCacheStats()).toEqual({ hits: 1, misses: 1, size: 1 });
+    expect(processor.getToolCacheStats()).toEqual({ hits: 1, misses: 1, size: 1, prefetchHits: 0 });
   });
 
   it('cache miss on different arguments', async () => {
@@ -1718,7 +1718,7 @@ describe('Tool result caching', () => {
 
     const callsAfter = vi.mocked(executeTool).mock.calls.length;
     expect(callsAfter - callsBefore).toBe(2);
-    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 2, size: 2 });
+    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 2, size: 2, prefetchHits: 0 });
   });
 
   it('mutation tools bypass cache entirely', async () => {
@@ -1761,7 +1761,7 @@ describe('Tool result caching', () => {
 
     const callsAfter = vi.mocked(executeTool).mock.calls.length;
     expect(callsAfter - callsBefore).toBe(2);
-    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 0, size: 0 });
+    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 0, size: 0, prefetchHits: 0 });
   });
 
   it('error results are not cached', async () => {
@@ -1804,7 +1804,7 @@ describe('Tool result caching', () => {
 
     const callsAfter = vi.mocked(executeTool).mock.calls.length;
     expect(callsAfter - callsBefore).toBe(2);
-    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 0, size: 0 });
+    expect(processor.getToolCacheStats()).toEqual({ hits: 0, misses: 0, size: 0, prefetchHits: 0 });
   });
 
   it('cache stats method returns correct hit/miss counts across multiple calls', async () => {
@@ -1859,7 +1859,7 @@ describe('Tool result caching', () => {
 
     const callsAfter = vi.mocked(executeTool).mock.calls.length;
     expect(callsAfter - callsBefore).toBe(2);
-    expect(processor.getToolCacheStats()).toEqual({ hits: 2, misses: 2, size: 2 });
+    expect(processor.getToolCacheStats()).toEqual({ hits: 2, misses: 2, size: 2, prefetchHits: 0 });
   });
 });
 
