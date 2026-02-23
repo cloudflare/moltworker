@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-23 (7B.3 Pre-fetch Context complete — 1273 tests)
+**Last Updated:** 2026-02-23 (7A.4 Structured Step Decomposition complete — 1299 tests)
 
 ---
 
@@ -64,6 +64,7 @@
 | MS.1-4 | Full model catalog auto-sync from OpenRouter (1227 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | MS.5-6 | Dynamic /pick picker + /syncall menu + /start sync button | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | 7B.2 | Model Routing by Complexity — fast model for simple queries (1242 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
+| 7A.4 | Structured Step Decomposition — JSON plan steps, file pre-loading (1299 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | 7B.3 | Pre-fetch Context — extract file paths, prefetch from GitHub (1273 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 
 ---
@@ -72,7 +73,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | 7B.3 Pre-fetch Context ✅ | `claude/execute-next-prompt-psdEX` | 2026-02-23 |
+| Claude | 7A.4 Structured Step Decomposition ✅ | `claude/execute-next-prompt-psdEX` | 2026-02-23 |
 | Codex | — | — | — |
 | Other | — | — | — |
 

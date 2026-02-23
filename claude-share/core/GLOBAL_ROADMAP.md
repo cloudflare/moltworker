@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-23 (7B.3 Pre-fetch Context complete — 1273 tests)
+**Last Updated:** 2026-02-23 (7A.4 Structured Step Decomposition complete — 1299 tests)
 
 ---
 
@@ -224,7 +224,7 @@
 | 7A.1 | **CoVe Verification Loop** — post-execution verification step | 🔲 | Claude | Medium | **HIGH** | After work phase: read claimed files, run `npm test`, check `git diff`. No extra LLM call — just tool execution + simple pass/fail checks. If tests fail, inject results back into context and give model one retry iteration. Inspired by §2.2 of spec but drastically simplified (no separate verifier agent). |
 | 7A.2 | **Smart Context Loading** — task-aware context in handler | ✅ | Claude | Low | **MEDIUM** | Complexity classifier in `src/utils/task-classifier.ts`. Simple queries (weather, greetings, crypto) skip R2 reads for learnings, last-task, sessions. History capped at 5 for simple. 35 tests (27 unit + 8 integration). Inspired by §5.1 of spec. |
 | 7A.3 | **Destructive Op Guard** — wire Vex patterns into task processor | ✅ | Claude | Low | **LOW-MEDIUM** | `scanToolCallForRisks()` in `src/guardrails/destructive-op-guard.ts`. Reuses 14 RISKY_PATTERNS from Vex review. Critical/high → block, medium → warn+allow. Guards sandbox_exec, github_api, github_create_pr, cloudflare_api. 25 tests. Inspired by §4.2 of spec. |
-| 7A.4 | **Structured Step Decomposition** — planner outputs JSON steps | 🔲 | Claude | Medium | **MEDIUM** | Current plan phase: model thinks for 1 iteration, then starts executing (discovering files as it goes, wasting 3-4 iterations on reads). New: force planner to output structured JSON `{steps: [{action, files, description}]}`. Pre-load referenced files into context before executor starts. Reduces iteration count by 2-4. Inspired by §8.2 of spec. |
+| 7A.4 | **Structured Step Decomposition** — planner outputs JSON steps | ✅ | Claude | Medium | **MEDIUM** | `STRUCTURED_PLAN_PROMPT` requests JSON `{steps: [{action, files, description}]}`. `parseStructuredPlan()` extracts from code blocks, raw JSON, or falls back to file path extraction. `prefetchPlanFiles()` pre-loads all referenced files at plan→work transition. 26 tests. Module: `src/durable-objects/step-decomposition.ts`. Inspired by §8.2 of spec. |
 | 7A.5 | **Prompt Caching** — `cache_control` for Anthropic models | ✅ | Claude | Low | **MEDIUM** | `injectCacheControl()` in `src/openrouter/prompt-cache.ts`. Detects Anthropic models via `isAnthropicModel()`, injects `cache_control: {type:'ephemeral'}` on last system message content block. Works via OpenRouter (passes through to Anthropic API). Wired into task processor + client. 17 tests. Inspired by §5.3 of spec. |
 
 > 🧑 HUMAN CHECK 7A.6: Review CoVe verification results after 10+ tasks — does it catch real failures?
@@ -264,7 +264,7 @@
 3. ~~**7A.5** Prompt Caching~~ ✅ Complete
 4. ~~**7B.2** Model Routing by Complexity~~ ✅ Complete
 5. ~~**7B.3** Pre-fetching Context~~ ✅ Complete
-6. **7A.4** Structured Step Decomposition (medium effort, enables 7B.4)
+6. ~~**7A.4** Structured Step Decomposition~~ ✅ Complete
 7. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
 8. **7B.4** Reduce Iteration Count (medium effort, biggest speed win for complex tasks)
 9. **7B.5** Streaming User Feedback (medium effort, UX win)
@@ -354,6 +354,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.4 Structured Step Decomposition — STRUCTURED_PLAN_PROMPT requests JSON steps, parseStructuredPlan() with 3-tier parsing (code block → raw JSON → free-form fallback), prefetchPlanFiles() pre-loads all files at plan→work transition, 26 new tests (1299 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.3 Pre-fetch Context — extractFilePaths() regex + extractGitHubContext() repo detection, startFilePrefetch() runs GitHub reads in parallel with first LLM call, prefetch cache in executeToolWithCache(), 31 new tests (1273 total) | src/utils/file-path-extractor.ts, src/utils/file-path-extractor.test.ts, src/openrouter/tools.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.2 Model Routing by Complexity — routeByComplexity() routes simple queries on default 'auto' to GPT-4o Mini, FAST_MODEL_CANDIDATES (mini/flash/haiku), autoRoute user pref + /autoroute toggle, 15 new tests (1242 total) | src/openrouter/model-router.ts, src/openrouter/model-router.test.ts, src/openrouter/storage.ts, src/telegram/handler.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(telegram): add /syncall to menu, sync button, dynamic model picker — sendModelPicker() scores models by SWE-Bench + capabilities, top 3 per tier (free/value/premium), sync button in /start | src/telegram/handler.ts, src/routes/telegram.ts
@@ -437,7 +438,7 @@ graph TD
         P7A1[7A.1 CoVe Verification 🔲]
         P7A2[7A.2 Smart Context Loading ✅]
         P7A3[7A.3 Destructive Op Guard ✅]
-        P7A4[7A.4 Step Decomposition 🔲]
+        P7A4[7A.4 Step Decomposition ✅]
         P7A5[7A.5 Prompt Caching ✅]
     end
 

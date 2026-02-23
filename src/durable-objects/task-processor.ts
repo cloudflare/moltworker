@@ -20,11 +20,13 @@ import { estimateTokens, compressContextBudgeted, sanitizeToolPairs } from './co
 import { checkPhaseBudget, PhaseBudgetExceededError } from './phase-budget';
 import { validateToolResult, createToolErrorTracker, trackToolError, generateCompletionWarning, adjustConfidence, type ToolErrorTracker } from '../guardrails/tool-validator';
 import { scanToolCallForRisks } from '../guardrails/destructive-op-guard';
+import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, type StructuredPlan } from './step-decomposition';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
 
 // Phase-aware prompts injected at each stage
+// Legacy free-form prompt (kept for reference, replaced by STRUCTURED_PLAN_PROMPT from step-decomposition)
 const PLAN_PHASE_PROMPT = 'Before starting, briefly outline your approach (2-3 bullet points): what tools you\'ll use and in what order. Then proceed immediately with execution.';
 
 /**
@@ -222,6 +224,8 @@ interface TaskState {
   phaseStartIteration?: number;
   // The actual answer from work phase, preserved so review doesn't replace it
   workPhaseContent?: string;
+  // Structured plan steps from 7A.4 step decomposition
+  structuredPlan?: StructuredPlan;
 }
 
 // Task request from the worker
@@ -1048,11 +1052,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       }
     }
 
-    // Inject planning prompt for fresh tasks (not resumed from checkpoint, not simple queries)
+    // Inject structured planning prompt for fresh tasks (not resumed from checkpoint, not simple queries)
+    // 7A.4: Uses structured JSON plan prompt instead of free-form text
     if (!resumedFromCheckpoint && !skipPlan) {
       conversationMessages.push({
         role: 'user',
-        content: `[PLANNING PHASE] ${PLAN_PHASE_PROMPT}`,
+        content: STRUCTURED_PLAN_PROMPT,
       });
     }
 
@@ -1429,6 +1434,28 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           task.phase = 'work';
           task.phaseStartIteration = task.iterations;
           phaseStartTime = Date.now(); // Reset phase budget clock
+
+          // 7A.4: Parse structured steps from the plan response and pre-load referenced files
+          const planContent = choice.message.content || '';
+          const structuredPlan = parseStructuredPlan(planContent);
+          if (structuredPlan) {
+            task.structuredPlan = structuredPlan;
+            console.log(`[TaskProcessor] Structured plan parsed: ${structuredPlan.steps.length} steps\n${formatPlanSummary(structuredPlan)}`);
+
+            // Pre-load all files referenced in the plan (merges into existing prefetch cache)
+            const planPrefetch = prefetchPlanFiles(structuredPlan, conversationMessages, request.githubToken);
+            for (const [key, promise] of planPrefetch) {
+              if (!this.prefetchPromises.has(key)) {
+                this.prefetchPromises.set(key, promise);
+              }
+            }
+            if (planPrefetch.size > 0) {
+              console.log(`[TaskProcessor] Plan prefetch: ${planPrefetch.size} files queued`);
+            }
+          } else {
+            console.log('[TaskProcessor] No structured plan parsed from response (free-form fallback)');
+          }
+
           await this.doState.storage.put('task', task);
           console.log(`[TaskProcessor] Phase transition: plan → work (iteration ${task.iterations})`);
         }
