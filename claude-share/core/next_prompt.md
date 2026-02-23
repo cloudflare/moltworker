@@ -3,46 +3,47 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-23 (7B.5 Streaming User Feedback complete — 1392 tests, moving to 7B.1)
+**Last Updated:** 2026-02-23 (7B.1 Speculative Tool Execution complete — 1411 tests — ALL Phase 7 done!)
 
 ---
 
-## Current Task: 7B.1 — Speculative Tool Execution
-
-### Goal
-
-Start tool execution during LLM streaming, before the full response is received. Currently: wait for full LLM response → parse tool_calls → execute. New: parse tool_call names/args from streaming chunks as they arrive. For read-only tools (in `PARALLEL_SAFE_TOOLS`), start execution immediately while model is still generating. Saves 2-10s per iteration on multi-tool calls.
+## Current Task: Choose Next Direction
 
 ### Context
 
-- Phase 7B is Speed Optimizations (see `GLOBAL_ROADMAP.md`)
-- All Phase 7A quality tasks complete (7A.1-7A.5)
-- All other Phase 7B tasks complete (7B.2-7B.5)
-- This is the last and most complex Phase 7 task
-- Risk: model may change args in later chunks — only start after args are complete per tool_call
+**Phase 7 (Performance & Quality Engine) is 100% complete!** All 10 tasks delivered:
+- 7A.1 CoVe Verification Loop ✅
+- 7A.2 Smart Context Loading ✅
+- 7A.3 Destructive Op Guard ✅
+- 7A.4 Structured Step Decomposition ✅
+- 7A.5 Prompt Caching ✅
+- 7B.1 Speculative Tool Execution ✅
+- 7B.2 Model Routing by Complexity ✅
+- 7B.3 Pre-fetch Context ✅
+- 7B.4 Reduce Iteration Count ✅
+- 7B.5 Streaming User Feedback ✅
 
-### What Needs to Happen
+Total: 1411 tests, all passing, typecheck clean.
 
-1. **Parse streaming tool calls** — detect tool_call chunks in SSE stream, extract name + args as they arrive
-2. **Start read-only tools early** — tools in `PARALLEL_SAFE_TOOLS` can be started before stream ends
-3. **Wait for args completion** — only start a tool after its arguments JSON is fully received
-4. **Merge with existing results** — when stream ends, check if speculative tools already have results
-5. **Safety**: Only speculate for tools in PARALLEL_SAFE_TOOLS whitelist (read-only)
-6. **Tests**: Mock streaming chunks with partial tool_calls, verify speculative execution
-7. **Run `npm test` and `npm run typecheck`** before committing
+### Remaining Open Work (by priority)
 
-### Key Files
+| Priority | Task | Phase | Effort | Notes |
+|----------|------|-------|--------|-------|
+| 1 | **Human checkpoint 7B.6** — Benchmark before/after latency on 5 tasks | 7B | Human | Validate Phase 7 speed gains |
+| 2 | **5.1 Multi-agent Review** — route complex results through reviewer model | 5 | High | 7A.1 CoVe may suffice |
+| 3 | **5.3 Acontext Sandbox** — code execution in sandbox containers | 5 | High | Requires Acontext setup |
+| 4 | **5.4 Acontext Disk** — file management via Acontext | 5 | High | Requires Acontext setup |
+| 5 | **6.3 Voice Messages** — Whisper + TTS | 6 | High | WhatsApp-style voice |
+| 6 | **6.4 Calendar/Reminders** — cron-based | 6 | Medium | |
+| 7 | **6.5 Email Integration** — CF Email Workers | 6 | Medium | |
+| 8 | **6.6 WhatsApp Integration** — Business API | 6 | High | |
 
-- `src/openrouter/client.ts` — `parseSSEStream()` is the streaming parser
-- `src/durable-objects/task-processor.ts` — tool execution loop, `PARALLEL_SAFE_TOOLS`
-- `src/openrouter/tools.ts` — tool definitions and execution
+### Recommendation
 
-### Queue After This Task
-
-| Priority | Task | Effort | Notes |
-|----------|------|--------|-------|
-| Next | Phase 6 expansion or new features | Varies | All Phase 7 would be complete |
-| Later | 5.1: Multi-agent Review | High | May be replaced by CoVe |
+The human should first benchmark Phase 7 gains (7B.6). Then either:
+- **Option A:** Phase 5 remaining (multi-agent, sandbox, disk) — deeper AI capabilities
+- **Option B:** Phase 6 expansion (voice, calendar, email, WhatsApp) — broader platform reach
+- **Option C:** New features from user requests — respond to actual usage patterns
 
 ---
 
@@ -50,6 +51,7 @@ Start tool execution during LLM streaming, before the full response is received.
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-23 | 7B.1: Speculative Tool Execution — start tools during streaming (1411 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | 7B.5: Streaming User Feedback — phase + tool-level progress messages (1392 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | Fix: Orchestra tool descriptions + partial failure handling (1348 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | 7A.1: CoVe Verification Loop — post-work verification (1336 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |

@@ -4,6 +4,37 @@
 
 ---
 
+## Session: 2026-02-23 | 7B.1 Speculative Tool Execution (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7B.1 Speculative Tool Execution — the last and most complex Phase 7 task. Start executing read-only tools during LLM streaming, before the full response is received. When SSE chunks reveal a complete tool_call (name + args), the `onToolCallReady` callback fires. A `SpeculativeExecutor` starts PARALLEL_SAFE tools immediately. When the full response arrives, the task-processor checks the speculative cache and reuses results, saving 2-10s per iteration on multi-tool calls.
+
+### Changes Made
+- Modified `src/openrouter/client.ts`:
+  - Added `onToolCallReady` parameter to `parseSSEStream()` and `chatCompletionStreamingWithTools()`
+  - Added `firedToolCallIndices` Set and `maybeFireToolReady()` helper
+  - Detection: fires when new tool_call index appears (previous done), fires on finish_reason='tool_calls' (all done)
+- Created `src/durable-objects/speculative-tools.ts`:
+  - `createSpeculativeExecutor(isSafe, execute)` factory pattern
+  - Safety: only PARALLEL_SAFE_TOOLS, max 5 speculative, 30s timeout
+  - Error handling: failures return `Error: message` (same as normal tools)
+- Modified `src/durable-objects/task-processor.ts`:
+  - Creates `specExec` before API retry loop
+  - Passes `specExec.onToolCallReady` to both OpenRouter and direct provider streaming paths
+  - Checks speculative cache before executing in both parallel and sequential tool paths
+- Created `src/openrouter/client.test.ts` — 7 tests for streaming tool detection
+- Created `src/durable-objects/speculative-tools.test.ts` — 12 tests for speculative executor
+
+### Test Results
+- 1411 tests total (19 net new)
+- Typecheck clean
+
+---
+
 ## Session: 2026-02-23 | 7B.5 Streaming User Feedback (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6

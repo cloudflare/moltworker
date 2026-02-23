@@ -23,6 +23,7 @@ import { scanToolCallForRisks } from '../guardrails/destructive-op-guard';
 import { shouldVerify, verifyWorkPhase, formatVerificationFailures } from '../guardrails/cove-verification';
 import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, awaitAndFormatPrefetchedFiles, type StructuredPlan } from './step-decomposition';
 import { formatProgressMessage, extractToolContext, shouldSendUpdate, type ProgressState } from './progress-formatter';
+import { createSpeculativeExecutor } from './speculative-tools';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -1199,6 +1200,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         } | null = null;
         let lastError: Error | null = null;
 
+        // 7B.1: Create speculative executor for this iteration
+        // Safe read-only tools will be started during streaming, before the full response arrives
+        const specExec = createSpeculativeExecutor(
+          isToolCallParallelSafe,
+          (tc) => this.executeToolWithCache(tc, toolContext),
+        );
+
         for (let attempt = 1; attempt <= MAX_API_RETRIES; attempt++) {
           try {
             console.log(`[TaskProcessor] Starting API call (attempt ${attempt}/${MAX_API_RETRIES})...`);
@@ -1234,10 +1242,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                       console.log(`[TaskProcessor] Streaming progress: ${progressCount} chunks received`);
                     }
                   },
+                  onToolCallReady: useTools ? specExec.onToolCallReady : undefined,
                 }
               );
 
-              console.log(`[TaskProcessor] Streaming completed: ${progressCount} total chunks`);
+              console.log(`[TaskProcessor] Streaming completed: ${progressCount} total chunks${specExec.startedCount() > 0 ? `, ${specExec.startedCount()} tools started speculatively` : ''}`);
               break; // Success! Exit retry loop
 
             } else {
@@ -1310,9 +1319,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 if (directProgressCount % 100 === 0) {
                   console.log(`[TaskProcessor] ${provider} streaming: ${directProgressCount} chunks`);
                 }
-              });
+              }, useTools ? specExec.onToolCallReady : undefined);
 
-              console.log(`[TaskProcessor] ${provider} streaming complete: ${directProgressCount} chunks`);
+              console.log(`[TaskProcessor] ${provider} streaming complete: ${directProgressCount} chunks${specExec.startedCount() > 0 ? `, ${specExec.startedCount()} tools started speculatively` : ''}`);
               break; // Success!
             }
 
@@ -1541,6 +1550,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           const parallelStart = Date.now();
           let toolResults: Array<{ toolName: string; toolResult: { tool_call_id: string; content: string } }>;
 
+          // 7B.1: Count how many tools have speculative results already available
+          const speculativeHits = choice.message.tool_calls.filter(tc => specExec.getResult(tc.id)).length;
+          if (speculativeHits > 0) {
+            console.log(`[TaskProcessor] 7B.1: ${speculativeHits}/${choice.message.tool_calls.length} tool results from speculative execution`);
+          }
+
           if (useParallel) {
             // 7B.5: Show parallel tool names in progress
             const parallelToolNames = choice.message.tool_calls.map(tc => tc.function.name);
@@ -1555,6 +1570,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               choice.message.tool_calls.map(async (toolCall) => {
                 const toolStartTime = Date.now();
                 const toolName = toolCall.function.name;
+
+                // 7B.1: Use speculative result if already started during streaming
+                const specResult = specExec.getResult(toolCall.id);
+                if (specResult) {
+                  const toolResult = await specResult;
+                  console.log(`[TaskProcessor] Tool ${toolName} from speculative cache in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
+                  return { toolName, toolResult };
+                }
 
                 const toolPromise = this.executeToolWithCache(toolCall, toolContext);
                 const toolTimeoutPromise = new Promise<never>((_, reject) => {
@@ -1596,20 +1619,28 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               await sendProgressUpdate();
 
               let toolResult;
-              try {
-                const toolPromise = this.executeToolWithCache(toolCall, toolContext);
-                const toolTimeoutPromise = new Promise<never>((_, reject) => {
-                  setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
-                });
-                toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
-              } catch (toolError) {
-                toolResult = {
-                  tool_call_id: toolCall.id,
-                  content: `Error: ${toolError instanceof Error ? toolError.message : String(toolError)}`,
-                };
+
+              // 7B.1: Use speculative result for safe tools even in sequential path
+              const specResult = specExec.getResult(toolCall.id);
+              if (specResult) {
+                toolResult = await specResult;
+                console.log(`[TaskProcessor] Tool ${toolName} from speculative cache in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
+              } else {
+                try {
+                  const toolPromise = this.executeToolWithCache(toolCall, toolContext);
+                  const toolTimeoutPromise = new Promise<never>((_, reject) => {
+                    setTimeout(() => reject(new Error(`Tool ${toolName} timeout (60s)`)), 60000);
+                  });
+                  toolResult = await Promise.race([toolPromise, toolTimeoutPromise]);
+                } catch (toolError) {
+                  toolResult = {
+                    tool_call_id: toolCall.id,
+                    content: `Error: ${toolError instanceof Error ? toolError.message : String(toolError)}`,
+                  };
+                }
+                console.log(`[TaskProcessor] Tool ${toolName} completed in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
               }
 
-              console.log(`[TaskProcessor] Tool ${toolName} completed in ${Date.now() - toolStartTime}ms, result size: ${toolResult.content.length} chars`);
               toolResults.push({ toolName, toolResult });
             }
             console.log(`[TaskProcessor] ${toolResults.length} tools executed sequentially in ${Date.now() - parallelStart}ms`);
