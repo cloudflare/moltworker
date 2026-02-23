@@ -386,4 +386,65 @@ debug.get('/container-config', async (c) => {
   }
 });
 
+// GET /debug/setup-context - Injects context and memory into the container
+debug.get('/setup-context', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  // Context data from the user's workspace
+  const identityContext = `
+# USER IDENTITY & CONTEXT
+- User: Caleb Broohm
+- Business: Descentra AI LLC (wyoming-based)
+- Email: info@descentraai.com
+- Phone: +43 664 8787784
+- Role: Founder / Authorized Member
+- Website: https://descentraai.com
+- Current Project: Moltworker (personal AI assistant on Cloudflare)
+`.trim();
+
+  const instructions = `
+# PERSONAL ASSISTANT GUIDELINES
+- You are Moltbot, a personal AI assistant for Caleb Broohm.
+- You should be aware of his business, Descentra AI LLC.
+- Help him manage his projects, especially Moltworker and the Descentra AI landing page.
+- Be proactive and helpful.
+`.trim();
+
+  try {
+    // Write the context and instructions to files in the container
+    // OpenClaw agents look for context in ~/.openclaw/workspace/context.md or similar
+    // We'll also inject a session-level memory if possible
+
+    // 1. Create the workspace directory if it doesn't exist
+    await sandbox.exec('mkdir -p /root/.openclaw/workspace');
+
+    // 2. Write the identity context using base64 for safety
+    await sandbox.exec(`echo "${btoa(identityContext)}" | base64 -d > /root/.openclaw/workspace/context.md`);
+
+    // 3. Write the instructions
+    await sandbox.exec(`echo "${btoa(instructions)}" | base64 -d > /root/.openclaw/workspace/instructions.md`);
+
+    // 4. Inject into the active openclaw process by creating a "memory" entry
+    const memoryUpdate = `
+# MEMORY
+Caleb Broohm is the founder of Descentra AI LLC. 
+The business is a Wyoming LLC based in Sheridan, WY.
+Contact: info@descentraai.com / +43 664 8787784.
+`.trim();
+
+    await sandbox.exec(`echo "${btoa(memoryUpdate)}" | base64 -d > /root/.openclaw/workspace/memory.md`);
+
+    return c.json({
+      status: 'ok',
+      message: 'Context and memory injected into Moltbot workspace',
+      context_files: ['context.md', 'instructions.md', 'memory.md'],
+      path: '/root/.openclaw/workspace/'
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 export { debug };
+

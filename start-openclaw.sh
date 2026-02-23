@@ -229,6 +229,11 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
         enabled: true,
         dmPolicy: dmPolicy,
     };
+    // Enable the plugin explicitly to satisfy openclaw doctor
+    config.plugins = config.plugins || {};
+    config.plugins.entries = config.plugins.entries || {};
+    config.plugins.entries.telegram = { enabled: true };
+
     if (process.env.TELEGRAM_DM_ALLOW_FROM) {
         config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',');
     } else if (dmPolicy === 'open') {
@@ -280,9 +285,14 @@ if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-or')
     console.log('Injected OpenRouter config with Kimi K2.5 as primary model');
 }
 
+console.log('Final Config:', JSON.stringify(config, null, 2));
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
+
+# Run doctor --fix to ensure Telegram/etc are fully enabled and healthy
+echo "Running openclaw doctor --fix..."
+openclaw doctor --fix || echo "Doctor fix failed or returned non-zero (this is often normal if no repairs needed)"
 
 # ============================================================
 # BACKGROUND SYNC LOOP
