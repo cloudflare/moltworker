@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-23 (7B.4 Reduce Iteration Count complete — 1312 tests)
+**Last Updated:** 2026-02-23 (7A.1 CoVe Verification Loop complete — 1336 tests)
 
 ---
 
@@ -221,7 +221,7 @@
 
 | ID | Task | Status | Owner | Effort | Priority | Notes |
 |----|------|--------|-------|--------|----------|-------|
-| 7A.1 | **CoVe Verification Loop** — post-execution verification step | 🔲 | Claude | Medium | **HIGH** | After work phase: read claimed files, run `npm test`, check `git diff`. No extra LLM call — just tool execution + simple pass/fail checks. If tests fail, inject results back into context and give model one retry iteration. Inspired by §2.2 of spec but drastically simplified (no separate verifier agent). |
+| 7A.1 | **CoVe Verification Loop** — post-execution verification step | ✅ | Claude | Medium | **HIGH** | `shouldVerify()` + `verifyWorkPhase()` in `src/guardrails/cove-verification.ts`. At work→review transition, scans tool results for: mutation errors not acknowledged, test failures (with "0 failed" exclusion), missing PR URLs, unverified PR claims. If failures found, injects details and gives model one retry iteration (`coveRetried` flag). 24 tests (1336 total). Inspired by §2.2 of spec. |
 | 7A.2 | **Smart Context Loading** — task-aware context in handler | ✅ | Claude | Low | **MEDIUM** | Complexity classifier in `src/utils/task-classifier.ts`. Simple queries (weather, greetings, crypto) skip R2 reads for learnings, last-task, sessions. History capped at 5 for simple. 35 tests (27 unit + 8 integration). Inspired by §5.1 of spec. |
 | 7A.3 | **Destructive Op Guard** — wire Vex patterns into task processor | ✅ | Claude | Low | **LOW-MEDIUM** | `scanToolCallForRisks()` in `src/guardrails/destructive-op-guard.ts`. Reuses 14 RISKY_PATTERNS from Vex review. Critical/high → block, medium → warn+allow. Guards sandbox_exec, github_api, github_create_pr, cloudflare_api. 25 tests. Inspired by §4.2 of spec. |
 | 7A.4 | **Structured Step Decomposition** — planner outputs JSON steps | ✅ | Claude | Medium | **MEDIUM** | `STRUCTURED_PLAN_PROMPT` requests JSON `{steps: [{action, files, description}]}`. `parseStructuredPlan()` extracts from code blocks, raw JSON, or falls back to file path extraction. `prefetchPlanFiles()` pre-loads all referenced files at plan→work transition. 26 tests. Module: `src/durable-objects/step-decomposition.ts`. Inspired by §8.2 of spec. |
@@ -266,7 +266,7 @@
 5. ~~**7B.3** Pre-fetching Context~~ ✅ Complete
 6. ~~**7A.4** Structured Step Decomposition~~ ✅ Complete
 7. ~~**7B.4** Reduce Iteration Count~~ ✅ Complete
-8. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
+8. ~~**7A.1** CoVe Verification Loop~~ ✅ Complete
 9. **7B.5** Streaming User Feedback (medium effort, UX win)
 10. **7B.1** Speculative Tool Execution (high effort, advanced optimization)
 
@@ -354,6 +354,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.1 CoVe Verification Loop — shouldVerify() + verifyWorkPhase() at work→review transition, scans for mutation errors/test failures/missing PRs/unverified claims, one retry iteration on failure, smart test success exclusion ("0 failed"), 24 new tests (1336 total) | src/guardrails/cove-verification.ts, src/guardrails/cove-verification.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.4 Reduce Iteration Count — awaitAndFormatPrefetchedFiles() awaits prefetch promises at plan→work transition, injects [FILE: path] blocks into context, binary/empty skip, 8KB/file + 50KB total caps, model skips github_read_file for pre-loaded files, 13 new tests (1312 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.4 Structured Step Decomposition — STRUCTURED_PLAN_PROMPT requests JSON steps, parseStructuredPlan() with 3-tier parsing (code block → raw JSON → free-form fallback), prefetchPlanFiles() pre-loads all files at plan→work transition, 26 new tests (1299 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.3 Pre-fetch Context — extractFilePaths() regex + extractGitHubContext() repo detection, startFilePrefetch() runs GitHub reads in parallel with first LLM call, prefetch cache in executeToolWithCache(), 31 new tests (1273 total) | src/utils/file-path-extractor.ts, src/utils/file-path-extractor.test.ts, src/openrouter/tools.ts, src/durable-objects/task-processor.ts
@@ -436,7 +437,7 @@ graph TD
     P25 --> P6[Phase 6: Platform Expansion]
 
     subgraph "Phase 7A: Quality & Correctness"
-        P7A1[7A.1 CoVe Verification 🔲]
+        P7A1[7A.1 CoVe Verification ✅]
         P7A2[7A.2 Smart Context Loading ✅]
         P7A3[7A.3 Destructive Op Guard ✅]
         P7A4[7A.4 Step Decomposition ✅]
