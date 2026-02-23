@@ -10,6 +10,7 @@ export interface UserPreferences {
   username?: string;
   model: string;
   autoResume?: boolean; // Auto-resume tasks on timeout
+  autoRoute?: boolean; // Auto-route simple queries to fast models (default: true)
   orchestraRepo?: string; // Locked repo for /orch next (owner/repo)
   locationLat?: string; // Saved briefing latitude
   locationLon?: string; // Saved briefing longitude
@@ -136,6 +137,23 @@ export class UserStorage {
   async setUserAutoResume(userId: string, autoResume: boolean): Promise<void> {
     const prefs = await this.getPreferences(userId);
     prefs.autoResume = autoResume;
+    await this.setPreferences(prefs);
+  }
+
+  /**
+   * Get user's auto-route setting (default: true)
+   */
+  async getUserAutoRoute(userId: string): Promise<boolean> {
+    const prefs = await this.getPreferences(userId);
+    return prefs.autoRoute ?? true;
+  }
+
+  /**
+   * Set user's auto-route setting
+   */
+  async setUserAutoRoute(userId: string, autoRoute: boolean): Promise<void> {
+    const prefs = await this.getPreferences(userId);
+    prefs.autoRoute = autoRoute;
     await this.setPreferences(prefs);
   }
 

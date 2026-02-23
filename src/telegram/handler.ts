@@ -29,6 +29,7 @@ import {
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import { fetchDOWithRetry } from '../utils/do-retry';
 import { classifyTaskComplexity } from '../utils/task-classifier';
+import { routeByComplexity } from '../openrouter/model-router';
 import { markdownToTelegramHtml } from '../utils/telegram-format';
 import {
   MODELS,
@@ -794,6 +795,7 @@ export class TelegramHandler {
         const statusModelInfo = getModel(statusModel);
         const statusHistory = await this.storage.getConversation(userId, 100);
         const statusAutoResume = await this.storage.getUserAutoResume(userId);
+        const statusAutoRoute = await this.storage.getUserAutoRoute(userId);
         const hasGithub = !!this.githubToken;
         const hasBrowser = !!this.browser;
         const hasSandbox = !!this.sandbox;
@@ -803,11 +805,13 @@ export class TelegramHandler {
           `Model: ${statusModelInfo?.name || statusModel}\n` +
           `Conversation: ${statusHistory.length} messages\n` +
           `Auto-resume: ${statusAutoResume ? `✓ Enabled (${statusModelInfo?.isFree ? '15x free' : '10x paid'})` : '✗ Disabled'}\n` +
+          `Auto-route: ${statusAutoRoute ? '✓ Simple queries → fast model' : '✗ Disabled'}\n` +
           `GitHub Tools: ${hasGithub ? '✓ Configured (read + PR creation)' : '✗ Not configured'}\n` +
           `Browser Tools: ${hasBrowser ? '✓ Configured' : '✗ Not configured'}\n` +
           `Sandbox: ${hasSandbox ? '✓ Available (code execution)' : '✗ Not available'}\n` +
           `Skill: ${this.defaultSkill}\n\n` +
           `Use /automode to toggle auto-resume\n` +
+          `Use /autoroute to toggle fast-model routing\n` +
           `Use /clear to reset conversation\n` +
           `Use /models to see available models`
         );
@@ -833,6 +837,20 @@ export class TelegramHandler {
             : '✗ Auto-resume disabled. You will need to manually tap Resume when tasks timeout.'
         );
         break;
+
+      case '/autoroute': {
+        // Toggle auto-routing of simple queries to fast models
+        const currentAutoRoute = await this.storage.getUserAutoRoute(userId);
+        const newAutoRoute = !currentAutoRoute;
+        await this.storage.setUserAutoRoute(userId, newAutoRoute);
+        await this.bot.sendMessage(
+          chatId,
+          newAutoRoute
+            ? '✓ Auto-routing enabled. Simple queries (weather, greetings, crypto) will use a fast model for lower latency.'
+            : '✗ Auto-routing disabled. All queries will use your selected model.'
+        );
+        break;
+      }
 
       case '/learnings': {
         // Show task history and learning summary
@@ -2196,6 +2214,14 @@ export class TelegramHandler {
     const fullHistory = await this.storage.getConversation(userId, 10);
     const complexity = classifyTaskComplexity(messageText, fullHistory.length);
 
+    // Route simple queries to fast models when user is on default 'auto' (Phase 7B.2)
+    const autoRouteEnabled = await this.storage.getUserAutoRoute(userId);
+    const routing = routeByComplexity(modelAlias, complexity, autoRouteEnabled);
+    if (routing.wasRouted) {
+      console.log(`[ModelRouter] ${routing.reason} (user=${userId})`);
+      modelAlias = routing.modelAlias;
+    }
+
     // Simple queries: skip learnings/sessions, keep only last 5 messages
     const history = complexity === 'simple' ? fullHistory.slice(-5) : fullHistory;
     const systemPrompt = await this.getSystemPrompt();
@@ -3520,6 +3546,7 @@ Available: fluxklein, fluxpro, fluxflex, fluxmax
 /load <name> — Restore state
 /delsave <name> — Delete slot
 /ar — Toggle auto-resume
+/autoroute — Toggle fast-model routing for simple queries
 /resume [model] — Resume with optional model override
 
 ━━━ Models (quick switch) ━━━
