@@ -73,19 +73,62 @@ Set these with `wrangler secret put <NAME>` from the `/Users/calebniikwei/moltwo
 
 ```
 moltworker/
-├── start-openclaw.sh       # Main startup script — runs inside the container
-│                           # (restores from R2, runs onboard, patches config, starts gateway)
-├── Dockerfile              # Container image (sandbox:0.7.0 + Node 22 + openclaw@2026.2.3)
-├── wrangler.jsonc          # Cloudflare Worker config (routes, R2, containers, etc.)
+├── start-openclaw.sh          # Main startup script inside container
+│                              # (restores R2, runs onboard, patches config, starts gateway)
+├── Dockerfile                 # Image: sandbox:0.7.0 + Node 22 + openclaw@2026.2.3
+├── wrangler.jsonc             # Cloudflare Worker config
+├── .env.example               # All secrets needed — grouped by role
 ├── src/
-│   ├── index.ts            # Main worker — proxies requests into the sandbox container
-│   ├── gateway/process.ts  # Logic to start/find the OpenClaw gateway process
-│   ├── gateway/env.ts      # Maps Worker env secrets → container env vars
-│   └── routes/debug.ts     # All /debug/* endpoints
-├── skills/                 # Custom skills copied into the container at /root/clawd/skills/
-│   └── cloudflare-browser/ # Browser automation via CDP
-└── MOLTBOT_QUICKSTART.md   # ← This file
+│   ├── index.ts               # Worker entry — proxies to sandbox container
+│   ├── gateway/process.ts     # Start/find the OpenClaw gateway process
+│   ├── gateway/env.ts         # Maps Worker env secrets → container env vars
+│   └── routes/debug.ts        # All /debug/* endpoints
+└── skills/                    # Copied into container at /root/clawd/skills/
+    ├── cloudflare-browser/    # Browser automation via CDP
+    │   └── SKILL.md
+    ├── web-researcher/        # Role 1 — Web search + fetch + browser
+    │   └── SKILL.md
+    ├── gmail-assistant/       # Role 2 — Gmail draft creation (OAuth, no send)
+    │   ├── SKILL.md
+    │   ├── scripts/draft.js
+    │   └── OAUTH_SETUP.md     # Step-by-step Google OAuth credential guide
+    └── elevenlabs-operator/   # Role 3 — ElevenLabs agents via n8n webhook
+        ├── SKILL.md
+        ├── scripts/create-agent.sh
+        └── N8N_SETUP.md       # Step-by-step n8n workflow guide
 ```
+
+---
+
+## 🔗 Device Pairing (MANDATORY — READ THIS FIRST)
+
+> [!IMPORTANT]
+> OpenClaw **requires device pairing** for any non-local connection (including through Cloudflare Workers). There is **no config flag to disable this**. It is a deliberate security feature.
+> After a fresh deploy OR after the container resets, you will see:
+> `disconnected (1008): Pairing required`
+
+### How to Fix It (One-Time per Container Instance)
+
+When you see the 1008 error:
+
+**Step 1 — Get the pending pairing request IDs:**
+```
+https://moltbot-sandbox.calebbroohm74.workers.dev/debug/cli?cmd=openclaw+devices+list&token=molt-secret-123
+```
+Look for `requestId` or `id` values in the JSON response.
+
+**Step 2 — Approve each request:**
+```
+https://moltbot-sandbox.calebbroohm74.workers.dev/debug/cli?cmd=openclaw+devices+approve+REQUEST_ID_HERE&token=molt-secret-123
+```
+
+**Step 3 — Reload the dashboard:** Visit the chat URL — it should now show "Health OK".
+
+> **Why this happens after redeploys:** The container image is fresh — it has no stored device state. Any pending pairing requests from previous browser sessions are gone. You must trigger a new pairing request (by visiting the dashboard) and then approve it via the CLI.
+
+### Pairing IDs approved on 2026-02-23
+- `873ae475-c5cd-4b29-b53e-e35e7e05a899` ✅
+- `ad02bf98-6f53-4ee0-b037-c2384219780d` ✅
 
 ---
 
@@ -121,10 +164,52 @@ wrangler secret put MOLTBOT_GATEWAY_TOKEN
 
 ---
 
-## 🧠 What Happened on 2026-02-23
+## � OpenClaw as a "Digital Employee" — 3 Roles
 
-- OpenClaw appeared "broken" (not responding).
-- Root cause: **Cloudflare Sandbox cold start** — the container was simply asleep.
-- Fix: Navigating to the Worker URL woke the container. OpenClaw booted and started responding normally within ~60 seconds.
-- The agent is working correctly. It correctly refused password sharing and suggested secure auth alternatives.
-- **No code changes were needed.** This was a cold-start issue, not a bug.
+Three skills were built (2026-02-23) to turn OpenClaw into a full-time digital employee:
+
+| Role | Skill | How it works | Setup needed |
+|---|---|---|---|
+| 🔍 Web Researcher | `web-researcher` | Uses `web_search`, `web_fetch`, `browser` tools | None — works after deploy |
+| 📧 Executive Assistant | `gmail-assistant` | Creates Gmail **drafts only** via OAuth. Never sends. | OAUTH_SETUP.md → 3 wrangler secrets |
+| 🎙️ Agency Operator | `elevenlabs-operator` | POSTs to n8n webhook → n8n calls ElevenLabs API. Agent never contacts ElevenLabs directly. | N8N_SETUP.md → 1 wrangler secret |
+
+**New secrets needed (not yet set):**
+```bash
+# Gmail:
+wrangler secret put GMAIL_CLIENT_ID
+wrangler secret put GMAIL_CLIENT_SECRET
+wrangler secret put GMAIL_REFRESH_TOKEN
+
+# ElevenLabs via n8n:
+wrangler secret put N8N_ELEVENLABS_WEBHOOK_URL
+```
+Then redeploy: `npm run deploy`
+
+---
+
+## 🧠 Session Log — 2026-02-23
+
+### Problem 1: OpenClaw "not working"
+- **Symptom**: Agent was completely unresponsive.
+- **Root cause**: Cloudflare Sandbox cold start — container was asleep.
+- **Fix**: Visiting the Worker URL woke the container. Booted in ~60 seconds. No code changes needed.
+
+### Problem 2: `disconnected (1008): Pairing required`
+- **Symptom**: Dashboard connected but WebSocket immediately closed with code 1008.
+- **Root cause**: OpenClaw mandates device pairing for all non-local connections. There is NO config flag to disable this — it's enforced at the gateway security layer. `gateway.auth.token` is an *additional* requirement, not a *replacement* for pairing.
+- **Fix**: Used `/debug/cli` to list pending device requests, then approved them:
+  ```
+  /debug/cli?cmd=openclaw+devices+list&token=molt-secret-123
+  /debug/cli?cmd=openclaw+devices+approve+REQUEST_ID&token=molt-secret-123
+  ```
+- **Result**: Dashboard showed "Health OK". Agent became fully operational.
+- **Devices approved**: `873ae475-c5cd-4b29-b53e-e35e7e05a899`, `ad02bf98-6f53-4ee0-b037-c2384219780d`
+- **Note**: After every fresh deploy the container resets — pairing must be redone using the steps in the `🔗 Device Pairing` section above.
+
+### Changes made
+- `npm run deploy` succeeded — new image `f4e77068` pushed to Cloudflare registry
+- Docker Desktop had to be started manually before deploy could run
+- 3 new skills created (see Project Layout above)
+- `.env.example` created in project root
+- `MOLTBOT_QUICKSTART.md` created and maintained
