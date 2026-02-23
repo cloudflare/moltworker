@@ -463,15 +463,40 @@ app.all('*', async (c) => {
 
 /**
  * Scheduled handler for cron triggers.
- * Checks Discord channels for new announcements.
+ *
+ * Cron schedule:
+ *   every 5 min  — Discord announcement checks
+ *   every 6 hours — Full model catalog sync from OpenRouter
+ *
  * Note: R2 sync is now handled by the background loop in start-openclaw.sh
  */
 async function scheduled(
-  _event: ScheduledEvent,
+  event: ScheduledEvent,
   env: MoltbotEnv,
   _ctx: ExecutionContext
 ): Promise<void> {
-  // Check Discord announcements if configured
+  const cron = event.cron;
+
+  // === Model catalog sync (every 6 hours) ===
+  if (cron === '0 */6 * * *') {
+    if (env.OPENROUTER_API_KEY) {
+      console.log('[cron] Running full model catalog sync...');
+      try {
+        const { runFullSync } = await import('./openrouter/model-sync/sync');
+        const result = await runFullSync(env.MOLTBOT_BUCKET, env.OPENROUTER_API_KEY);
+        if (result.success) {
+          console.log(`[cron] Model sync complete: ${result.totalSynced} models synced (${result.newModels} new, ${result.staleModels} stale) in ${result.durationMs}ms`);
+        } else {
+          console.error(`[cron] Model sync failed: ${result.error}`);
+        }
+      } catch (error) {
+        console.error('[cron] Model sync error:', error);
+      }
+    }
+    return; // Don't run Discord check on the 6h cron
+  }
+
+  // === Discord announcement check (every 5 min) ===
   if (env.DISCORD_BOT_TOKEN && env.DISCORD_ANNOUNCEMENT_CHANNELS && env.DISCORD_FORWARD_TO_TELEGRAM && env.TELEGRAM_BOT_TOKEN && env.OPENROUTER_API_KEY) {
     console.log('[cron] Checking Discord announcements...');
 

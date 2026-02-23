@@ -311,6 +311,86 @@ adminApi.get('/acontext/sessions', async (c) => {
   }
 });
 
+// POST /api/admin/models/sync — Trigger a full model catalog sync from OpenRouter
+adminApi.post('/models/sync', async (c) => {
+  if (!c.env.OPENROUTER_API_KEY) {
+    return c.json({ error: 'OPENROUTER_API_KEY not configured' }, 400);
+  }
+
+  try {
+    const { runFullSync } = await import('../openrouter/model-sync/sync');
+    const result = await runFullSync(c.env.MOLTBOT_BUCKET, c.env.OPENROUTER_API_KEY);
+    return c.json(result);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// GET /api/admin/models/catalog — Get the current auto-synced model catalog
+adminApi.get('/models/catalog', async (c) => {
+  try {
+    const { loadCatalog } = await import('../openrouter/model-sync/sync');
+    const catalog = await loadCatalog(c.env.MOLTBOT_BUCKET);
+
+    if (!catalog) {
+      return c.json({
+        synced: false,
+        message: 'No auto-sync has been performed yet. Trigger one with POST /api/admin/models/sync',
+      });
+    }
+
+    const tier = c.req.query('tier'); // 'free', 'paid', 'all' (default)
+    const capability = c.req.query('capability'); // 'tools', 'vision', 'reasoning'
+
+    let models = Object.values(catalog.models);
+
+    // Filter by tier
+    if (tier === 'free') {
+      models = models.filter(m => m.isFree);
+    } else if (tier === 'paid') {
+      models = models.filter(m => !m.isFree);
+    }
+
+    // Filter by capability
+    if (capability === 'tools') {
+      models = models.filter(m => m.supportsTools);
+    } else if (capability === 'vision') {
+      models = models.filter(m => m.supportsVision);
+    } else if (capability === 'reasoning') {
+      models = models.filter(m => m.reasoning && m.reasoning !== 'none');
+    }
+
+    const stale = Object.entries(catalog.deprecations)
+      .filter(([, d]) => d.state === 'stale' || d.state === 'deprecated')
+      .map(([id, d]) => ({ id, ...d }));
+
+    return c.json({
+      synced: true,
+      syncedAt: new Date(catalog.syncedAt).toISOString(),
+      totalFetched: catalog.totalFetched,
+      totalSynced: Object.keys(catalog.models).length,
+      modelsReturned: models.length,
+      staleCount: stale.length,
+      models: models.map(m => ({
+        alias: m.alias,
+        id: m.id,
+        name: m.name,
+        cost: m.cost,
+        tools: !!m.supportsTools,
+        vision: !!m.supportsVision,
+        reasoning: m.reasoning || 'none',
+        maxContext: m.maxContext,
+        isFree: !!m.isFree,
+      })),
+      stale,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 // Mount admin API routes under /admin
 api.route('/admin', adminApi);
 
