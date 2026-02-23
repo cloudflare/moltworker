@@ -3,47 +3,48 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-23 (7B.2 Model Routing complete — moving to 7B.3)
+**Last Updated:** 2026-02-23 (7B.3 Pre-fetch Context complete — moving to 7A.4)
 
 ---
 
-## Current Task: 7B.3 — Pre-fetching Context
+## Current Task: 7A.4 — Structured Step Decomposition
 
 ### Goal
 
-When user says "fix the bug in auth.ts" or "update src/routes/api.ts", regex-extract file paths from the message. Start reading those files from GitHub/R2 immediately (before LLM even responds). Cache results so the tool call is instant. Works with existing tool cache infrastructure (Phase 4.3).
+Force the planner to output structured JSON `{steps: [{action, files, description}]}` instead of free-form text. Pre-load referenced files into context before executor starts. Reduces iteration count by 2-4.
 
 ### Context
 
-- Phase 7B is Speed Optimizations (see `GLOBAL_ROADMAP.md`)
-- 7B.2 (Model Routing) is complete — simple queries now route to fast models
-- 7A.2 (Smart Context Loading) and 7A.5 (Prompt Caching) are already done
-- Tool result caching exists from Phase 4.3 (`src/openrouter/tools.ts`)
-- Pre-fetching reduces latency by loading file content before the LLM requests it
+- Phase 7A is Quality & Correctness (see `GLOBAL_ROADMAP.md`)
+- 7B.3 (Pre-fetch Context) is complete — files referenced in user messages are pre-fetched
+- 7B.4 (Reduce Iteration Count) depends on 7A.4 — structured steps enable bulk file loading
+- Current plan phase: model thinks for 1 iteration, then starts executing (discovering files as it goes, wasting 3-4 iterations on reads)
+- New: force planner to output structured JSON steps, pre-load all referenced files
 
 ### What Needs to Happen
 
-1. **Regex extraction** — detect file paths in user messages (e.g. `src/foo.ts`, `auth.ts:42`, `/path/to/file.py`)
-2. **Pre-fetch** — start reading those files via GitHub API before LLM even responds
-3. **Cache integration** — store results in the existing tool cache so `github_read_file` tool calls are instant
-4. **Tests**: Unit tests for path extraction, integration test confirming pre-fetched files skip API calls
-5. **Run `npm test` and `npm run typecheck`** before committing
+1. **Define step schema** — `{steps: [{action: string, files: string[], description: string}]}`
+2. **Modify plan phase prompt** — instruct model to output JSON steps
+3. **Parse structured steps** — validate and extract from model response
+4. **Pre-load files** — before each step, load all referenced files into context
+5. **Tests**: Unit tests for step parsing, integration test for file pre-loading
+6. **Run `npm test` and `npm run typecheck`** before committing
 
 ### Key Files
 
-- `src/telegram/handler.ts` — where pre-fetch logic would run (before DO dispatch)
-- `src/openrouter/tools.ts` — existing tool cache infrastructure
-- `src/durable-objects/task-processor.ts` — where tool calls execute
-- `src/utils/task-classifier.ts` — complexity classifier (reference for pattern matching)
+- `src/durable-objects/task-processor.ts` — plan phase logic, step execution
+- `src/durable-objects/phase-budget.ts` — phase tracking
+- `src/openrouter/tools.ts` — file reading tools
+- `src/utils/file-path-extractor.ts` — existing path extraction from 7B.3
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | 7A.4: Structured Step Decomposition — planner outputs JSON steps | Medium | Planner outputs JSON steps |
-| Later | 7A.1: CoVe Verification Loop | Medium | Post-execution test runner |
-| Later | 7B.4: Reduce Iteration Count | Medium | Depends on 7A.4 |
+| Next | 7A.1: CoVe Verification Loop | Medium | Post-execution test runner |
+| Next | 7B.4: Reduce Iteration Count | Medium | Depends on 7A.4 |
 | Later | 7B.5: Streaming User Feedback | Medium | Progressive Telegram updates |
+| Later | 7B.1: Speculative Tool Execution | High | Advanced optimization |
 
 ---
 
@@ -51,6 +52,7 @@ When user says "fix the bug in auth.ts" or "update src/routes/api.ts", regex-ext
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
+| 2026-02-23 | 7B.3: Pre-fetch Context — extract file paths, prefetch from GitHub (1273 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | 7B.2: Model Routing by Complexity — fast model for simple queries (1242 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | MS.5-6: Dynamic /pick picker + /syncall menu + /start sync button | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | MS.1-4: Full model catalog auto-sync from OpenRouter (1227 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |

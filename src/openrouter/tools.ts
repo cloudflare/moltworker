@@ -612,7 +612,7 @@ async function fetchUrl(url: string): Promise<string> {
 /**
  * Read a file from GitHub
  */
-async function githubReadFile(
+export async function githubReadFile(
   owner: string,
   repo: string,
   path: string,

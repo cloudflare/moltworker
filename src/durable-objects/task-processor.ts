@@ -6,12 +6,13 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, parseSSEStream, type ChatMessage, type ResponseFormat } from '../openrouter/client';
-import { executeTool, AVAILABLE_TOOLS, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
+import { executeTool, AVAILABLE_TOOLS, githubReadFile, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, isAnthropicModel, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { injectCacheControl } from '../openrouter/prompt-cache';
 import { markdownToTelegramHtml } from '../utils/telegram-format';
 import { extractLearning, storeLearning, storeLastTaskSummary, storeSessionSummary, type SessionSummary } from '../openrouter/learnings';
+import { extractFilePaths, extractGitHubContext } from '../utils/file-path-extractor';
 import { UserStorage } from '../openrouter/storage';
 import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
 import { createAcontextClient, toOpenAIMessages } from '../acontext/client';
@@ -314,6 +315,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private toolInFlightCache = new Map<string, Promise<{ tool_call_id: string; content: string }>>();
   private toolCacheHits = 0;
   private toolCacheMisses = 0;
+  /** Pre-fetched file contents keyed by "owner/repo/path" (Phase 7B.3) */
+  private prefetchPromises = new Map<string, Promise<string | null>>();
+  private prefetchHits = 0;
 
   constructor(state: DurableObjectState, env: TaskProcessorEnv) {
     super(state, env);
@@ -321,12 +325,57 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     this.r2 = env.MOLTBOT_BUCKET;
   }
 
-  getToolCacheStats(): { hits: number; misses: number; size: number } {
+  getToolCacheStats(): { hits: number; misses: number; size: number; prefetchHits: number } {
     return {
       hits: this.toolCacheHits,
       misses: this.toolCacheMisses,
       size: this.toolResultCache.size,
+      prefetchHits: this.prefetchHits,
     };
+  }
+
+  /**
+   * Start pre-fetching files referenced in user messages (Phase 7B.3).
+   * Runs in parallel with the first LLM call — results populate prefetchPromises.
+   * When the LLM eventually calls github_read_file, the content is already available.
+   */
+  private startFilePrefetch(messages: ChatMessage[], githubToken?: string): void {
+    if (!githubToken) return;
+
+    // Find the last user message
+    const lastUser = [...messages].reverse().find(m => m.role === 'user');
+    if (!lastUser) return;
+    const userText = typeof lastUser.content === 'string' ? lastUser.content : '';
+
+    // Extract file paths from user message
+    const paths = extractFilePaths(userText);
+    if (paths.length === 0) return;
+
+    // Extract GitHub repo context from conversation
+    const repo = extractGitHubContext(messages);
+    if (!repo) return;
+
+    console.log(`[TaskProcessor] Pre-fetching ${paths.length} files from ${repo.owner}/${repo.repo}: ${paths.join(', ')}`);
+
+    // Fire off all fetches in parallel (non-blocking)
+    for (const filePath of paths) {
+      const prefetchKey = `${repo.owner}/${repo.repo}/${filePath}`;
+
+      // Skip if already prefetching this file
+      if (this.prefetchPromises.has(prefetchKey)) continue;
+
+      const fetchPromise = githubReadFile(repo.owner, repo.repo, filePath, undefined, githubToken)
+        .then(content => {
+          console.log(`[TaskProcessor] Prefetched: ${prefetchKey} (${content.length} chars)`);
+          return content;
+        })
+        .catch(err => {
+          console.log(`[TaskProcessor] Prefetch failed: ${prefetchKey} — ${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        });
+
+      this.prefetchPromises.set(prefetchKey, fetchPromise);
+    }
   }
 
   private shouldCacheToolResult(content: string): boolean {
@@ -340,6 +389,27 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     const toolName = toolCall.function.name;
     const cacheKey = `${toolName}:${toolCall.function.arguments}`;
     const isCacheable = isToolCallParallelSafe(toolCall);
+
+    // Phase 7B.3: Check prefetch cache for github_read_file (normalized key: owner/repo/path)
+    if (toolName === 'github_read_file' && this.prefetchPromises.size > 0) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments);
+        const prefetchKey = `${args.owner}/${args.repo}/${args.path}`;
+        const pending = this.prefetchPromises.get(prefetchKey);
+        if (pending) {
+          const content = await pending;
+          if (content !== null) {
+            // Store in normal cache for future hits with exact same args
+            this.toolResultCache.set(cacheKey, content);
+            this.prefetchHits++;
+            console.log(`[TaskProcessor] Prefetch HIT: ${prefetchKey} (${this.prefetchHits} total)`);
+            return { tool_call_id: toolCall.id, content };
+          }
+        }
+      } catch {
+        // JSON parse failure — fall through to normal execution
+      }
+    }
 
     if (isCacheable) {
       // Check result cache
@@ -828,6 +898,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     this.toolInFlightCache.clear();
     this.toolCacheHits = 0;
     this.toolCacheMisses = 0;
+    this.prefetchPromises.clear();
+    this.prefetchHits = 0;
 
     const task: TaskState = {
       taskId: request.taskId,
@@ -983,6 +1055,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         content: `[PLANNING PHASE] ${PLAN_PHASE_PROMPT}`,
       });
     }
+
+    // Phase 7B.3: Pre-fetch files referenced in user message (runs in parallel with first LLM call)
+    this.startFilePrefetch(conversationMessages, request.githubToken);
 
     // Track cumulative token usage across all iterations
     const totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, costUsd: 0 };

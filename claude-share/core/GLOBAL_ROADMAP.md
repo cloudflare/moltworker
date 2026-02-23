@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-23 (7B.2 Model Routing complete — 1242 tests)
+**Last Updated:** 2026-02-23 (7B.3 Pre-fetch Context complete — 1273 tests)
 
 ---
 
@@ -235,7 +235,7 @@
 |----|------|--------|-------|--------|----------|-------|
 | 7B.1 | **Speculative Tool Execution** — start tools during streaming | 🔲 | Claude | High | **HIGH** | Current: wait for full LLM response → parse tool_calls → execute. New: parse tool_call names/args from streaming chunks as they arrive. For read-only tools (in `PARALLEL_SAFE_TOOLS`), start execution immediately while model is still generating. Saves 2-10s per iteration on multi-tool calls. Risk: model may change args in later chunks — only start after args are complete per tool_call. |
 | 7B.2 | **Model Routing by Complexity** — fast models for simple queries | ✅ | Claude | Medium | **HIGH** | `routeByComplexity()` in `src/openrouter/model-router.ts`. Simple queries on default 'auto' model → GPT-4o Mini. FAST_MODEL_CANDIDATES: mini > flash > haiku. `autoRoute` user preference (default: true), `/autoroute` toggle. 15 tests. |
-| 7B.3 | **Pre-fetching Context** — parse file refs from user message | 🔲 | Claude | Low | **MEDIUM** | When user says "fix the bug in auth.ts" or "update src/routes/api.ts", regex-extract file paths from the message. Start reading those files from GitHub/R2 immediately (before LLM even responds). Cache results so the tool call is instant. Works with existing tool cache infrastructure (Phase 4.3). |
+| 7B.3 | **Pre-fetching Context** — parse file refs from user message | ✅ | Claude | Low | **MEDIUM** | `extractFilePaths()` + `extractGitHubContext()` in `src/utils/file-path-extractor.ts`. `startFilePrefetch()` in task-processor fires GitHub reads in parallel with first LLM call. Prefetch cache checked in `executeToolWithCache()`. 31 tests. |
 | 7B.4 | **Reduce Iteration Count** — upfront file loading per plan step | 🔲 | Claude | Medium | **HIGH** | Biggest speed win. After 7A.4 produces structured steps, load ALL referenced files into context before each step. Model gets `[FILE: src/foo.ts]\n<contents>` in its system message, doesn't need to call `github_read_file`. Typical task drops from 8 iterations to 3-4. Depends on 7A.4. |
 | 7B.5 | **Streaming User Feedback** — progressive Telegram updates | 🔲 | Claude | Medium | **MEDIUM** | Currently: "Thinking..." for 3 minutes, then wall of text. New: update Telegram message every ~15s with current phase (Planning step 2/4..., Executing: reading auth.ts..., Running tests...). Already have `editMessage` infrastructure (progress updates). Enhance with tool-level granularity. Subsumes Phase 6.2 (response streaming). |
 
@@ -248,7 +248,7 @@
 7A.3 (Destructive Guard) ─────────────────── can be done independently
 7A.5 (Prompt Caching) ────────────────────── can be done independently
 7B.2 (Model Routing) ─────────────────────── ✅ COMPLETE
-7B.3 (Pre-fetch Context) ─────────────────── can be done independently
+7B.3 (Pre-fetch Context) ─────────────────── ✅ COMPLETE
 
 7A.1 (CoVe Verification) ─────────────────── depends on nothing, but best after 7A.4
 7A.4 (Step Decomposition) ──┬──────────────── depends on nothing
@@ -263,7 +263,7 @@
 2. ~~**7A.3** Destructive Op Guard~~ ✅ Complete
 3. ~~**7A.5** Prompt Caching~~ ✅ Complete
 4. ~~**7B.2** Model Routing by Complexity~~ ✅ Complete
-5. **7B.3** Pre-fetching Context (low effort, reduces tool call latency)
+5. ~~**7B.3** Pre-fetching Context~~ ✅ Complete
 6. **7A.4** Structured Step Decomposition (medium effort, enables 7B.4)
 7. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
 8. **7B.4** Reduce Iteration Count (medium effort, biggest speed win for complex tasks)
@@ -354,6 +354,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.3 Pre-fetch Context — extractFilePaths() regex + extractGitHubContext() repo detection, startFilePrefetch() runs GitHub reads in parallel with first LLM call, prefetch cache in executeToolWithCache(), 31 new tests (1273 total) | src/utils/file-path-extractor.ts, src/utils/file-path-extractor.test.ts, src/openrouter/tools.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.2 Model Routing by Complexity — routeByComplexity() routes simple queries on default 'auto' to GPT-4o Mini, FAST_MODEL_CANDIDATES (mini/flash/haiku), autoRoute user pref + /autoroute toggle, 15 new tests (1242 total) | src/openrouter/model-router.ts, src/openrouter/model-router.test.ts, src/openrouter/storage.ts, src/telegram/handler.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(telegram): add /syncall to menu, sync button, dynamic model picker — sendModelPicker() scores models by SWE-Bench + capabilities, top 3 per tier (free/value/premium), sync button in /start | src/telegram/handler.ts, src/routes/telegram.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(sync): automated full model catalog sync from OpenRouter — 3-level capability detection, stable aliases, deprecation lifecycle, atomic R2 publish, 6h cron, /syncall command, admin API, 52 new tests (1227 total) | src/openrouter/model-sync/*.ts, src/openrouter/models.ts, src/index.ts, wrangler.jsonc, src/telegram/handler.ts, src/routes/api.ts, src/routes/telegram.ts
