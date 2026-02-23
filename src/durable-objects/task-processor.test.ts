@@ -582,11 +582,11 @@ describe('TaskProcessor phases', () => {
         { timeout: 10000, interval: 50 }
       );
 
-      // First Telegram sendMessage should contain "Planning..."
+      // First Telegram sendMessage should contain "Planning" (7B.5: now with emoji)
       const sendCalls = telegramBodies.filter(c => c.url.includes('sendMessage'));
       expect(sendCalls.length).toBeGreaterThan(0);
       const firstSend = sendCalls[0];
-      expect(firstSend.body.text).toContain('Planning...');
+      expect(firstSend.body.text).toContain('Planning');
     });
 
     it('should show "Working..." as initial status for simple queries', async () => {
@@ -624,11 +624,11 @@ describe('TaskProcessor phases', () => {
         { timeout: 10000, interval: 50 }
       );
 
-      // First Telegram sendMessage should contain "Working..." (not "Planning...")
+      // First Telegram sendMessage should contain "Working" (7B.5: now with emoji, not "Planning")
       const sendCalls = telegramBodies.filter(c => c.url.includes('sendMessage'));
       expect(sendCalls.length).toBeGreaterThan(0);
       const firstSend = sendCalls[0];
-      expect(firstSend.body.text).toContain('Working...');
+      expect(firstSend.body.text).toContain('Working');
     });
   });
 

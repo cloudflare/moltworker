@@ -22,6 +22,7 @@ import { validateToolResult, createToolErrorTracker, trackToolError, generateCom
 import { scanToolCallForRisks } from '../guardrails/destructive-op-guard';
 import { shouldVerify, verifyWorkPhase, formatVerificationFailures } from '../guardrails/cove-verification';
 import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, awaitAndFormatPrefetchedFiles, type StructuredPlan } from './step-decomposition';
+import { formatProgressMessage, extractToolContext, shouldSendUpdate, type ProgressState } from './progress-formatter';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -962,7 +963,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     const statusMessageId = await this.sendTelegramMessage(
       request.telegramToken,
       request.chatId,
-      skipPlan ? '⏳ Working...' : '⏳ Planning...'
+      skipPlan ? '⏳ 🔨 Working…' : '⏳ 📋 Planning…'
     );
 
     // Store status message ID for cancel cleanup
@@ -1035,7 +1036,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             request.telegramToken,
             request.chatId,
             statusMessageId,
-            `⏳ Resuming from checkpoint (${checkpoint.iterations} iterations)...`
+            `⏳ 🔄 Resuming from checkpoint (${checkpoint.iterations} iterations)…`
           );
         }
         console.log(`[TaskProcessor] Resumed from checkpoint: ${checkpoint.iterations} iterations`);
@@ -1070,6 +1071,40 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     // Track cumulative token usage across all iterations
     const totalUsage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, costUsd: 0 };
 
+    // Progress tracking state (7B.5: Streaming User Feedback)
+    let currentTool: string | null = null;
+    let currentToolContext: string | null = null;
+
+    /** Build a snapshot of progress state for the formatter. */
+    const getProgressState = (): ProgressState => ({
+      phase: task.phase || 'work',
+      iterations: task.iterations,
+      toolsUsed: task.toolsUsed,
+      startTime: task.startTime,
+      currentTool,
+      currentToolContext,
+      structuredPlan: task.structuredPlan || null,
+      workPhaseStartIteration: task.phaseStartIteration || 0,
+      coveRetrying: task.coveRetried === true && task.phase === 'work',
+    });
+
+    /** Send a throttled progress update to Telegram (non-fatal). */
+    const sendProgressUpdate = async (force?: boolean): Promise<void> => {
+      if (!statusMessageId) return;
+      if (!force && !shouldSendUpdate(lastProgressUpdate)) return;
+      try {
+        lastProgressUpdate = Date.now();
+        await this.editTelegramMessage(
+          request.telegramToken,
+          request.chatId,
+          statusMessageId,
+          formatProgressMessage(getProgressState()),
+        );
+      } catch (updateError) {
+        console.log('[TaskProcessor] Progress update failed (non-fatal):', updateError);
+      }
+    };
+
     try {
       while (task.iterations < maxIterations) {
         // Check if cancelled
@@ -1080,26 +1115,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         task.iterations++;
         task.lastUpdate = Date.now();
+        currentTool = null;
+        currentToolContext = null;
         await this.doState.storage.put('task', task);
 
-        // Send progress update every 15 seconds (wrapped in try-catch)
-        // Note: Removed token estimation to save CPU cycles
-        if (Date.now() - lastProgressUpdate > 15000 && statusMessageId) {
-          try {
-            lastProgressUpdate = Date.now();
-            const elapsed = Math.round((Date.now() - task.startTime) / 1000);
-            const phaseLabel = task.phase === 'plan' ? 'Planning' : task.phase === 'review' ? 'Reviewing' : 'Working';
-            await this.editTelegramMessage(
-              request.telegramToken,
-              request.chatId,
-              statusMessageId,
-              `⏳ ${phaseLabel}... (${task.iterations} iter, ${task.toolsUsed.length} tools, ${elapsed}s)`
-            );
-          } catch (updateError) {
-            console.log('[TaskProcessor] Progress update failed (non-fatal):', updateError);
-            // Don't let progress update failure crash the task
-          }
-        }
+        // Send progress update (throttled to every 15s)
+        await sendProgressUpdate();
 
         const iterStartTime = Date.now();
         console.log(`[TaskProcessor] Iteration ${task.iterations} START - tools: ${task.toolsUsed.length}, messages: ${conversationMessages.length}`);
@@ -1521,6 +1542,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           let toolResults: Array<{ toolName: string; toolResult: { tool_call_id: string; content: string } }>;
 
           if (useParallel) {
+            // 7B.5: Show parallel tool names in progress
+            const parallelToolNames = choice.message.tool_calls.map(tc => tc.function.name);
+            currentTool = parallelToolNames.length > 1
+              ? parallelToolNames.slice(0, 3).join(', ')
+              : parallelToolNames[0];
+            currentToolContext = `${parallelToolNames.length} tools in parallel`;
+            await sendProgressUpdate(true);
+
             // Parallel path: Promise.allSettled — one failure doesn't cancel others
             const settled = await Promise.allSettled(
               choice.message.tool_calls.map(async (toolCall) => {
@@ -1561,6 +1590,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               const toolStartTime = Date.now();
               const toolName = toolCall.function.name;
 
+              // 7B.5: Track current tool for progress display
+              currentTool = toolName;
+              currentToolContext = extractToolContext(toolName, toolCall.function.arguments);
+              await sendProgressUpdate();
+
               let toolResult;
               try {
                 const toolPromise = this.executeToolWithCache(toolCall, toolContext);
@@ -1580,6 +1614,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             }
             console.log(`[TaskProcessor] ${toolResults.length} tools executed sequentially in ${Date.now() - parallelStart}ms`);
           }
+
+          // 7B.5: Clear tool tracking after execution completes
+          currentTool = null;
+          currentToolContext = null;
 
           // Add all tool results to conversation (preserving order, with truncation + validation)
           for (const { toolName, toolResult } of toolResults) {
