@@ -4,6 +4,39 @@
 
 ---
 
+## Session: 2026-02-23 | 7A.1 CoVe Verification Loop (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
+
+**AI:** Claude Opus 4.6
+**Branch:** `claude/execute-next-prompt-psdEX`
+**Status:** Completed
+
+### Summary
+Implemented Phase 7A.1 CoVe (Chain of Verification) Loop — the biggest quality win in Phase 7. At the work→review transition, scans all tool call/result pairs for issues the model may have overlooked: mutation tool errors not acknowledged in the response, test failures in sandbox_exec output, missing PR URLs, and unverified PR claims. If verification fails, injects failure details and gives the model one retry iteration before proceeding to review.
+
+### Changes Made
+- Created `src/guardrails/cove-verification.ts` with:
+  - `shouldVerify()` — only verifies coding tasks with mutation tools
+  - `verifyWorkPhase()` — scans conversation for 5 failure types
+  - `formatVerificationFailures()` — formats failures for context injection
+  - Smart test success detection — "0 failed" patterns excluded to avoid false positives
+  - `extractToolPairs()` — matches tool_calls to their results via tool_call_id
+- Modified `task-processor.ts`:
+  - Added `coveRetried` to TaskState (only one retry allowed)
+  - CoVe check runs before work→review transition
+  - On failure: injects model response + failure details, stays in work phase
+  - On pass: proceeds normally to review
+
+### Files Modified
+- `src/guardrails/cove-verification.ts` (new)
+- `src/guardrails/cove-verification.test.ts` (new — 24 tests)
+- `src/durable-objects/task-processor.ts` (import + coveRetried flag + work→review CoVe check)
+
+### Tests
+- 1336 tests passing (24 new)
+- TypeScript typecheck: clean
+
+---
+
 ## Session: 2026-02-23 | 7B.4 Reduce Iteration Count (Session: session_01V82ZPEL4WPcLtvGC6szgt5)
 
 **AI:** Claude Opus 4.6

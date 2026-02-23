@@ -3,47 +3,43 @@
 > Copy-paste this prompt to start the next AI session.
 > After completing, update this file to point to the next task.
 
-**Last Updated:** 2026-02-23 (7B.4 Reduce Iteration Count complete — moving to 7A.1)
+**Last Updated:** 2026-02-23 (7A.1 CoVe Verification Loop complete — moving to 7B.5)
 
 ---
 
-## Current Task: 7A.1 — CoVe Verification Loop
+## Current Task: 7B.5 — Streaming User Feedback
 
 ### Goal
 
-After the work phase completes, run a lightweight verification step: read claimed files, run `npm test`, check `git diff`. No extra LLM call — just tool execution + simple pass/fail checks. If tests fail, inject results back into context and give model one retry iteration. This is the biggest quality win remaining in Phase 7.
+Currently: "Thinking..." for 2-3 minutes, then wall of text. New: update Telegram message every ~15s with current phase and tool-level granularity (Planning step 2/4..., Executing: reading auth.ts..., Running tests...). This is a UX win — users see progress in real-time.
 
 ### Context
 
-- Phase 7A is Quality & Correctness (see `GLOBAL_ROADMAP.md`)
-- 7A.4 (Structured Step Decomposition) is complete — plan outputs JSON steps with file lists
-- 7B.4 (Reduce Iteration Count) is complete — pre-loaded files injected into context
-- Current: work phase → review phase transition has no verification
-- Next: after work phase, verify claims with tool calls before transitioning to review
-- Inspired by §2.2 of Agent Skills Engine Spec but drastically simplified (no separate verifier agent)
+- Phase 7B is Speed Optimizations (see `GLOBAL_ROADMAP.md`)
+- All Phase 7A quality tasks complete (7A.1-7A.5)
+- Phase 7B speed tasks 7B.2-7B.4 complete
+- Already have `editMessage` infrastructure for progress updates in task-processor
+- This subsumes the old Phase 6.2 (response streaming)
 
 ### What Needs to Happen
 
-1. **Detect verifiable claims** — after work phase, check if the task involved code changes (github_api, github_create_pr, sandbox_exec in toolsUsed)
-2. **Run verification tools** — read files claimed to be modified, run tests if sandbox available
-3. **Pass/fail check** — compare tool results against claims in the model's response
-4. **Retry on failure** — if verification fails, inject failure details and give model one retry iteration
-5. **Skip for non-code tasks** — weather queries, lookups, etc. don't need verification
-6. **Tests**: Unit tests for claim detection, verification logic, retry injection
-7. **Run `npm test` and `npm run typecheck`** before committing
+1. **Enhance progress messages** — instead of just "Thinking...", show phase + tool info
+2. **Track current tool** — when executing tools, report which tool is running
+3. **Phase-aware updates** — "Planning...", "Working (step 2/5)...", "Verifying...", "Reviewing..."
+4. **Throttle updates** — Telegram rate limits apply, update every 15-20s max
+5. **Tests**: Unit tests for message formatting, throttle logic
+6. **Run `npm test` and `npm run typecheck`** before committing
 
 ### Key Files
 
-- `src/durable-objects/task-processor.ts` — work→review transition, phase logic
-- `src/guardrails/tool-validator.ts` — existing tool validation patterns
-- `src/durable-objects/step-decomposition.ts` — structured plan for file references
+- `src/durable-objects/task-processor.ts` — progress update calls, phase tracking
+- `src/telegram/handler.ts` — Telegram message editing
 
 ### Queue After This Task
 
 | Priority | Task | Effort | Notes |
 |----------|------|--------|-------|
-| Next | 7B.5: Streaming User Feedback | Medium | Progressive Telegram updates |
-| Later | 7B.1: Speculative Tool Execution | High | Advanced optimization |
+| Next | 7B.1: Speculative Tool Execution | High | Advanced optimization |
 | Later | 5.1: Multi-agent Review | High | May be replaced by CoVe |
 
 ---
@@ -52,8 +48,9 @@ After the work phase completes, run a lightweight verification step: read claime
 
 | Date | Task | AI | Session |
 |------|------|----|---------|
-| 2026-02-23 | 7B.4: Reduce Iteration Count — inject pre-loaded files into context (1312 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
-| 2026-02-23 | 7A.4: Structured Step Decomposition — JSON plan steps, file pre-loading (1299 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
+| 2026-02-23 | 7A.1: CoVe Verification Loop — post-work verification (1336 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
+| 2026-02-23 | 7B.4: Reduce Iteration Count — inject pre-loaded files (1312 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
+| 2026-02-23 | 7A.4: Structured Step Decomposition — JSON plan steps (1299 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | 7B.3: Pre-fetch Context — extract file paths, prefetch from GitHub (1273 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | 7B.2: Model Routing by Complexity — fast model for simple queries (1242 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-23 | MS.5-6: Dynamic /pick picker + /syncall menu + /start sync button | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
@@ -61,7 +58,3 @@ After the work phase completes, run a lightweight verification step: read claime
 | 2026-02-22 | 7A.5: Prompt Caching — cache_control for Anthropic models (1175 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.3: Destructive Op Guard — block risky tool calls (1158 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
 | 2026-02-22 | 7A.2: Smart Context Loading — skip R2 reads for simple queries (1133 tests) | Claude Opus 4.6 | session_01V82ZPEL4WPcLtvGC6szgt5 |
-| 2026-02-22 | Phase 7 roadmap: 10 tasks added to GLOBAL_ROADMAP.md (5 quality, 5 speed) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-22 | S48.1-fix: Phase budget wall-clock fix (8s/18s/3s → 120s/240s/60s) + auto-resume double-counting | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-22 | Deployment verification: DM.10, DM.12, shared secret, smoke test — all PASS | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |
-| 2026-02-21 | DM.10-DM.14: Queue consumer, GitHubClient, JWT auth, shipper deploy, Vex review (1084 tests) | Claude Opus 4.6 | session_01NzU1oFRadZHdJJkiKi2sY8 |

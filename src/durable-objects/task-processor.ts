@@ -20,6 +20,7 @@ import { estimateTokens, compressContextBudgeted, sanitizeToolPairs } from './co
 import { checkPhaseBudget, PhaseBudgetExceededError } from './phase-budget';
 import { validateToolResult, createToolErrorTracker, trackToolError, generateCompletionWarning, adjustConfidence, type ToolErrorTracker } from '../guardrails/tool-validator';
 import { scanToolCallForRisks } from '../guardrails/destructive-op-guard';
+import { shouldVerify, verifyWorkPhase, formatVerificationFailures } from '../guardrails/cove-verification';
 import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, awaitAndFormatPrefetchedFiles, type StructuredPlan } from './step-decomposition';
 
 // Task phase type for structured task processing
@@ -226,6 +227,8 @@ interface TaskState {
   workPhaseContent?: string;
   // Structured plan steps from 7A.4 step decomposition
   structuredPlan?: StructuredPlan;
+  // 7A.1: CoVe verification retry flag (only one retry allowed)
+  coveRetried?: boolean;
 }
 
 // Task request from the worker
@@ -1788,6 +1791,32 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Phase transition: work → review when tools were used and model produced content
         // Skip review if content is empty — nothing to review, adding more prompts won't help
         if (hasContent && task.phase === 'work' && task.toolsUsed.length > 0) {
+          // 7A.1: CoVe verification — check tool results for unacknowledged failures
+          // before transitioning to review. One retry allowed if failures detected.
+          if (!task.coveRetried && shouldVerify(task.toolsUsed, taskCategory)) {
+            const verification = verifyWorkPhase(conversationMessages, choice.message.content || '');
+            if (!verification.passed) {
+              task.coveRetried = true;
+              await this.doState.storage.put('task', task);
+              console.log(`[TaskProcessor] CoVe verification FAILED: ${verification.failures.length} issue(s) — retrying work phase`);
+              for (const f of verification.failures) {
+                console.log(`[TaskProcessor]   [${f.type}] ${f.tool}: ${f.message.substring(0, 100)}`);
+              }
+              // Inject the model's response + verification failures for retry
+              conversationMessages.push({
+                role: 'assistant',
+                content: choice.message.content || '',
+              });
+              conversationMessages.push({
+                role: 'user',
+                content: formatVerificationFailures(verification.failures),
+              });
+              continue; // One more work iteration to fix issues
+            } else {
+              console.log('[TaskProcessor] CoVe verification PASSED');
+            }
+          }
+
           task.phase = 'review';
           task.phaseStartIteration = task.iterations;
           phaseStartTime = Date.now(); // Reset phase budget clock
@@ -1800,7 +1829,6 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           const systemMsg = request.messages.find(m => m.role === 'system');
           const sysContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
           const isOrchestraTask = sysContent.includes('Orchestra INIT Mode') || sysContent.includes('Orchestra RUN Mode') || sysContent.includes('Orchestra REDO Mode');
-          const taskCategory = detectTaskCategory(request.messages);
           const reviewPrompt = isOrchestraTask ? ORCHESTRA_REVIEW_PROMPT
             : taskCategory === 'coding' ? CODING_REVIEW_PROMPT
             : REVIEW_PHASE_PROMPT;
