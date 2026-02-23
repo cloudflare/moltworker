@@ -118,6 +118,7 @@ telegram.get('/setup', async (c) => {
     { command: 'ar', description: 'Toggle auto-resume' },
     { command: 'resume', description: 'Resume task with optional model override' },
     { command: 'credits', description: 'OpenRouter balance' },
+    { command: 'syncall', description: 'Sync full model catalog from OpenRouter' },
   ]);
 
   if (success) {

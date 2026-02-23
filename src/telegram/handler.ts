@@ -52,6 +52,7 @@ import {
   getFreeToolModels,
   formatOrchestraModelRecs,
   categorizeModel,
+  getValueTier,
   resolveTaskModel,
   type ModelInfo,
   type ReasoningLevel,
@@ -2648,6 +2649,11 @@ export class TelegramHandler {
       return;
     }
 
+    if (feature === 'sync') {
+      await this.handleSyncAllCommand(chatId);
+      return;
+    }
+
     if (feature === 'help') {
       await this.bot.sendMessage(chatId, this.getHelpMessage());
       return;
@@ -2672,27 +2678,67 @@ export class TelegramHandler {
    * Send a quick model picker
    */
   async sendModelPicker(chatId: number): Promise<void> {
-    const buttons: InlineKeyboardButton[][] = [
-      [
-        { text: '🆓 QwenCoder 🔧', callback_data: 'model:qwencoderfree' },
-        { text: '🆓 Trinity 🔧', callback_data: 'model:trinity' },
-        { text: '🆓 Devstral 🔧', callback_data: 'model:devstral' },
-      ],
-      [
-        { text: '🧠 DeepSeek 🔧', callback_data: 'model:deep' },
-        { text: '⚡ Grok 🔧', callback_data: 'model:grok' },
-        { text: '🤖 GPT-4o 🔧👁️', callback_data: 'model:gpt' },
-      ],
-      [
-        { text: '🎭 Sonnet 🔧👁️', callback_data: 'model:sonnet' },
-        { text: '💨 Haiku 🔧👁️', callback_data: 'model:haiku' },
-        { text: '🔮 Qwen 🔧', callback_data: 'model:qwennext' },
-      ],
-    ];
+    const all = Object.values(getAllModels());
+    const toolModels = all.filter(m => m.supportsTools && !m.isImageGen);
 
+    // Score models for picker ranking (higher = better pick)
+    const scored = toolModels.map(m => {
+      let score = 0;
+      const lower = (m.name + ' ' + m.specialty + ' ' + m.score).toLowerCase();
+      // SWE-Bench scores
+      const sweMatch = m.score.match(/(\d+(?:\.\d+)?)%\s*SWE/i);
+      if (sweMatch) score += parseFloat(sweMatch[1]);
+      // Agentic / coding keywords
+      if (/agentic|coding/i.test(lower)) score += 15;
+      // Large context is a bonus
+      if ((m.maxContext || 0) >= 200000) score += 5;
+      // Vision is nice
+      if (m.supportsVision) score += 3;
+      // Parallel calls
+      if (m.parallelCalls) score += 2;
+      return { m, score };
+    });
+
+    // Free models with tools — top 3 by score
+    const freeScored = scored
+      .filter(s => s.m.isFree)
+      .sort((a, b) => b.score - a.score);
+    const freeTop = freeScored.slice(0, 3);
+
+    // Paid value models (exceptional + great tier) — top 3 by score
+    const paidValue = scored
+      .filter(s => !s.m.isFree && ['exceptional', 'great'].includes(getValueTier(s.m)))
+      .sort((a, b) => b.score - a.score);
+    const valueTop = paidValue.slice(0, 3);
+
+    // Premium flagships — top 3 by score
+    const premium = scored
+      .filter(s => !s.m.isFree && ['good', 'premium'].includes(getValueTier(s.m)))
+      .sort((a, b) => b.score - a.score);
+    const premiumTop = premium.slice(0, 3);
+
+    const makeButton = (m: ModelInfo, prefix: string): InlineKeyboardButton => {
+      const icons = [m.supportsTools && '🔧', m.supportsVision && '👁️'].filter(Boolean).join('');
+      // Truncate name to fit Telegram button (max ~20 chars visible)
+      const shortName = m.name.length > 14 ? m.name.slice(0, 13) + '…' : m.name;
+      return { text: `${prefix} ${shortName} ${icons}`, callback_data: `model:${m.alias}` };
+    };
+
+    const buttons: InlineKeyboardButton[][] = [];
+    if (freeTop.length > 0) {
+      buttons.push(freeTop.map(s => makeButton(s.m, '🆓')));
+    }
+    if (valueTop.length > 0) {
+      buttons.push(valueTop.map(s => makeButton(s.m, '🏆')));
+    }
+    if (premiumTop.length > 0) {
+      buttons.push(premiumTop.map(s => makeButton(s.m, '💎')));
+    }
+
+    const totalCount = all.filter(m => !m.isImageGen).length;
     await this.bot.sendMessageWithButtons(
       chatId,
-      '🤖 Select a model:\n🆓 = free  🔧 = tools  👁️ = vision',
+      `🤖 Top models (${totalCount} available):\n🆓 = free  🏆 = best value  💎 = premium\n🔧 = tools  👁️ = vision\n\nFull list: /models`,
       buttons
     );
   }
@@ -3260,6 +3306,9 @@ Just type a message to chat, or tap a button below to explore:`;
       [
         { text: '🎼 Orchestra', callback_data: 'start:orchestra' },
         { text: '🤖 Pick a Model', callback_data: 'start:pick' },
+        { text: '🌐 Sync Models', callback_data: 'start:sync' },
+      ],
+      [
         { text: '📖 All Commands', callback_data: 'start:help' },
       ],
     ];
