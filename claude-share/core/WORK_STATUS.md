@@ -2,7 +2,7 @@
 
 > Current sprint status. Updated by every AI agent after every task.
 
-**Last Updated:** 2026-02-23 (7A.4 Structured Step Decomposition complete — 1299 tests)
+**Last Updated:** 2026-02-23 (7B.4 Reduce Iteration Count complete — 1312 tests)
 
 ---
 
@@ -66,6 +66,7 @@
 | 7B.2 | Model Routing by Complexity — fast model for simple queries (1242 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | 7A.4 | Structured Step Decomposition — JSON plan steps, file pre-loading (1299 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 | 7B.3 | Pre-fetch Context — extract file paths, prefetch from GitHub (1273 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
+| 7B.4 | Reduce Iteration Count — inject pre-loaded files into context (1312 tests) | Claude Opus 4.6 | ✅ Complete | `claude/execute-next-prompt-psdEX` |
 
 ---
 
@@ -73,7 +74,7 @@
 
 | AI Agent | Current Task | Branch | Started |
 |----------|-------------|--------|---------|
-| Claude | 7A.4 Structured Step Decomposition ✅ | `claude/execute-next-prompt-psdEX` | 2026-02-23 |
+| Claude | 7B.4 Reduce Iteration Count ✅ | `claude/execute-next-prompt-psdEX` | 2026-02-23 |
 | Codex | — | — | — |
 | Other | — | — | — |
 
@@ -139,6 +140,8 @@
 | MS.5-6 | Dynamic /pick picker + /syncall menu + /start sync button | Claude Opus 4.6 | 2026-02-23 | `claude/execute-next-prompt-psdEX` |
 | 7B.2 | Model Routing by Complexity — fast model for simple queries (1242 tests) | Claude Opus 4.6 | 2026-02-23 | `claude/execute-next-prompt-psdEX` |
 | 7B.3 | Pre-fetch Context — extract file paths, prefetch from GitHub (1273 tests) | Claude Opus 4.6 | 2026-02-23 | `claude/execute-next-prompt-psdEX` |
+| 7A.4 | Structured Step Decomposition — JSON plan steps (1299 tests) | Claude Opus 4.6 | 2026-02-23 | `claude/execute-next-prompt-psdEX` |
+| 7B.4 | Reduce Iteration Count — inject pre-loaded files (1312 tests) | Claude Opus 4.6 | 2026-02-23 | `claude/execute-next-prompt-psdEX` |
 
 ---
 
@@ -176,9 +179,9 @@
 3. ~~**7A.5** — Prompt Caching for Anthropic~~ ✅ Complete (1175 tests)
 4. ~~**7B.2** — Model Routing by Complexity~~ ✅ Complete (1242 tests)
 5. ~~**7B.3** — Pre-fetching Context from user message~~ ✅ Complete (1273 tests)
-6. **7A.4** — Structured Step Decomposition (medium effort, enables 7B.4)
-7. **7A.1** — CoVe Verification Loop (medium effort, biggest quality win)
-8. **7B.4** — Reduce Iteration Count via upfront file loading (medium effort, depends on 7A.4)
+6. ~~**7A.4** — Structured Step Decomposition~~ ✅ Complete (1299 tests)
+7. ~~**7B.4** — Reduce Iteration Count~~ ✅ Complete (1312 tests)
+8. **7A.1** — CoVe Verification Loop (medium effort, biggest quality win)
 9. **7B.5** — Streaming User Feedback (medium effort, UX win — subsumes old 6.2)
 10. **7B.1** — Speculative Tool Execution (high effort, advanced optimization)
 11. **Phase 5.1** — Multi-agent review for complex tasks (deferred — 7A.1 CoVe is cheaper alternative)
@@ -191,4 +194,4 @@
 
 | Sprint | Tasks Planned | Tasks Completed | Notes |
 |--------|-------------|----------------|-------|
-| Sprint 1 (current) | 8 | 59 | Phase 0-4 COMPLETE, Phase 5.2+5.5 done, Dream Machine (DM.1-DM.14) COMPLETE & DEPLOYED ✅, Model Sync (MS.1-6) COMPLETE, Phase 7A (7A.2+7A.3+7A.5) done, Phase 7B.2+7B.3 done, ALL 12 bugs fixed, 1273 tests total |
+| Sprint 1 (current) | 8 | 60 | Phase 0-4 COMPLETE, Phase 5.2+5.5 done, Dream Machine (DM.1-DM.14) COMPLETE & DEPLOYED ✅, Model Sync (MS.1-6) COMPLETE, Phase 7A (7A.2+7A.3+7A.4+7A.5) done, Phase 7B (7B.2+7B.3+7B.4) done, ALL 12 bugs fixed, 1312 tests total |

@@ -4,6 +4,7 @@ import {
   collectPlanFiles,
   prefetchPlanFiles,
   formatPlanSummary,
+  awaitAndFormatPrefetchedFiles,
   STRUCTURED_PLAN_PROMPT,
   type PlanStep,
   type StructuredPlan,
@@ -337,5 +338,158 @@ describe('STRUCTURED_PLAN_PROMPT', () => {
 
   it('instructs model to proceed after planning', () => {
     expect(STRUCTURED_PLAN_PROMPT).toContain('proceed immediately');
+  });
+});
+
+describe('awaitAndFormatPrefetchedFiles (7B.4)', () => {
+  it('returns empty result for empty map', async () => {
+    const result = await awaitAndFormatPrefetchedFiles(new Map());
+    expect(result.loadedCount).toBe(0);
+    expect(result.skippedCount).toBe(0);
+    expect(result.contextMessage).toBe('');
+    expect(result.loadedFiles).toEqual([]);
+  });
+
+  it('formats a single file correctly', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/auth.ts', Promise.resolve('export function auth() { return true; }'));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.skippedCount).toBe(0);
+    expect(result.loadedFiles).toEqual(['src/auth.ts']);
+    expect(result.contextMessage).toContain('[PRE-LOADED FILES]');
+    expect(result.contextMessage).toContain('[FILE: src/auth.ts]');
+    expect(result.contextMessage).toContain('export function auth()');
+    expect(result.contextMessage).toContain('Do NOT call github_read_file');
+  });
+
+  it('formats multiple files correctly', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/a.ts', Promise.resolve('const a = 1;'));
+    map.set('owner/repo/src/b.ts', Promise.resolve('const b = 2;'));
+    map.set('owner/repo/src/c.ts', Promise.resolve('const c = 3;'));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(3);
+    expect(result.skippedCount).toBe(0);
+    expect(result.loadedFiles).toHaveLength(3);
+    expect(result.contextMessage).toContain('[FILE: src/a.ts]');
+    expect(result.contextMessage).toContain('[FILE: src/b.ts]');
+    expect(result.contextMessage).toContain('[FILE: src/c.ts]');
+    expect(result.contextMessage).toContain('3 file(s)');
+  });
+
+  it('skips null (failed) fetches', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/good.ts', Promise.resolve('content'));
+    map.set('owner/repo/src/bad.ts', Promise.resolve(null));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    expect(result.loadedFiles).toEqual(['src/good.ts']);
+  });
+
+  it('skips rejected promises', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/good.ts', Promise.resolve('content'));
+    map.set('owner/repo/src/fail.ts', Promise.reject(new Error('network error')));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    expect(result.loadedFiles).toEqual(['src/good.ts']);
+  });
+
+  it('skips empty files', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/empty.ts', Promise.resolve('   \n  '));
+    map.set('owner/repo/src/good.ts', Promise.resolve('content'));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    expect(result.loadedFiles).toEqual(['src/good.ts']);
+  });
+
+  it('skips binary content', async () => {
+    // Create content with high ratio of control characters
+    const binaryContent = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0B\x0C\x0E\x0F' +
+      '\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1A\x1B\x1C\x1D\x1E\x1F' +
+      'some text mixed in';
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/image.png', Promise.resolve(binaryContent));
+    map.set('owner/repo/src/good.ts', Promise.resolve('content'));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.skippedCount).toBe(1);
+    expect(result.loadedFiles).toEqual(['src/good.ts']);
+  });
+
+  it('truncates large files with marker', async () => {
+    const largeContent = 'x'.repeat(10000);
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/big.ts', Promise.resolve(largeContent));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.contextMessage).toContain('... [truncated, 10000 chars total]');
+    // Should be less than the original content size
+    expect(result.contextMessage.length).toBeLessThan(largeContent.length);
+  });
+
+  it('respects total size budget', async () => {
+    // Create files that individually fit but collectively exceed MAX_TOTAL_INJECT_SIZE (50000)
+    const map = new Map<string, Promise<string | null>>();
+    for (let i = 0; i < 20; i++) {
+      map.set(`owner/repo/src/file${i}.ts`, Promise.resolve('a'.repeat(7000)));
+    }
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    // Not all 20 should fit within the 50KB budget
+    expect(result.loadedCount).toBeLessThan(20);
+    expect(result.skippedCount).toBeGreaterThan(0);
+    expect(result.loadedCount + result.skippedCount).toBe(20);
+  });
+
+  it('extracts file path from cache key correctly', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('myorg/myrepo/src/deep/nested/file.ts', Promise.resolve('content'));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedFiles).toEqual(['src/deep/nested/file.ts']);
+    expect(result.contextMessage).toContain('[FILE: src/deep/nested/file.ts]');
+  });
+
+  it('handles all files failing gracefully', async () => {
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/a.ts', Promise.resolve(null));
+    map.set('owner/repo/src/b.ts', Promise.reject(new Error('err')));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(0);
+    expect(result.skippedCount).toBe(2);
+    expect(result.contextMessage).toBe('');
+  });
+
+  it('does not include binary detection false positives for normal code', async () => {
+    const normalCode = `import { foo } from './bar';\n\nexport function hello(): string {\n  return 'world';\n}\n`;
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/normal.ts', Promise.resolve(normalCode));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+  });
+
+  it('handles file with tabs and newlines (not binary)', async () => {
+    const tabbedContent = 'function foo() {\n\treturn true;\r\n}\n';
+    const map = new Map<string, Promise<string | null>>();
+    map.set('owner/repo/src/tabbed.ts', Promise.resolve(tabbedContent));
+
+    const result = await awaitAndFormatPrefetchedFiles(map);
+    expect(result.loadedCount).toBe(1);
+    expect(result.contextMessage).toContain('return true;');
   });
 });

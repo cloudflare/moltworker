@@ -20,7 +20,7 @@ import { estimateTokens, compressContextBudgeted, sanitizeToolPairs } from './co
 import { checkPhaseBudget, PhaseBudgetExceededError } from './phase-budget';
 import { validateToolResult, createToolErrorTracker, trackToolError, generateCompletionWarning, adjustConfidence, type ToolErrorTracker } from '../guardrails/tool-validator';
 import { scanToolCallForRisks } from '../guardrails/destructive-op-guard';
-import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, type StructuredPlan } from './step-decomposition';
+import { STRUCTURED_PLAN_PROMPT, parseStructuredPlan, prefetchPlanFiles, formatPlanSummary, awaitAndFormatPrefetchedFiles, type StructuredPlan } from './step-decomposition';
 
 // Task phase type for structured task processing
 export type TaskPhase = 'plan' | 'work' | 'review';
@@ -1452,8 +1452,34 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             if (planPrefetch.size > 0) {
               console.log(`[TaskProcessor] Plan prefetch: ${planPrefetch.size} files queued`);
             }
+
+            // 7B.4: Await prefetch results and inject file contents into context.
+            // This eliminates the need for the model to call github_read_file for planned files,
+            // reducing iteration count from ~8 to 3-4 on typical multi-file tasks.
+            if (this.prefetchPromises.size > 0) {
+              const injection = await awaitAndFormatPrefetchedFiles(this.prefetchPromises);
+              if (injection.loadedCount > 0) {
+                conversationMessages.push({
+                  role: 'user',
+                  content: injection.contextMessage,
+                });
+                console.log(`[TaskProcessor] 7B.4 file injection: ${injection.loadedCount} files loaded into context (${injection.skippedCount} skipped): ${injection.loadedFiles.join(', ')}`);
+              }
+            }
           } else {
             console.log('[TaskProcessor] No structured plan parsed from response (free-form fallback)');
+
+            // 7B.4: Even without a structured plan, inject any files from user-message prefetch (7B.3)
+            if (this.prefetchPromises.size > 0) {
+              const injection = await awaitAndFormatPrefetchedFiles(this.prefetchPromises);
+              if (injection.loadedCount > 0) {
+                conversationMessages.push({
+                  role: 'user',
+                  content: injection.contextMessage,
+                });
+                console.log(`[TaskProcessor] 7B.4 file injection (free-form): ${injection.loadedCount} files loaded: ${injection.loadedFiles.join(', ')}`);
+              }
+            }
           }
 
           await this.doState.storage.put('task', task);

@@ -3,7 +3,7 @@
 > **Single source of truth** for all project planning and status tracking.
 > Updated by every AI agent after every task. Human checkpoints marked explicitly.
 
-**Last Updated:** 2026-02-23 (7A.4 Structured Step Decomposition complete — 1299 tests)
+**Last Updated:** 2026-02-23 (7B.4 Reduce Iteration Count complete — 1312 tests)
 
 ---
 
@@ -236,7 +236,7 @@
 | 7B.1 | **Speculative Tool Execution** — start tools during streaming | 🔲 | Claude | High | **HIGH** | Current: wait for full LLM response → parse tool_calls → execute. New: parse tool_call names/args from streaming chunks as they arrive. For read-only tools (in `PARALLEL_SAFE_TOOLS`), start execution immediately while model is still generating. Saves 2-10s per iteration on multi-tool calls. Risk: model may change args in later chunks — only start after args are complete per tool_call. |
 | 7B.2 | **Model Routing by Complexity** — fast models for simple queries | ✅ | Claude | Medium | **HIGH** | `routeByComplexity()` in `src/openrouter/model-router.ts`. Simple queries on default 'auto' model → GPT-4o Mini. FAST_MODEL_CANDIDATES: mini > flash > haiku. `autoRoute` user preference (default: true), `/autoroute` toggle. 15 tests. |
 | 7B.3 | **Pre-fetching Context** — parse file refs from user message | ✅ | Claude | Low | **MEDIUM** | `extractFilePaths()` + `extractGitHubContext()` in `src/utils/file-path-extractor.ts`. `startFilePrefetch()` in task-processor fires GitHub reads in parallel with first LLM call. Prefetch cache checked in `executeToolWithCache()`. 31 tests. |
-| 7B.4 | **Reduce Iteration Count** — upfront file loading per plan step | 🔲 | Claude | Medium | **HIGH** | Biggest speed win. After 7A.4 produces structured steps, load ALL referenced files into context before each step. Model gets `[FILE: src/foo.ts]\n<contents>` in its system message, doesn't need to call `github_read_file`. Typical task drops from 8 iterations to 3-4. Depends on 7A.4. |
+| 7B.4 | **Reduce Iteration Count** — upfront file loading per plan step | ✅ | Claude | Medium | **HIGH** | `awaitAndFormatPrefetchedFiles()` in step-decomposition.ts. After plan→work transition, awaits all prefetch promises and injects `[FILE: path]\n<contents>` into conversation context. Skips binary/empty, truncates >8KB, total cap 50KB. Model sees files already loaded, doesn't call github_read_file. Also injects user-message prefetch files (7B.3 fallback). 13 new tests (1312 total). |
 | 7B.5 | **Streaming User Feedback** — progressive Telegram updates | 🔲 | Claude | Medium | **MEDIUM** | Currently: "Thinking..." for 3 minutes, then wall of text. New: update Telegram message every ~15s with current phase (Planning step 2/4..., Executing: reading auth.ts..., Running tests...). Already have `editMessage` infrastructure (progress updates). Enhance with tool-level granularity. Subsumes Phase 6.2 (response streaming). |
 
 > 🧑 HUMAN CHECK 7B.6: Benchmark before/after — measure end-to-end latency on 5 representative tasks
@@ -265,8 +265,8 @@
 4. ~~**7B.2** Model Routing by Complexity~~ ✅ Complete
 5. ~~**7B.3** Pre-fetching Context~~ ✅ Complete
 6. ~~**7A.4** Structured Step Decomposition~~ ✅ Complete
-7. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
-8. **7B.4** Reduce Iteration Count (medium effort, biggest speed win for complex tasks)
+7. ~~**7B.4** Reduce Iteration Count~~ ✅ Complete
+8. **7A.1** CoVe Verification Loop (medium effort, biggest quality win)
 9. **7B.5** Streaming User Feedback (medium effort, UX win)
 10. **7B.1** Speculative Tool Execution (high effort, advanced optimization)
 
@@ -354,6 +354,7 @@
 > Newest first. Format: `YYYY-MM-DD | AI | Description | files`
 
 ```
+2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.4 Reduce Iteration Count — awaitAndFormatPrefetchedFiles() awaits prefetch promises at plan→work transition, injects [FILE: path] blocks into context, binary/empty skip, 8KB/file + 50KB total caps, model skips github_read_file for pre-loaded files, 13 new tests (1312 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(quality): 7A.4 Structured Step Decomposition — STRUCTURED_PLAN_PROMPT requests JSON steps, parseStructuredPlan() with 3-tier parsing (code block → raw JSON → free-form fallback), prefetchPlanFiles() pre-loads all files at plan→work transition, 26 new tests (1299 total) | src/durable-objects/step-decomposition.ts, src/durable-objects/step-decomposition.test.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.3 Pre-fetch Context — extractFilePaths() regex + extractGitHubContext() repo detection, startFilePrefetch() runs GitHub reads in parallel with first LLM call, prefetch cache in executeToolWithCache(), 31 new tests (1273 total) | src/utils/file-path-extractor.ts, src/utils/file-path-extractor.test.ts, src/openrouter/tools.ts, src/durable-objects/task-processor.ts
 2026-02-23 | Claude Opus 4.6 (Session: session_01V82ZPEL4WPcLtvGC6szgt5) | feat(perf): 7B.2 Model Routing by Complexity — routeByComplexity() routes simple queries on default 'auto' to GPT-4o Mini, FAST_MODEL_CANDIDATES (mini/flash/haiku), autoRoute user pref + /autoroute toggle, 15 new tests (1242 total) | src/openrouter/model-router.ts, src/openrouter/model-router.test.ts, src/openrouter/storage.ts, src/telegram/handler.ts
@@ -444,9 +445,9 @@ graph TD
 
     subgraph "Phase 7B: Speed Optimizations"
         P7B1[7B.1 Speculative Tools 🔲]
-        P7B2[7B.2 Model Routing 🔲]
-        P7B3[7B.3 Pre-fetch Context 🔲]
-        P7B4[7B.4 Reduce Iterations 🔲]
+        P7B2[7B.2 Model Routing ✅]
+        P7B3[7B.3 Pre-fetch Context ✅]
+        P7B4[7B.4 Reduce Iterations ✅]
         P7B5[7B.5 Streaming Feedback 🔲]
     end
 
