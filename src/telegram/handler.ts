@@ -1192,11 +1192,14 @@ export class TelegramHandler {
       return;
     }
 
-    await this.storage.setUserModel(userId, alias, username);
+    // Store canonical alias (from model definition), not the user's raw input.
+    // This ensures exact-match lookups on subsequent requests.
+    const canonicalAlias = model.alias;
+    await this.storage.setUserModel(userId, canonicalAlias, username);
     await this.bot.sendMessage(
       chatId,
       `Model set to: ${model.name}\n` +
-      `Alias: /${alias}\n` +
+      `Alias: /${canonicalAlias}\n` +
       `${model.specialty}\n` +
       `Cost: ${model.cost}`
     );
