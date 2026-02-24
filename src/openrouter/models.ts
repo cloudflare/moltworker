@@ -679,6 +679,39 @@ export function getAutoSyncedModelCount(): number {
   return Object.keys(AUTO_SYNCED_MODELS).length;
 }
 
+/** Major providers whose auto-synced models are highlighted in /models and /synccheck. */
+const NOTABLE_PROVIDERS = ['anthropic', 'google', 'openai', 'deepseek', 'x-ai', 'meta-llama', 'mistralai'];
+
+/**
+ * Get notable auto-synced models for display in /models.
+ * Picks top 2 per major provider (highest cost = flagship), capped at 15.
+ */
+export function getNotableAutoSynced(): ModelInfo[] {
+  const byProvider = new Map<string, ModelInfo[]>();
+  for (const m of Object.values(AUTO_SYNCED_MODELS)) {
+    const provider = m.id.split('/')[0];
+    if (!NOTABLE_PROVIDERS.includes(provider)) continue;
+    if (!byProvider.has(provider)) byProvider.set(provider, []);
+    byProvider.get(provider)!.push(m);
+  }
+
+  const notable: ModelInfo[] = [];
+  for (const models of byProvider.values()) {
+    models.sort((a, b) => parseCostForSort(b.cost) - parseCostForSort(a.cost));
+    notable.push(...models.slice(0, 2));
+  }
+
+  notable.sort((a, b) => parseCostForSort(b.cost) - parseCostForSort(a.cost));
+  return notable.slice(0, 15);
+}
+
+/**
+ * Get auto-synced model by OpenRouter model ID (for synccheck cross-referencing).
+ */
+export function getAutoSyncedByModelId(modelId: string): ModelInfo | undefined {
+  return Object.values(AUTO_SYNCED_MODELS).find(m => m.id === modelId);
+}
+
 /**
  * Get all models merged: curated < auto-synced < dynamic (dynamic wins on conflict).
  * Excludes blocked models.
@@ -920,13 +953,17 @@ export function formatModelsList(): string {
   const lines: string[] = ['📋 Model Catalog — sorted by value\n'];
 
   const all = Object.values(getAllModels());
-  const free = all.filter(m => m.isFree && !m.isImageGen && !m.provider);
-  const imageGen = all.filter(m => m.isImageGen);
-  const paid = all.filter(m => !m.isFree && !m.isImageGen && !m.provider);
-  const direct = all.filter(m => m.provider && m.provider !== 'openrouter');
+  // Tier sections show curated + dynamic only (auto-synced get their own section below)
+  const curated = all.filter(m => isCuratedModel(m.alias));
+  const free = curated.filter(m => m.isFree && !m.isImageGen && !m.provider);
+  const imageGen = curated.filter(m => m.isImageGen);
+  const paid = curated.filter(m => !m.isFree && !m.isImageGen && !m.provider);
+  const direct = curated.filter(m => m.provider && m.provider !== 'openrouter');
 
-  const freeCurated = free.filter(m => isCuratedModel(m.alias));
-  const freeSynced = free.filter(m => !isCuratedModel(m.alias));
+  // Dynamic (from /syncmodels) free models shown separately
+  const dynamicFree = all.filter(m => m.isFree && !m.isImageGen && !m.provider && !isCuratedModel(m.alias) && !isAutoSyncedModel(m.alias));
+  const freeCurated = free;
+  const freeSynced = dynamicFree;
 
   const sortByCost = (a: ModelInfo, b: ModelInfo) => parseCostForSort(a.cost) - parseCostForSort(b.cost);
   paid.sort(sortByCost);
@@ -991,11 +1028,21 @@ export function formatModelsList(): string {
     }
   }
 
-  // Auto-synced models summary (not listed individually — too many)
+  // Auto-synced models — show notable highlights + summary count
   const autoSyncedCount = getAutoSyncedModelCount();
   if (autoSyncedCount > 0) {
-    lines.push(`\n🌐 +${autoSyncedCount} more models auto-synced from OpenRouter`);
-    lines.push('  Use /use <model-alias> to switch — /syncall to refresh');
+    const notable = getNotableAutoSynced();
+    if (notable.length > 0) {
+      lines.push('\n🌐 AUTO-SYNCED HIGHLIGHTS:');
+      for (const m of notable) {
+        const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
+        lines.push(`  /${m.alias} — ${m.name} ${features}\n    ${m.cost}`);
+      }
+    }
+    const remaining = autoSyncedCount - notable.length;
+    if (remaining > 0) {
+      lines.push(`\n  +${remaining} more auto-synced — /use <alias> to switch`);
+    }
   }
 
   lines.push('\n━━━ Legend ━━━');

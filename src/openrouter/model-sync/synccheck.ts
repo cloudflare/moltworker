@@ -7,8 +7,7 @@
  * 3. Pricing changes for curated models
  */
 
-import { MODELS } from '../models';
-import type { ModelInfo } from '../models';
+import { MODELS, getAutoSyncedByModelId } from '../models';
 import type { OpenRouterApiModel } from './types';
 import { fetchOpenRouterModels } from './sync';
 import { formatCostString } from './capabilities';
@@ -150,8 +149,12 @@ export async function runSyncCheck(apiKey: string): Promise<SyncCheckResult> {
   }
 }
 
+/** Max models to show in detail per family before collapsing to summary. */
+const MAX_PER_FAMILY = 4;
+
 /**
  * Format sync check results for Telegram display.
+ * Concise output: highlights actionable items, collapses older models.
  */
 export function formatSyncCheckMessage(result: SyncCheckResult): string {
   if (!result.success) {
@@ -183,28 +186,62 @@ export function formatSyncCheckMessage(result: SyncCheckResult): string {
 
   lines.push(`✅ ${ok.length} curated models OK`);
 
-  // New family models
+  // Family models — grouped, with auto-sync status and collapse for older ones
   if (result.newFamilyModels.length > 0) {
     lines.push('');
-    lines.push('━━━ New models from tracked families ━━━');
+    lines.push('━━━ Not yet curated (tracked families) ━━━');
+    lines.push('Models below are usable via /use <alias> after /syncall.\n');
 
-    let currentFamily = '';
+    // Group by family
+    const byFamily = new Map<string, typeof result.newFamilyModels>();
     for (const m of result.newFamilyModels) {
-      if (m.family !== currentFamily) {
-        currentFamily = m.family;
-        lines.push(`\n📦 ${currentFamily}:`);
+      if (!byFamily.has(m.family)) byFamily.set(m.family, []);
+      byFamily.get(m.family)!.push(m);
+    }
+
+    for (const [family, models] of byFamily) {
+      // Sort by cost descending (flagship first)
+      models.sort((a, b) => {
+        const costA = parseSyncCost(a.cost);
+        const costB = parseSyncCost(b.cost);
+        return costB - costA;
+      });
+
+      lines.push(`📦 ${family} (${models.length}):`);
+
+      // Show top models in detail
+      const shown = models.slice(0, MAX_PER_FAMILY);
+      const collapsed = models.length - shown.length;
+
+      for (const m of shown) {
+        const ctx = m.contextLength >= 1048576
+          ? `${Math.round(m.contextLength / 1048576)}M`
+          : `${Math.round(m.contextLength / 1024)}K`;
+        const synced = getAutoSyncedByModelId(m.id);
+        const aliasHint = synced ? ` → /${synced.alias}` : '';
+        lines.push(`  ${m.name} — ${m.cost} (${ctx} ctx)${aliasHint}`);
       }
-      const ctx = m.contextLength >= 1048576
-        ? `${Math.round(m.contextLength / 1048576)}M`
-        : `${Math.round(m.contextLength / 1024)}K`;
-      lines.push(`  ${m.name} — ${m.cost} (${ctx} ctx)`);
-      lines.push(`    id: ${m.id}`);
+
+      if (collapsed > 0) {
+        lines.push(`  +${collapsed} older/variant models`);
+      }
+      lines.push('');
     }
   } else {
     lines.push('\n📦 No new models from tracked families');
   }
 
-  lines.push(`\n⚡ ${result.durationMs}ms — ${result.totalLiveModels} live models checked`);
+  lines.push(`⚡ ${result.durationMs}ms — ${result.totalLiveModels} live models checked`);
 
   return lines.join('\n');
+}
+
+/**
+ * Parse cost string for sorting (higher cost = more flagship).
+ */
+function parseSyncCost(cost: string): number {
+  if (cost === 'FREE' || cost.includes('FREE')) return 0;
+  const match = cost.match(/\$([0-9.]+)\/\$([0-9.]+)/);
+  if (match) return (parseFloat(match[1]) + parseFloat(match[2])) / 2;
+  return 0;
 }
