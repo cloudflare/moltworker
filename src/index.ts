@@ -28,7 +28,7 @@ import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp, telegram, discord, dream } from './routes';
-import { redactSensitiveParams } from './utils/logging';
+import { redactSensitiveParams, redactWsPayload } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
 import { createDiscordHandler } from './discord/handler';
@@ -355,7 +355,7 @@ app.all('*', async (c) => {
     // Relay messages from client to container
     serverWs.addEventListener('message', (event) => {
       if (debugLogs) {
-        console.log('[WS] Client -> Container:', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 200) : '(binary)');
+        console.log('[WS] Client -> Container:', typeof event.data, typeof event.data === 'string' ? redactWsPayload(event.data) : '(binary)');
       }
       if (containerWs.readyState === WebSocket.OPEN) {
         containerWs.send(event.data);
@@ -367,7 +367,7 @@ app.all('*', async (c) => {
     // Relay messages from container to client, with error transformation
     containerWs.addEventListener('message', (event) => {
       if (debugLogs) {
-        console.log('[WS] Container -> Client (raw):', typeof event.data, typeof event.data === 'string' ? event.data.slice(0, 500) : '(binary)');
+        console.log('[WS] Container -> Client (raw):', typeof event.data, typeof event.data === 'string' ? redactWsPayload(event.data, 500) : '(binary)');
       }
       let data = event.data;
 
