@@ -1136,6 +1136,10 @@ export class TelegramHandler {
         await this.handleSyncAllCommand(chatId);
         break;
 
+      case '/synccheck':
+        await this.handleSyncCheckCommand(chatId);
+        break;
+
       case '/syncreset': {
         // Clear all dynamic models and blocked list from R2
         await this.storage.saveDynamicModels({}, []);
@@ -3144,6 +3148,24 @@ export class TelegramHandler {
   }
 
   /**
+   * Handle /synccheck — compare curated models against live OpenRouter catalog.
+   * Detects missing models, price changes, and new models from tracked families.
+   */
+  private async handleSyncCheckCommand(chatId: number): Promise<void> {
+    await this.bot.sendChatAction(chatId, 'typing');
+    await this.bot.sendMessage(chatId, '🔍 Checking curated models against live OpenRouter catalog...');
+
+    try {
+      const { runSyncCheck, formatSyncCheckMessage } = await import('../openrouter/model-sync/synccheck');
+      const result = await runSyncCheck(this.openrouterKey);
+      const message = formatSyncCheckMessage(result);
+      await this.bot.sendMessage(chatId, message);
+    } catch (error) {
+      await this.bot.sendMessage(chatId, `❌ Sync check error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
    * Handle sync picker callback queries (toggle, validate, cancel).
    */
   private async handleSyncCallback(
@@ -3556,6 +3578,7 @@ Direct: /dcode /dreason /q3coder /kimidirect
 All:   /models for full list
 /syncmodels — Fetch latest free models (interactive picker)
 /syncall — Full catalog sync from OpenRouter (all models)
+/synccheck — Check curated models: missing, price changes, new releases
 
 ━━━ Cloudflare API ━━━
 /cloudflare search <query> — Search CF API endpoints

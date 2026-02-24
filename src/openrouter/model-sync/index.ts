@@ -5,6 +5,8 @@
 export { detectCapabilities, formatCostString } from './capabilities';
 export { generateAlias, collectExistingAliases } from './alias';
 export { runFullSync, loadCatalog, loadAutoSyncedModels, fetchOpenRouterModels } from './sync';
+export { runSyncCheck, formatSyncCheckMessage } from './synccheck';
+export type { SyncCheckResult, CuratedCheckResult, NewFamilyModel } from './synccheck';
 export type {
   OpenRouterApiModel,
   OpenRouterApiResponse,
