@@ -694,11 +694,81 @@ export function getAllModels(): Record<string, ModelInfo> {
 /**
  * Get model by alias.
  * Priority: blocked → dynamic (/syncmodels) → curated (static) → auto-synced (full catalog)
+ * Falls back to fuzzy matching when exact match fails (strips hyphens/dots, tries suffix/prefix).
  */
 export function getModel(alias: string): ModelInfo | undefined {
   const lower = alias.toLowerCase();
   if (BLOCKED_ALIASES.has(lower)) return undefined;
-  return DYNAMIC_MODELS[lower] || MODELS[lower] || AUTO_SYNCED_MODELS[lower];
+
+  // Exact match (highest priority)
+  const exact = DYNAMIC_MODELS[lower] || MODELS[lower] || AUTO_SYNCED_MODELS[lower];
+  if (exact) return exact;
+
+  // Fuzzy fallback for auto-synced and hyphenated aliases
+  return fuzzyMatchModel(lower);
+}
+
+/**
+ * Fuzzy model lookup when exact alias match fails.
+ * Normalizes query and keys by stripping hyphens/dots, then tries:
+ * 1. Normalized exact match (e.g. "claudesonnet46" matches key "claude-sonnet-46")
+ * 2. Normalized key ends with query (e.g. "sonnet46" matches "claude-sonnet-46")
+ * 3. Normalized key starts with query (e.g. "claudesonnet" matches "claude-sonnet-46")
+ * 4. Model ID match (strip provider prefix, normalize)
+ *
+ * Respects registry priority: DYNAMIC > MODELS > AUTO_SYNCED.
+ */
+function fuzzyMatchModel(query: string): ModelInfo | undefined {
+  const norm = query.replace(/[-_.]/g, '');
+  if (norm.length < 3) return undefined;
+
+  const registries = [DYNAMIC_MODELS, MODELS, AUTO_SYNCED_MODELS];
+
+  // Pass 1: Normalized exact match on alias
+  for (const reg of registries) {
+    for (const [key, model] of Object.entries(reg)) {
+      if (BLOCKED_ALIASES.has(key)) continue;
+      if (key.replace(/[-_.]/g, '') === norm) return model;
+    }
+  }
+
+  // Pass 2: Normalized alias ends with query
+  // e.g. "sonnet46" matches "claude-sonnet-46" → normalized "claudesonnet46"
+  for (const reg of registries) {
+    for (const [key, model] of Object.entries(reg)) {
+      if (BLOCKED_ALIASES.has(key)) continue;
+      const normKey = key.replace(/[-_.]/g, '');
+      if (normKey.endsWith(norm) && norm.length >= 4) return model;
+    }
+  }
+
+  // Pass 3: Normalized alias starts with query (handles version-less lookups)
+  // e.g. "claudesonnet" matches "claude-sonnet-46" → normalized "claudesonnet46"
+  // Single match only — returns undefined if ambiguous
+  const startMatches: ModelInfo[] = [];
+  for (const reg of registries) {
+    for (const [key, model] of Object.entries(reg)) {
+      if (BLOCKED_ALIASES.has(key)) continue;
+      const normKey = key.replace(/[-_.]/g, '');
+      if (normKey.startsWith(norm) && norm.length >= 5 && norm.length >= normKey.length * 0.6) {
+        startMatches.push(model);
+      }
+    }
+  }
+  if (startMatches.length === 1) return startMatches[0];
+
+  // Pass 4: Match against model ID (strip provider prefix, normalize)
+  // e.g. "gpt4o" matches model with ID "openai/gpt-4o"
+  for (const reg of registries) {
+    for (const model of Object.values(reg)) {
+      if (BLOCKED_ALIASES.has(model.alias)) continue;
+      const idName = model.id.includes('/') ? model.id.split('/').pop()! : model.id;
+      const normId = idName.replace(/[-_.]/g, '').replace(/:.*$/, '').toLowerCase();
+      if (normId === norm) return model;
+    }
+  }
+
+  return undefined;
 }
 
 /**

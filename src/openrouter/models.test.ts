@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectToolIntent, getModel, getFreeToolModels, categorizeModel, getOrchestraRecommendations, formatOrchestraModelRecs, resolveTaskModel, detectTaskIntent, type RouterCheckpointMeta } from './models';
+import { detectToolIntent, getModel, getFreeToolModels, categorizeModel, getOrchestraRecommendations, formatOrchestraModelRecs, resolveTaskModel, detectTaskIntent, registerAutoSyncedModels, type RouterCheckpointMeta, type ModelInfo } from './models';
 
 // --- detectToolIntent ---
 
@@ -208,6 +208,110 @@ describe('GLM model tools support', () => {
     expect(model).toBeDefined();
     expect(model!.supportsTools).toBe(true);
   });
+});
+
+// --- getModel fuzzy matching ---
+
+describe('getModel fuzzy matching', () => {
+  // Register test auto-synced models for fuzzy tests
+  const testModels: Record<string, ModelInfo> = {
+    'claude-sonnet-46': {
+      id: 'anthropic/claude-sonnet-4.6',
+      alias: 'claude-sonnet-46',
+      name: 'Claude Sonnet 4.6',
+      specialty: 'General (auto-synced)',
+      score: '200K context',
+      cost: '$3/$15',
+    },
+    'deepseek-v32': {
+      id: 'deepseek/deepseek-v3.2',
+      alias: 'deepseek-v32',
+      name: 'DeepSeek V3.2 (synced)',
+      specialty: 'General (auto-synced)',
+      score: '128K context',
+      cost: '$0.25/$0.38',
+    },
+    'meta-llama-4-scout': {
+      id: 'meta-llama/llama-4-scout',
+      alias: 'meta-llama-4-scout',
+      name: 'Llama 4 Scout',
+      specialty: 'General (auto-synced)',
+      score: '512K context',
+      cost: '$0.15/$0.60',
+    },
+  };
+
+  // Register before each test group
+  registerAutoSyncedModels(testModels);
+
+  it('exact match still works for curated models', () => {
+    const model = getModel('sonnet');
+    expect(model).toBeDefined();
+    expect(model!.alias).toBe('sonnet');
+  });
+
+  it('exact match works for auto-synced models', () => {
+    const model = getModel('claude-sonnet-46');
+    expect(model).toBeDefined();
+    expect(model!.alias).toBe('claude-sonnet-46');
+  });
+
+  it('fuzzy: normalized match strips hyphens (claudesonnet46 → claude-sonnet-46)', () => {
+    const model = getModel('claudesonnet46');
+    expect(model).toBeDefined();
+    expect(model!.id).toBe('anthropic/claude-sonnet-4.6');
+  });
+
+  it('fuzzy: suffix match (sonnet46 → claude-sonnet-46)', () => {
+    const model = getModel('sonnet46');
+    expect(model).toBeDefined();
+    expect(model!.id).toBe('anthropic/claude-sonnet-4.6');
+  });
+
+  it('fuzzy: prefix match (claudesonnet → claude-sonnet-46)', () => {
+    const model = getModel('claudesonnet');
+    expect(model).toBeDefined();
+    expect(model!.id).toBe('anthropic/claude-sonnet-4.6');
+  });
+
+  it('fuzzy: model ID match (gpt4o → curated gpt model)', () => {
+    const model = getModel('gpt4o');
+    expect(model).toBeDefined();
+    expect(model!.id).toBe('openai/gpt-4o');
+  });
+
+  it('fuzzy: model ID match for hyphenated (llama4scout → meta-llama-4-scout)', () => {
+    const model = getModel('llama4scout');
+    expect(model).toBeDefined();
+    expect(model!.id).toBe('meta-llama/llama-4-scout');
+  });
+
+  it('does not fuzzy match very short queries (< 3 chars)', () => {
+    const model = getModel('so');
+    expect(model).toBeUndefined();
+  });
+
+  it('returns undefined for completely unknown aliases', () => {
+    const model = getModel('totallyunknownmodel123');
+    expect(model).toBeUndefined();
+  });
+
+  it('curated exact match takes priority over fuzzy auto-synced', () => {
+    // "deep" should exact-match curated model, not fuzzy-match "deepseek-v32"
+    const model = getModel('deep');
+    expect(model).toBeDefined();
+    expect(model!.alias).toBe('deep');
+    expect(model!.id).toBe('deepseek/deepseek-v3.2');
+  });
+
+  it('case insensitive fuzzy matching', () => {
+    const model = getModel('Sonnet46');
+    expect(model).toBeDefined();
+    expect(model!.id).toBe('anthropic/claude-sonnet-4.6');
+  });
+
+  // Clean up
+  registerAutoSyncedModels({});
 });
 
 // --- getOrchestraRecommendations ---
