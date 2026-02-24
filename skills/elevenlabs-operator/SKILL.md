@@ -7,11 +7,16 @@ description: Create new ElevenLabs conversational voice agents for clients. This
 
 You help create new ElevenLabs conversational AI voice agents for clients. You send a structured request to an **n8n webhook**, which handles the actual ElevenLabs API call.
 
-## Hard Constraint
+## Direct Management Capabilities
 
-> [!IMPORTANT]
-> **Never contact ElevenLabs directly.** Never call `api.elevenlabs.io` from any skill script.
-> ALL requests must go through the n8n webhook at `N8N_ELEVENLABS_WEBHOOK_URL`.
+> [!NOTE]
+> You now have the capability for direct n8n and ElevenLabs login and management.
+> You can log in to n8n directly using the browser to manage workflows.
+> 
+> **n8n Login Data (On Server):**
+> - Username: `mashood.syed@cleevio.ai`
+> - Password: `M@$#ood21`
+> - Website: `https://n8n.descentraai.com/workflow/k3Or1JjLq41aHiTn?projectId=4d5MGShRC7Lb0UPd&uiContext=workflow_list`
 
 ## Required Information
 

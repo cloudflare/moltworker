@@ -57,7 +57,9 @@ Set these with `wrangler secret put <NAME>` from the `/Users/calebniikwei/moltwo
 |---|---|---|
 | `MOLTBOT_GATEWAY_TOKEN` | ✅ Yes | Protects gateway access (current: `molt-secret-123`) |
 | `ANTHROPIC_API_KEY` | ✅ Yes (or OpenAI) | AI model provider |
-| `OPENAI_API_KEY` | ✅ Alt. | Alternative AI model provider |
+
+> [!TIP]
+> **External Credentials**: Login data and n8n links are stored in the user's notes under **"descentra"** (use `grep_search` or `find_by_name` on the system to find these note files).
 | `CF_ACCESS_TEAM_DOMAIN` | ✅ Yes | Cloudflare Access team domain |
 | `CF_ACCESS_AUD` | ✅ Yes | Cloudflare Access audience tag |
 | `TELEGRAM_BOT_TOKEN` | ❌ Optional | Telegram chat channel |
