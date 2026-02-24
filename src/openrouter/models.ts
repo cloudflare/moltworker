@@ -360,7 +360,7 @@ export const MODELS: Record<string, ModelInfo> = {
     cost: '$0.20/$1.10',
     supportsTools: true,
     parallelCalls: true,
-    reasoning: 'configurable',
+    reasoning: 'fixed', // MiniMax API requires reasoning — cannot be disabled
     maxContext: 1000000,
   },
   grok: {
