@@ -327,6 +327,22 @@ adminApi.post('/models/sync', async (c) => {
   }
 });
 
+// GET /api/admin/models/check — Compare curated models against live OpenRouter catalog
+adminApi.get('/models/check', async (c) => {
+  if (!c.env.OPENROUTER_API_KEY) {
+    return c.json({ error: 'OPENROUTER_API_KEY not configured' }, 400);
+  }
+
+  try {
+    const { runSyncCheck } = await import('../openrouter/model-sync/synccheck');
+    const result = await runSyncCheck(c.env.OPENROUTER_API_KEY);
+    return c.json(result);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 // GET /api/admin/models/catalog — Get the current auto-synced model catalog
 adminApi.get('/models/catalog', async (c) => {
   try {
