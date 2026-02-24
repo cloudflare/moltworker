@@ -229,6 +229,11 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
         enabled: true,
         dmPolicy: dmPolicy,
     };
+    // Enable the plugin explicitly to satisfy openclaw doctor
+    config.plugins = config.plugins || {};
+    config.plugins.entries = config.plugins.entries || {};
+    config.plugins.entries.telegram = { enabled: true };
+
     if (process.env.TELEGRAM_DM_ALLOW_FROM) {
         config.channels.telegram.allowFrom = process.env.TELEGRAM_DM_ALLOW_FROM.split(',');
     } else if (dmPolicy === 'open') {
@@ -260,9 +265,34 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
     };
 }
 
+// Custom OpenRouter injection for Kimi K2
+if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.startsWith('sk-or')) {
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers['openrouter'] = {
+        baseUrl: 'https://openrouter.ai/api/v1',
+        apiKey: process.env.OPENAI_API_KEY,
+        api: 'openai-completions',
+        models: [
+            { id: 'moonshotai/kimi-k2.5', name: 'Kimi K2.5', contextWindow: 262144, maxTokens: 8192 },
+            { id: 'minimax/minimax-01', name: 'MiniMax-01', contextWindow: 1000000, maxTokens: 8192 },
+            { id: 'minimax/minimax-m2.5', name: 'MiniMax M2.5', contextWindow: 196608, maxTokens: 8192 }
+        ]
+    };
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    config.agents.defaults.model = { primary: 'openrouter/moonshotai/kimi-k2.5' };
+    console.log('Injected OpenRouter config with Kimi K2.5 as primary model');
+}
+
+console.log('Final Config:', JSON.stringify(config, null, 2));
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 console.log('Configuration patched successfully');
 EOFPATCH
+
+# Run doctor --fix to ensure Telegram/etc are fully enabled and healthy
+echo "Running openclaw doctor --fix..."
+openclaw doctor --fix || echo "Doctor fix failed or returned non-zero (this is often normal if no repairs needed)"
 
 # ============================================================
 # BACKGROUND SYNC LOOP
