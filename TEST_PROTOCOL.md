@@ -136,3 +136,161 @@ Copy this table, fill in as you go:
 ```
 
 **Pass criteria:** All 40 tests pass. If any fail, note the exact response and which model was active.
+
+---
+
+## 11. Phase 7B.6 — Latency Benchmark Protocol
+
+> **Human checkpoint 7B.6:** Benchmark before/after — measure end-to-end latency on 5 representative tasks.
+>
+> Validates that Phase 7B speed optimizations (speculative execution, model routing,
+> file prefetching, iteration reduction, streaming feedback) deliver real-world improvement.
+
+### Prerequisites
+
+- Deploy the current build with all 7B optimizations enabled
+- Use Telegram (production path — Workers + Durable Objects)
+- Run `/new` before each test to start with clean context
+- Note the Cloudflare region (Workers dashboard → Analytics)
+
+### What to Record
+
+For each task, capture from the final response footer:
+
+| Field | Source |
+|-------|--------|
+| **Wall-clock (s)** | `⏱️ Xs` in response footer |
+| **Iterations** | `(N iter)` in response footer |
+| **Tools used** | `[Used N tool(s): ...]` header |
+| **Model** | `🤖 /alias` in footer |
+| **Token cost** | Cost footer (if shown) |
+
+Also note from the Telegram UX:
+- **Time-to-first-update**: seconds from send until first "⏳" status appears
+- **Progress clarity**: could you tell what the bot was doing? (Y/N)
+
+### The 5 Benchmark Tasks
+
+#### Task A: Simple Chat (tests 7B.2 — model routing)
+
+```
+/use auto
+What is the capital of France?
+```
+
+| Metric | Expected |
+|--------|----------|
+| Wall-clock | < 5s |
+| Iterations | 1 |
+| Tools | 0 |
+| Model | mini, flash, or haiku (NOT deep/gpt/sonnet) |
+
+**What 7B.2 does:** Routes simple queries to a fast model instead of the default heavyweight.
+**Pass:** Response arrives in ≤ 5s AND model shown is a fast candidate (mini/flash/haiku).
+
+---
+
+#### Task B: Multi-Tool Research (tests 7B.1 — speculative execution)
+
+```
+/use deep
+What's the weather in Prague and what's Bitcoin trading at?
+```
+
+| Metric | Expected |
+|--------|----------|
+| Wall-clock | < 20s |
+| Iterations | 1–2 |
+| Tools | 2 (get_weather, get_crypto) |
+
+**What 7B.1 does:** Starts tool execution during streaming — both tools should fire in parallel before the full response arrives.
+**Pass:** Both tools called in a single iteration, wall-clock noticeably lower than 2× single-tool time.
+
+---
+
+#### Task C: GitHub File Reading (tests 7B.3 + 7B.4 — prefetch + injection)
+
+```
+/use deep
+Read the README.md and package.json from PetrAnto/moltworker and summarize the project stack
+```
+
+| Metric | Expected (with 7B) | Baseline (without 7B) |
+|--------|--------------------|-----------------------|
+| Wall-clock | < 30s | ~45–60s |
+| Iterations | 1–3 | 4–6 |
+| Tools | 2–4 | 4–6 |
+
+**What 7B.3 + 7B.4 do:** File paths are extracted from the user message, GitHub reads start in parallel with the first LLM call, and file contents are injected into context at the plan→work transition — so the model doesn't need separate `github_read_file` iterations.
+**Pass:** Iteration count ≤ 3 AND wall-clock under 30s.
+
+---
+
+#### Task D: Orchestra Run (tests all 7B optimizations end-to-end)
+
+Pick a repo with a ROADMAP.md (e.g., one previously initialized with `/orchestra init`):
+
+```
+/orchestra run <owner>/<repo>
+```
+
+| Metric | Expected (with 7B) | Baseline (without 7B) |
+|--------|--------------------|-----------------------|
+| Wall-clock | < 3 min | ~4–6 min |
+| Iterations | 8–15 | 15–25 |
+| Tools | 5–15 | 10–25 |
+
+**What the full stack does:** File prefetch on roadmap/work-log reads, speculative execution on parallel-safe tool calls, fewer iterations due to injected file contents, streaming progress updates throughout.
+**Pass:** Iteration count ≤ 15 AND progress messages showed meaningful context (tool names, plan steps).
+
+---
+
+#### Task E: Non-Tool Reasoning (tests 7B.5 — streaming feedback + baseline)
+
+```
+/use deep
+think:high Compare the architectural trade-offs between microservices and monoliths for a team of 5 developers building a SaaS product. Consider deployment complexity, debugging, and team velocity.
+```
+
+| Metric | Expected |
+|--------|----------|
+| Wall-clock | < 30s |
+| Iterations | 1 |
+| Tools | 0 |
+| Time-to-first-update | < 3s |
+
+**What 7B.5 does:** Even with no tools, the streaming feedback shows the user a "⏳ 📋 Planning…" or "⏳ Thinking…" status within seconds.
+**Pass:** First status message appears in ≤ 3s AND final response is substantive.
+
+---
+
+### Results Table
+
+Copy and fill in:
+
+```
+| Task | Wall-clock | Iterations | Tools | Model | First-update | Progress clear? | Pass? | Notes |
+|------|-----------|------------|-------|-------|-------------|----------------|-------|-------|
+| A: Simple chat | | | | | | | | |
+| B: Multi-tool | | | | | | | | |
+| C: GitHub read | | | | | | | | |
+| D: Orchestra | | | | | | | | |
+| E: Reasoning | | | | | | | | |
+```
+
+### Pass Criteria
+
+| Level | Requirement |
+|-------|-------------|
+| **PASS** | All 5 tasks meet their individual thresholds |
+| **CONDITIONAL PASS** | 4/5 pass, the failing one is within 1.5× threshold |
+| **FAIL** | 2+ tasks exceed threshold, or any task exceeds 2× threshold |
+
+### Comparison Notes
+
+If you have baseline measurements from before Phase 7B (pre-Feb 2026), record them here for delta analysis. Key metrics to compare:
+
+- **Task C iteration count**: Should drop from ~5–6 to ~2–3 (7B.4's main win)
+- **Task B wall-clock**: Should drop from ~25s to ~15s (7B.1's parallel tool execution)
+- **Task A model**: Should route to mini/flash instead of default model (7B.2)
+- **Task D iteration count**: Should drop by ~40% (compound effect of all optimizations)
