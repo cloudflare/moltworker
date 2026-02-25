@@ -14,7 +14,7 @@ import { markdownToTelegramHtml } from '../utils/telegram-format';
 import { extractLearning, storeLearning, storeLastTaskSummary, storeSessionSummary, type SessionSummary } from '../openrouter/learnings';
 import { extractFilePaths, extractGitHubContext } from '../utils/file-path-extractor';
 import { UserStorage } from '../openrouter/storage';
-import { parseOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
+import { parseOrchestraResult, validateOrchestraResult, storeOrchestraTask, type OrchestraTask } from '../orchestra/orchestra';
 import { createAcontextClient, toOpenAIMessages } from '../acontext/client';
 import { estimateTokens, compressContextBudgeted, sanitizeToolPairs } from './context-budget';
 import { checkPhaseBudget, PhaseBudgetExceededError } from './phase-budget';
@@ -2178,8 +2178,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // Orchestra result tracking: if the response contains ORCHESTRA_RESULT, update history
         if (this.r2 && task.result) {
           try {
-            const orchestraResult = parseOrchestraResult(task.result);
-            if (orchestraResult) {
+            const rawOrchestraResult = parseOrchestraResult(task.result);
+            if (rawOrchestraResult) {
+              // Fix 3: Cross-reference tool results — detect phantom PRs where model
+              // claims success but github_create_pr actually failed
+              const fullTaskOutput = conversationMessages
+                .filter(m => m.role === 'tool')
+                .map(m => typeof m.content === 'string' ? m.content : '')
+                .join('\n');
+              const orchestraResult = validateOrchestraResult(rawOrchestraResult, fullTaskOutput);
+
               // Find the orchestra task entry to update (or create a new completed entry)
               const systemMsg = request.messages.find(m => m.role === 'system');
               const systemContent = typeof systemMsg?.content === 'string' ? systemMsg.content : '';
@@ -2207,7 +2215,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 let taskSummary = orchestraResult.summary || '';
                 let failureReason = '';
 
-                if (!hasValidPr) {
+                if (orchestraResult.phantomPr) {
+                  taskStatus = 'failed';
+                  failureReason = 'Phantom PR — model claimed PR but github_create_pr failed';
+                } else if (!hasValidPr) {
                   taskStatus = 'failed';
                   failureReason = 'No PR created';
                 } else if (hasIncompleteRefactor) {
@@ -2232,6 +2243,41 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   taskSummary = `FAILED: ${failureReason}. ${orchestraResult.summary || ''}`.trim();
                 }
 
+                // Fix 1: Post-execution PR verification — if we still have a claimed PR URL,
+                // verify it actually exists via GitHub API (catches edge cases Fix 3 might miss)
+                let verifiedPrUrl = orchestraResult.prUrl;
+                if (taskStatus === 'completed' && orchestraResult.prUrl && request.githubToken) {
+                  try {
+                    // Extract PR number from URL: https://github.com/owner/repo/pull/123
+                    const prMatch = orchestraResult.prUrl.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+                    if (prMatch) {
+                      const [, prRepo, prNumber] = prMatch;
+                      const prCheckResponse = await fetch(
+                        `https://api.github.com/repos/${prRepo}/pulls/${prNumber}`,
+                        {
+                          headers: {
+                            'User-Agent': 'MoltworkerBot/1.0',
+                            'Authorization': `Bearer ${request.githubToken}`,
+                            'Accept': 'application/vnd.github.v3+json',
+                          },
+                        },
+                      );
+                      if (!prCheckResponse.ok) {
+                        console.log(`[TaskProcessor] PR verification FAILED: ${orchestraResult.prUrl} → ${prCheckResponse.status}`);
+                        taskStatus = 'failed';
+                        failureReason = `Phantom PR — claimed ${orchestraResult.prUrl} but GitHub returned ${prCheckResponse.status}`;
+                        taskSummary = `FAILED: ${failureReason}. ${orchestraResult.summary || ''}`.trim();
+                        verifiedPrUrl = '';
+                      } else {
+                        console.log(`[TaskProcessor] PR verification OK: ${orchestraResult.prUrl}`);
+                      }
+                    }
+                  } catch (verifyErr) {
+                    // Non-fatal — if we can't verify, keep the claimed URL
+                    console.log(`[TaskProcessor] PR verification error (non-fatal): ${verifyErr}`);
+                  }
+                }
+
                 const completedTask: OrchestraTask = {
                   taskId: task.taskId,
                   timestamp: Date.now(),
@@ -2240,7 +2286,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   mode: orchestraMode,
                   prompt: prompt.substring(0, 200),
                   branchName: orchestraResult.branch,
-                  prUrl: orchestraResult.prUrl,
+                  prUrl: verifiedPrUrl,
                   status: taskStatus,
                   filesChanged: orchestraResult.files,
                   summary: taskSummary,

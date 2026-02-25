@@ -442,6 +442,60 @@ export function parseOrchestraResult(response: string): {
   return { branch, prUrl: validPrUrl, files, summary };
 }
 
+/**
+ * Cross-reference a parsed orchestra result against tool output evidence.
+ * Detects phantom PRs: model claims a PR URL but tool results show failures.
+ *
+ * @param result - Parsed orchestra result (from parseOrchestraResult)
+ * @param fullOutput - The full task output including tool results
+ * @returns Validated result with prUrl cleared if evidence contradicts the claim
+ */
+export function validateOrchestraResult(
+  result: { branch: string; prUrl: string; files: string[]; summary: string },
+  fullOutput: string,
+): { branch: string; prUrl: string; files: string[]; summary: string; phantomPr: boolean } {
+  if (!result.prUrl) {
+    return { ...result, phantomPr: false };
+  }
+
+  // Evidence of github_create_pr failure in tool results
+  const prFailurePatterns = [
+    'PR NOT CREATED',
+    'github_create_pr FAILED',
+    'Destructive update blocked',
+    'Full-rewrite blocked',
+    'INCOMPLETE REFACTOR blocked',
+    'DATA FABRICATION blocked',
+    'NET DELETION blocked',
+    'AUDIT TRAIL VIOLATION',
+    'ROADMAP TAMPERING blocked',
+    'FALSE COMPLETION blocked',
+    'Error executing github_create_pr',
+  ];
+
+  const hasFailureEvidence = prFailurePatterns.some(pattern => fullOutput.includes(pattern));
+
+  // Evidence of actual PR creation success
+  // The tool returns "Pull Request created successfully!" + "PR: https://github.com/..."
+  const hasSuccessEvidence =
+    fullOutput.includes('Pull Request created successfully') ||
+    fullOutput.includes(`PR: ${result.prUrl}`) ||
+    fullOutput.includes(`"html_url":"${result.prUrl}"`);
+
+  // If there's failure evidence AND no success evidence, this is a phantom PR
+  if (hasFailureEvidence && !hasSuccessEvidence) {
+    console.log(`[orchestra] Phantom PR detected: model claimed ${result.prUrl} but tool results show failure`);
+    return {
+      ...result,
+      prUrl: '',
+      summary: `⚠️ PHANTOM PR: Model claimed PR but github_create_pr failed. ${result.summary}`,
+      phantomPr: true,
+    };
+  }
+
+  return { ...result, phantomPr: false };
+}
+
 // ============================================================
 // Helpers
 // ============================================================
