@@ -37,6 +37,16 @@ Thumbs.db
 # Docker build artifacts
 *.tar
 
+# Local Claude settings
+.claude/
+
+# Clawdbot runtime config (contains tokens)
+clawdbot/
+.clawdhub/
+
+# Custom skills (user-specific)
+skills/prompt-guard/
+
 # Veta agent memory
 .veta/
 

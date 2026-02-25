@@ -4,6 +4,28 @@ import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
 import { ensureRcloneConfig } from './r2';
 
+/** Commands that identify a gateway process (vs CLI commands) */
+export const GATEWAY_COMMANDS = ['start-openclaw.sh', 'start-moltbot.sh', 'clawdbot gateway', 'openclaw gateway'];
+
+/** Check if a command string is a gateway process */
+export function isGatewayProcess(command: string): boolean {
+  return GATEWAY_COMMANDS.some(cmd => command.includes(cmd));
+}
+
+// Auto-recovery configuration
+const MAX_RECOVERY_ATTEMPTS = 3;
+const RECOVERY_COOLDOWN_MS = 30_000; // 30s minimum between recovery cycles
+let recoveryAttempts = 0;
+let lastRecoveryTime = 0;
+
+// Track when a gateway process was last started (for cron grace period)
+let lastGatewayStartTime = 0;
+
+/** Get the timestamp of when the last gateway process was started */
+export function getLastGatewayStartTime(): number {
+  return lastGatewayStartTime;
+}
+
 /**
  * Find an existing OpenClaw gateway process
  *
@@ -14,14 +36,6 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
   try {
     const processes = await sandbox.listProcesses();
     for (const proc of processes) {
-      // Match gateway process (openclaw gateway or legacy clawdbot gateway)
-      // Don't match CLI commands like "openclaw devices list"
-      const isGatewayProcess =
-        proc.command.includes('start-openclaw.sh') ||
-        proc.command.includes('openclaw gateway') ||
-        // Legacy: match old startup script during transition
-        proc.command.includes('start-moltbot.sh') ||
-        proc.command.includes('clawdbot gateway');
       const isCliCommand =
         proc.command.includes('openclaw devices') ||
         proc.command.includes('openclaw --version') ||
@@ -29,7 +43,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
         proc.command.includes('clawdbot devices') ||
         proc.command.includes('clawdbot --version');
 
-      if (isGatewayProcess && !isCliCommand) {
+      if (isGatewayProcess(proc.command) && !isCliCommand) {
         if (proc.status === 'starting' || proc.status === 'running') {
           return proc;
         }
@@ -90,6 +104,7 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
 
   // Start a new OpenClaw gateway
   console.log('Starting new OpenClaw gateway...');
+  lastGatewayStartTime = Date.now();
   const envVars = buildEnvVars(env);
   const command = '/usr/local/bin/start-openclaw.sh';
 
@@ -135,4 +150,60 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   console.log('[Gateway] Verifying gateway health...');
 
   return process;
+}
+
+/**
+ * Ensure the Moltbot gateway is running with auto-recovery
+ *
+ * Wraps ensureMoltbotGateway with exponential backoff retry logic:
+ * - Max 3 retry attempts
+ * - Exponential backoff (2s, 4s, 8s)
+ * - 30s cooldown between recovery cycles
+ *
+ * @param sandbox - The sandbox instance
+ * @param env - Worker environment bindings
+ * @returns The running gateway process
+ */
+export async function ensureMoltbotGatewayWithRecovery(
+  sandbox: Sandbox,
+  env: MoltbotEnv
+): Promise<Process> {
+  try {
+    return await ensureMoltbotGateway(sandbox, env);
+  } catch (error) {
+    const now = Date.now();
+
+    // Reset attempts after cooldown period
+    if (now - lastRecoveryTime > RECOVERY_COOLDOWN_MS) {
+      recoveryAttempts = 0;
+    }
+
+    if (recoveryAttempts < MAX_RECOVERY_ATTEMPTS) {
+      recoveryAttempts++;
+      lastRecoveryTime = now;
+
+      console.log(`[Recovery] Attempt ${recoveryAttempts}/${MAX_RECOVERY_ATTEMPTS} after error:`, error);
+
+      // Exponential backoff: 2s, 4s, 8s
+      const waitTime = Math.pow(2, recoveryAttempts) * 1000;
+      console.log(`[Recovery] Waiting ${waitTime}ms before retry...`);
+      await new Promise(r => setTimeout(r, waitTime));
+
+      // Kill any stuck processes
+      const stuck = await findExistingMoltbotProcess(sandbox);
+      if (stuck) {
+        console.log('[Recovery] Killing stuck process:', stuck.id);
+        try {
+          await stuck.kill();
+        } catch (killErr) {
+          console.log('[Recovery] Kill failed:', killErr);
+        }
+      }
+
+      // Retry
+      return await ensureMoltbotGateway(sandbox, env);
+    }
+
+    throw new Error(`Gateway failed after ${MAX_RECOVERY_ATTEMPTS} recovery attempts: ${error}`);
+  }
 }

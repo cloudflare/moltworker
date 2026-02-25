@@ -354,6 +354,67 @@ debug.get('/env', async (c) => {
   });
 });
 
+// GET /debug/disk - Show disk usage
+debug.get('/disk', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    const proc = await sandbox.startProcess(
+      'df -h / && echo "---" && du -sh /root/.openclaw /root/clawd /data/moltbot 2>/dev/null || true'
+    );
+
+    let attempts = 0;
+    while (attempts < 20) {
+      await new Promise(r => setTimeout(r, 500));
+      if (proc.status !== 'running') break;
+      attempts++;
+    }
+
+    const logs = await proc.getLogs();
+    return c.json({
+      output: logs.stdout || '',
+      errors: logs.stderr || '',
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// POST /debug/gc - Trigger garbage collection (cleanup old data)
+debug.post('/gc', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    // Clean up old log files, tmp files, and stale session locks
+    const cleanupCmd = `
+      find /root -name "*.log" -mtime +7 -delete 2>/dev/null || true;
+      find /tmp -type f -mtime +1 -delete 2>/dev/null || true;
+      find /root/.openclaw -name "*.lock" -mmin +30 -delete 2>/dev/null || true;
+      echo "Cleanup complete"
+    `;
+
+    const proc = await sandbox.startProcess(cleanupCmd);
+
+    let attempts = 0;
+    while (attempts < 60) {
+      await new Promise(r => setTimeout(r, 500));
+      if (proc.status !== 'running') break;
+      attempts++;
+    }
+
+    const logs = await proc.getLogs();
+    return c.json({
+      success: logs.stdout?.includes('Cleanup complete') || false,
+      output: logs.stdout || '',
+      errors: logs.stderr || '',
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 // GET /debug/container-config - Read the moltbot config from inside the container
 debug.get('/container-config', async (c) => {
   const sandbox = c.get('sandbox');

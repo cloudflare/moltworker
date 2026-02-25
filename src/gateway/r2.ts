@@ -7,7 +7,7 @@ const CONFIGURED_FLAG = '/tmp/.rclone-configured';
 
 /**
  * Ensure rclone is configured in the container for R2 access.
- * Idempotent — checks for a flag file to skip re-configuration.
+ * Idempotent -- checks for a flag file to skip re-configuration.
  *
  * @returns true if rclone is configured, false if credentials are missing
  */

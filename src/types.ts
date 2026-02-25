@@ -42,6 +42,31 @@ export interface MoltbotEnv {
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
+  BRAVE_API_KEY?: string; // Brave Search API key for web search
+  SERPER_API_KEY?: string; // Serper (Google Search) API key for web research
+  CLAUDE_ACCESS_TOKEN?: string; // Claude Max OAuth access token
+  CLAUDE_REFRESH_TOKEN?: string; // Claude Max OAuth refresh token
+  GITHUB_REPO_URL?: string; // GitHub repo URL to clone on startup
+  GITHUB_TOKEN?: string; // GitHub personal access token for private repos
+  GITHUB_PAT?: string; // GitHub personal access token (fallback for GITHUB_TOKEN)
+  GITHUB_REPO_SUBDIR?: string; // Subdirectory within the GitHub repo to scope memory to (e.g. "moltworker")
+  TELEGRAM_OWNER_ID?: string; // Telegram user ID to auto-allowlist on startup
+  // Google Calendar OAuth 2.0 credentials
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REFRESH_TOKEN?: string;
+  GOOGLE_CALENDAR_ID?: string; // Calendar ID (defaults to 'primary' in skill script)
+  // Node host device identity for pre-seeded pairing (workaround for openclaw#4833)
+  NODE_DEVICE_ID?: string; // Device ID from node's ~/.openclaw/identity/device.json
+  NODE_DEVICE_PUBLIC_KEY?: string; // Base64url-encoded public key from device.json
+  NODE_DEVICE_DISPLAY_NAME?: string; // Display name for the node (default: "Node Host")
+  GITHUB_COPILOT_TOKEN?: string; // GitHub Copilot OAuth token (ghu_...) for OpenClaw model auth
+  NOTION_API_KEY?: string; // Notion internal integration token for reading/writing pages and databases
+  GOOGLE_AI_API_KEY?: string; // Google AI API key for embeddings (memory_search)
+  GOOGLE_GMAIL_CLIENT_ID?: string; // Gmail OAuth client ID (Web application type)
+  GOOGLE_GMAIL_CLIENT_SECRET?: string; // Gmail OAuth client secret
+  GOOGLE_GMAIL_REFRESH_TOKEN?: string; // Gmail read-only refresh token (astin@hashed.com)
+  GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN?: string; // Gmail read-only refresh token (gkswlghks118@gmail.com)
 }
 
 /**

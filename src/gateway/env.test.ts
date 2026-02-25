@@ -158,4 +158,30 @@ describe('buildEnvVars', () => {
       TELEGRAM_BOT_TOKEN: 'tg',
     });
   });
+
+
+  it('includes Google Calendar credentials when set', () => {
+    const env = createMockEnv({
+      GOOGLE_CLIENT_ID: 'test-client-id',
+      GOOGLE_CLIENT_SECRET: 'test-client-secret',
+      GOOGLE_REFRESH_TOKEN: 'test-refresh-token',
+      GOOGLE_CALENDAR_ID: 'user@gmail.com',
+    });
+    const result = buildEnvVars(env);
+
+    expect(result.GOOGLE_CLIENT_ID).toBe('test-client-id');
+    expect(result.GOOGLE_CLIENT_SECRET).toBe('test-client-secret');
+    expect(result.GOOGLE_REFRESH_TOKEN).toBe('test-refresh-token');
+    expect(result.GOOGLE_CALENDAR_ID).toBe('user@gmail.com');
+  });
+
+  it('omits Google Calendar credentials when not set', () => {
+    const env = createMockEnv();
+    const result = buildEnvVars(env);
+
+    expect(result.GOOGLE_CLIENT_ID).toBeUndefined();
+    expect(result.GOOGLE_CLIENT_SECRET).toBeUndefined();
+    expect(result.GOOGLE_REFRESH_TOKEN).toBeUndefined();
+    expect(result.GOOGLE_CALENDAR_ID).toBeUndefined();
+  });
 });

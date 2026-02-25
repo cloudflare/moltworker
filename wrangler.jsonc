@@ -37,7 +37,7 @@
     {
       "class_name": "Sandbox",
       "image": "./Dockerfile",
-      "instance_type": "standard-1",
+      "instance_type": "standard-4",
       "max_instances": 1,
     },
   ],
@@ -62,7 +62,12 @@
       "bucket_name": "moltbot-data",
     },
   ],
-
+  // Cron trigger for health check every 10 minutes
+  "triggers": {
+    "crons": [
+      "*/10 * * * *"
+    ],
+  },
   // Browser Rendering binding for CDP shim
   "browser": {
     "binding": "BROWSER",

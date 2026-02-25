@@ -232,17 +232,32 @@ adminApi.get('/storage', async (c) => {
   });
 });
 
-// POST /api/admin/storage/sync - Trigger a manual sync to R2
+// POST /api/admin/storage/sync - Trigger a manual sync to R2 with detailed response
 adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
+  const startTime = Date.now();
 
   const result = await syncToR2(sandbox, c.env);
+  const duration = Date.now() - startTime;
 
   if (result.success) {
+    // Get backup size
+    let backupSize: string | undefined;
+    try {
+      const proc = await sandbox.startProcess(`du -sh /root/.openclaw 2>/dev/null | cut -f1`);
+      await waitForProcess(proc, 5000);
+      const logs = await proc.getLogs();
+      backupSize = logs.stdout?.trim();
+    } catch {
+      // Ignore errors getting size
+    }
+
     return c.json({
       success: true,
       message: 'Sync completed successfully',
       lastSync: result.lastSync,
+      duration: `${duration}ms`,
+      backupSize,
     });
   } else {
     const status = result.error?.includes('not configured') ? 400 : 500;
@@ -251,9 +266,118 @@ adminApi.post('/storage/sync', async (c) => {
         success: false,
         error: result.error,
         details: result.details,
+        duration: `${duration}ms`,
       },
       status,
     );
+  }
+});
+
+// GET /api/admin/conversations - List recent conversation sessions
+adminApi.get('/conversations', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    // Find session files in OpenClaw agents directory
+    const proc = await sandbox.startProcess(
+      'find /root/.openclaw/agents -name "*.jsonl" -type f -printf "%T@ %p\\n" 2>/dev/null | sort -rn | head -20'
+    );
+    await waitForProcess(proc, 10000);
+
+    const logs = await proc.getLogs();
+    const files = (logs.stdout || '')
+      .split('\n')
+      .filter(Boolean)
+      .map(line => {
+        const spaceIdx = line.indexOf(' ');
+        const timestamp = line.substring(0, spaceIdx);
+        const path = line.substring(spaceIdx + 1);
+        const parts = path.split('/');
+        const filename = parts[parts.length - 1];
+        return {
+          id: filename.replace('.jsonl', ''),
+          path,
+          modified: new Date(parseFloat(timestamp) * 1000).toISOString(),
+        };
+      });
+
+    return c.json({ conversations: files, count: files.length });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// GET /api/admin/conversations/:id - Get a specific conversation
+adminApi.get('/conversations/:id', async (c) => {
+  const id = c.req.param('id');
+  const sandbox = c.get('sandbox');
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+
+    // Find and read the session file
+    const proc = await sandbox.startProcess(
+      `find /root/.openclaw/agents -name "${id}.jsonl" -type f -exec cat {} \\; 2>/dev/null | head -100`
+    );
+    await waitForProcess(proc, 10000);
+
+    const logs = await proc.getLogs();
+    const content = logs.stdout || '';
+
+    if (!content.trim()) {
+      return c.json({ error: 'Conversation not found' }, 404);
+    }
+
+    // Parse JSONL format (one JSON object per line)
+    const messages = content
+      .split('\n')
+      .filter(Boolean)
+      .map(line => {
+        try {
+          return JSON.parse(line);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+
+    return c.json({ id, messages, count: messages.length });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// GET /api/admin/skills - List installed skills
+adminApi.get('/skills', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    // Find skill definition files
+    const proc = await sandbox.startProcess(
+      'find /root/clawd/skills -maxdepth 2 \\( -name "SKILL.md" -o -name "CLAUDE.md" -o -name "skill.json" \\) 2>/dev/null'
+    );
+    await waitForProcess(proc, 10000);
+
+    const logs = await proc.getLogs();
+    const skillFiles = (logs.stdout || '').split('\n').filter(Boolean);
+
+    // Extract skill names from paths
+    const skillsMap = new Map<string, { name: string; files: string[] }>();
+    for (const path of skillFiles) {
+      const parts = path.split('/');
+      const skillDir = parts[parts.length - 2]; // parent directory name
+      if (!skillsMap.has(skillDir)) {
+        skillsMap.set(skillDir, { name: skillDir, files: [] });
+      }
+      skillsMap.get(skillDir)!.files.push(parts[parts.length - 1]);
+    }
+
+    const skills = Array.from(skillsMap.values());
+    return c.json({ skills, count: skills.length });
+  } catch (error) {
+    return c.json({ error: String(error) }, 500);
   }
 });
 
@@ -288,6 +412,33 @@ adminApi.post('/gateway/restart', async (c) => {
         ? 'Gateway process killed, new instance starting...'
         : 'No existing process found, starting new instance...',
       previousProcessId: existingProcess?.id,
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
+// POST /api/admin/container/reset - Kill ALL processes to force container recreation
+adminApi.post('/container/reset', async (c) => {
+  const sandbox = c.get('sandbox');
+
+  try {
+    const processes = await sandbox.listProcesses();
+    let killed = 0;
+
+    for (const p of processes) {
+      if (p.status === 'running' || p.status === 'starting') {
+        try {
+          await p.kill();
+          killed++;
+        } catch {}
+      }
+    }
+
+    return c.json({
+      success: true,
+      message: `Killed ${killed} processes out of ${processes.length} total. Container will reset on next request.`,
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
