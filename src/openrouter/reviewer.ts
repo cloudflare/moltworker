@@ -170,16 +170,19 @@ export function summarizeToolUsage(messages: readonly ChatMessage[]): string {
 }
 
 /**
- * Extract the original user question from the conversation messages.
- * Skips system messages and planning prompts.
+ * Extract the most recent user question from the conversation messages.
+ * Iterates backwards to find the latest user message, skipping injected phase prompts.
  */
 export function extractUserQuestion(messages: readonly ChatMessage[]): string {
-  for (const msg of messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
     if (msg.role !== 'user') continue;
     const text = typeof msg.content === 'string' ? msg.content : '';
     // Skip injected phase prompts
     if (text.includes('[PLANNING PHASE]') || text.includes('[REVIEW PHASE]')) continue;
     if (text.includes('STRUCTURED_PLAN_PROMPT') || text.startsWith('Before starting,')) continue;
+    // Skip file injection blocks (Phase 7B.4)
+    if (text.startsWith('[FILE:') || text.startsWith('Pre-loaded file contents')) continue;
     if (text.length > 10) return text;
   }
   return '(Unknown question)';

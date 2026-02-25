@@ -2222,8 +2222,11 @@ export class TelegramHandler {
     const complexity = classifyTaskComplexity(messageText, fullHistory.length);
 
     // Route simple queries to fast models when user is on default 'auto' (Phase 7B.2)
+    // Use message-only complexity (ignoring conversation length) so that simple messages
+    // in long conversations still get routed to fast models.
     const autoRouteEnabled = await this.storage.getUserAutoRoute(userId);
-    const routing = routeByComplexity(modelAlias, complexity, autoRouteEnabled);
+    const routingComplexity = classifyTaskComplexity(messageText, 0);
+    const routing = routeByComplexity(modelAlias, routingComplexity, autoRouteEnabled);
     if (routing.wasRouted) {
       console.log(`[ModelRouter] ${routing.reason} (user=${userId})`);
       modelAlias = routing.modelAlias;
