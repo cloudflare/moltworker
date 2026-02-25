@@ -10,6 +10,7 @@ import {
   buildOrchestraPrompt,
   parseOrchestraCommand,
   parseOrchestraResult,
+  validateOrchestraResult,
   generateTaskSlug,
   loadOrchestraHistory,
   storeOrchestraTask,
@@ -1222,5 +1223,74 @@ describe('partial failure handling in prompts', () => {
     expect(prompt).toContain('Handle Partial Failures');
     expect(prompt).toContain('WORK_LOG.md');
     expect(prompt).toContain('partial');
+  });
+});
+
+// --- validateOrchestraResult ---
+
+describe('validateOrchestraResult', () => {
+  const baseResult = {
+    branch: 'bot/add-feature-grok',
+    prUrl: 'https://github.com/owner/repo/pull/42',
+    files: ['src/feature.ts'],
+    summary: 'Added feature',
+  };
+
+  it('passes through valid result when no failure evidence', () => {
+    const validated = validateOrchestraResult(baseResult, 'github_read_file returned content...');
+    expect(validated.prUrl).toBe('https://github.com/owner/repo/pull/42');
+    expect(validated.phantomPr).toBe(false);
+  });
+
+  it('detects phantom PR when tool output shows PR NOT CREATED', () => {
+    const toolOutput = '❌ PR NOT CREATED — github_create_pr FAILED.\n\nError: Destructive update blocked';
+    const validated = validateOrchestraResult(baseResult, toolOutput);
+    expect(validated.prUrl).toBe('');
+    expect(validated.phantomPr).toBe(true);
+    expect(validated.summary).toContain('PHANTOM PR');
+  });
+
+  it('detects phantom PR when tool output shows Destructive update blocked', () => {
+    const toolOutput = 'Error executing github_create_pr: Destructive update blocked for "src/App.jsx"';
+    const validated = validateOrchestraResult(baseResult, toolOutput);
+    expect(validated.prUrl).toBe('');
+    expect(validated.phantomPr).toBe(true);
+  });
+
+  it('detects phantom PR when INCOMPLETE REFACTOR in tool output', () => {
+    const toolOutput = 'INCOMPLETE REFACTOR blocked: 3 new code files created but no existing code files updated.';
+    const validated = validateOrchestraResult(baseResult, toolOutput);
+    expect(validated.prUrl).toBe('');
+    expect(validated.phantomPr).toBe(true);
+  });
+
+  it('detects phantom PR when DATA FABRICATION in tool output', () => {
+    const toolOutput = 'DATA FABRICATION blocked for "src/App.jsx": only 3/20 original data values survive';
+    const validated = validateOrchestraResult(baseResult, toolOutput);
+    expect(validated.prUrl).toBe('');
+    expect(validated.phantomPr).toBe(true);
+  });
+
+  it('does NOT flag phantom PR when failure exists but success also confirmed', () => {
+    const toolOutput = [
+      '❌ PR NOT CREATED — github_create_pr FAILED.\n\nError: 422 branch already exists',
+      '✅ Pull Request created successfully!\n\nPR: https://github.com/owner/repo/pull/42',
+    ].join('\n');
+    const validated = validateOrchestraResult(baseResult, toolOutput);
+    expect(validated.prUrl).toBe('https://github.com/owner/repo/pull/42');
+    expect(validated.phantomPr).toBe(false);
+  });
+
+  it('passes through when no PR URL claimed', () => {
+    const noPrResult = { ...baseResult, prUrl: '' };
+    const validated = validateOrchestraResult(noPrResult, 'some tool output');
+    expect(validated.phantomPr).toBe(false);
+  });
+
+  it('preserves branch and files when detecting phantom PR', () => {
+    const toolOutput = 'Full-rewrite blocked for "src/App.jsx"';
+    const validated = validateOrchestraResult(baseResult, toolOutput);
+    expect(validated.branch).toBe('bot/add-feature-grok');
+    expect(validated.files).toEqual(['src/feature.ts']);
   });
 });

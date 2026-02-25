@@ -554,10 +554,15 @@ export async function executeTool(toolCall: ToolCall, context?: ToolContext): Pr
       content: result,
     };
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    // Make github_create_pr failures unmistakable so models can't hallucinate success
+    const prefix = name === 'github_create_pr'
+      ? `❌ PR NOT CREATED — github_create_pr FAILED.\n\nDo NOT claim a PR was created. The PR does not exist.\n\nError: `
+      : `Error executing ${name}: `;
     return {
       tool_call_id: toolCall.id,
       role: 'tool',
-      content: `Error executing ${name}: ${error instanceof Error ? error.message : String(error)}`,
+      content: prefix + errMsg,
     };
   }
 }
