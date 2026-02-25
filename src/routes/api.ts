@@ -236,24 +236,30 @@ adminApi.get('/storage', async (c) => {
 adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
 
-  const result = await syncToR2(sandbox, c.env);
+  try {
+    const result = await syncToR2(sandbox, c.env);
 
-  if (result.success) {
-    return c.json({
-      success: true,
-      message: 'Sync completed successfully',
-      lastSync: result.lastSync,
-    });
-  } else {
-    const status = result.error?.includes('not configured') ? 400 : 500;
-    return c.json(
-      {
-        success: false,
-        error: result.error,
-        details: result.details,
-      },
-      status,
-    );
+    if (result.success) {
+      return c.json({
+        success: true,
+        message: 'Sync completed successfully',
+        lastSync: result.lastSync,
+      });
+    } else {
+      const status = result.error?.includes('not configured') || result.error?.includes('no config file') ? 400 : 500;
+      return c.json(
+        {
+          success: false,
+          error: result.error,
+          details: result.details,
+        },
+        status,
+      );
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    console.error('[SYNC] syncToR2 threw:', errorMessage);
+    return c.json({ success: false, error: errorMessage }, 500);
   }
 });
 
