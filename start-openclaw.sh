@@ -463,7 +463,7 @@ config.tools.deny = ['browser'];
 // Memory search: hybrid BM25+vector with temporal decay and MMR
 config.agents.defaults.memorySearch = {
     provider: 'gemini',
-    model: 'text-embedding-004',
+    model: 'gemini-embedding-001',
     query: {
         hybrid: {
             enabled: true,
