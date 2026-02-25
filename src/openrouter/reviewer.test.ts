@@ -194,7 +194,7 @@ describe('summarizeToolUsage', () => {
 // ─── extractUserQuestion ────────────────────────────────────────────────────
 
 describe('extractUserQuestion', () => {
-  it('extracts the first real user message', () => {
+  it('extracts the most recent user message', () => {
     const messages: ChatMessage[] = [
       { role: 'system', content: 'You are an assistant' },
       { role: 'user', content: 'What is the weather in Milan?' },
@@ -228,6 +228,26 @@ describe('extractUserQuestion', () => {
 
   it('returns fallback for empty messages', () => {
     expect(extractUserQuestion([])).toBe('(Unknown question)');
+  });
+
+  it('picks the latest user question in multi-turn conversations', () => {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'You are an assistant' },
+      { role: 'user', content: 'What is the capital of France?' },
+      { role: 'assistant', content: 'Paris.' },
+      { role: 'user', content: 'Now read the README.md from my repo and summarize it' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'tc1', type: 'function' as const, function: { name: 'github_read_file', arguments: '{}' } }] },
+      { role: 'tool', content: '# README content...', tool_call_id: 'tc1' },
+    ];
+    expect(extractUserQuestion(messages)).toBe('Now read the README.md from my repo and summarize it');
+  });
+
+  it('skips file injection blocks from Phase 7B.4', () => {
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Read and summarize the project' },
+      { role: 'user', content: '[FILE: owner/repo/README.md]\n# Contents here...' },
+    ];
+    expect(extractUserQuestion(messages)).toBe('Read and summarize the project');
   });
 });
 
