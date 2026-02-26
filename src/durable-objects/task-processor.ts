@@ -71,8 +71,13 @@ const SOURCE_GROUNDING_PROMPT =
   '• When providing your final answer, include a brief "Evidence" section listing the tool outputs that support your key claims.\n' +
   '• End with "Confidence: High/Medium/Low" based on how much of your answer is tool-verified vs inferred.';
 
-// Max characters for a single tool result before truncation
-const MAX_TOOL_RESULT_LENGTH = 8000; // ~2K tokens (reduced for CPU)
+// Max characters for a single tool result before truncation.
+// This is the fallback for models without maxContext metadata.
+// For models with known context windows, getToolResultLimit() scales this up.
+const DEFAULT_TOOL_RESULT_LENGTH = 8000; // ~2K tokens
+// Upper cap even for large-context models — prevents single tool results
+// from dominating the context window
+const MAX_TOOL_RESULT_LENGTH = 50000; // ~12.5K tokens
 // Compress context after this many tool calls
 const COMPRESS_AFTER_TOOLS = 6; // Compress more frequently
 // Safety fallback for aliases without metadata
@@ -517,6 +522,24 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
    */
   async alarm(): Promise<void> {
     console.log('[TaskProcessor] Watchdog alarm fired');
+    try {
+      await this.alarmInner();
+    } catch (alarmError) {
+      // Error boundary: if the alarm handler throws (R2 outage, Telegram rate limit,
+      // storage error), Cloudflare will automatically retry it, potentially creating
+      // a tight failure loop. Catch everything, log it, and reschedule gracefully.
+      console.error('[TaskProcessor] Alarm handler error (rescheduling):', alarmError);
+      try {
+        await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
+      } catch {
+        // If even setAlarm fails, we can't do anything — the DO is in bad shape.
+        // Cloudflare will eventually retry the alarm or evict the DO.
+        console.error('[TaskProcessor] Failed to reschedule alarm after error');
+      }
+    }
+  }
+
+  private async alarmInner(): Promise<void> {
     const task = await this.doState.storage.get<TaskState>('task');
 
     if (!task) {
@@ -711,19 +734,36 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   }
 
   /**
+   * Get the tool result truncation limit for the current model.
+   * Models with larger context windows can handle longer tool results.
+   * Scales from 8K chars (default) up to 50K chars (cap).
+   */
+  private getToolResultLimit(modelAlias?: string): number {
+    const modelContext = modelAlias ? getModel(modelAlias)?.maxContext : undefined;
+    if (!modelContext || modelContext <= 0) {
+      return DEFAULT_TOOL_RESULT_LENGTH;
+    }
+    // Allow tool results up to ~5% of the model's context (in chars, ~4 chars/token).
+    // 128K context → ~25K chars, 256K → ~50K (capped), 32K → ~6.4K (floor at default)
+    const scaled = Math.floor(modelContext * 0.05 * 4);
+    return Math.min(MAX_TOOL_RESULT_LENGTH, Math.max(DEFAULT_TOOL_RESULT_LENGTH, scaled));
+  }
+
+  /**
    * Truncate a tool result if it's too long
    */
-  private truncateToolResult(content: string, toolName: string): string {
-    if (content.length <= MAX_TOOL_RESULT_LENGTH) {
+  private truncateToolResult(content: string, toolName: string, modelAlias?: string): string {
+    const limit = this.getToolResultLimit(modelAlias);
+    if (content.length <= limit) {
       return content;
     }
 
     // For file contents, keep beginning and end
-    const halfLength = Math.floor(MAX_TOOL_RESULT_LENGTH / 2) - 100;
+    const halfLength = Math.floor(limit / 2) - 100;
     const beginning = content.slice(0, halfLength);
     const ending = content.slice(-halfLength);
 
-    return `${beginning}\n\n... [TRUNCATED ${content.length - MAX_TOOL_RESULT_LENGTH} chars from ${toolName}] ...\n\n${ending}`;
+    return `${beginning}\n\n... [TRUNCATED ${content.length - limit} chars from ${toolName}] ...\n\n${ending}`;
   }
 
   /**
@@ -1834,7 +1874,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
           // Add all tool results to conversation (preserving order, with truncation + validation)
           for (const { toolName, toolResult } of toolResults) {
-            const truncatedContent = this.truncateToolResult(toolResult.content, toolName);
+            const truncatedContent = this.truncateToolResult(toolResult.content, toolName, task.modelAlias);
             conversationMessages.push({
               role: 'tool',
               content: truncatedContent,
