@@ -59,7 +59,7 @@
   "r2_buckets": [
     {
       "binding": "MOLTBOT_BUCKET",
-      "bucket_name": "molt-storage",
+      "bucket_name": "moltbot-data",
     },
   ],
 
