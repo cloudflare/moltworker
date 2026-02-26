@@ -291,8 +291,8 @@ const CHECKPOINT_EVERY_N_TOOLS = 3;
 // Ensures small tasks (1-3 tool calls) are checkpointed before the watchdog fires.
 const CHECKPOINT_EARLY_THRESHOLD = 3;
 // Max auto-resume attempts before requiring manual intervention
-const MAX_AUTO_RESUMES_DEFAULT = 10;
-const MAX_AUTO_RESUMES_FREE = 8; // Was 15 — 5-resume spins still happened; 8 is enough for legitimate complex tasks
+const MAX_AUTO_RESUMES_DEFAULT = 5; // Was 10 — 10 resumes lets bad situations drag on for 30min
+const MAX_AUTO_RESUMES_FREE = 5; // Was 8 — aligned with paid; 5 is enough for legitimate complex tasks
 // Max total elapsed time before stopping (15min for free, 30min for paid)
 const MAX_ELAPSED_FREE_MS = 15 * 60 * 1000;
 const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
@@ -760,23 +760,29 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
    * Get the tool result truncation limit for the current model.
    * Models with larger context windows can handle longer tool results.
    * Scales from 8K chars (default) up to 50K chars (cap).
+   *
+   * @param batchSize Number of tool results in this batch. When >1, the per-result
+   *   limit is divided so that the TOTAL doesn't overwhelm the context. Without this,
+   *   5 parallel file reads × 26K = 130K chars — causing multi-minute API responses,
+   *   DO evictions, and cascading auto-resumes.
    */
-  private getToolResultLimit(modelAlias?: string): number {
+  private getToolResultLimit(modelAlias?: string, batchSize = 1): number {
     const modelContext = modelAlias ? getModel(modelAlias)?.maxContext : undefined;
     if (!modelContext || modelContext <= 0) {
-      return DEFAULT_TOOL_RESULT_LENGTH;
+      return Math.max(4000, Math.floor(DEFAULT_TOOL_RESULT_LENGTH / Math.max(1, batchSize)));
     }
-    // Allow tool results up to ~5% of the model's context (in chars, ~4 chars/token).
-    // 128K context → ~25K chars, 256K → ~50K (capped), 32K → ~6.4K (floor at default)
-    const scaled = Math.floor(modelContext * 0.05 * 4);
-    return Math.min(MAX_TOOL_RESULT_LENGTH, Math.max(DEFAULT_TOOL_RESULT_LENGTH, scaled));
+    // Total budget: ~20% of context in chars (~4 chars/token), shared across all results
+    // 128K context → 102K total → 20K each for 5 tools, 51K each for 2 tools
+    const totalBudget = Math.floor(modelContext * 0.20 * 4);
+    const perResult = Math.floor(totalBudget / Math.max(1, batchSize));
+    return Math.min(MAX_TOOL_RESULT_LENGTH, Math.max(4000, perResult));
   }
 
   /**
    * Truncate a tool result if it's too long
    */
-  private truncateToolResult(content: string, toolName: string, modelAlias?: string): string {
-    const limit = this.getToolResultLimit(modelAlias);
+  private truncateToolResult(content: string, toolName: string, modelAlias?: string, batchSize = 1): string {
+    const limit = this.getToolResultLimit(modelAlias, batchSize);
     if (content.length <= limit) {
       return content;
     }
@@ -1522,7 +1528,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               // Non-OpenRouter providers: use SSE streaming (same as OpenRouter)
               // This prevents DO termination during long Kimi/DeepSeek API calls
               const abortController = new AbortController();
-              const fetchTimeout = setTimeout(() => abortController.abort(), 120000);
+              const fetchTimeout = setTimeout(() => abortController.abort(), 90000); // 90s (was 120s)
 
               // Inject cache_control on system messages for Anthropic models (prompt caching)
               const sanitized = sanitizeMessages(conversationMessages);
@@ -1934,8 +1940,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           currentToolContext = null;
 
           // Add all tool results to conversation (preserving order, with truncation + validation)
+          // Pass batchSize so per-result limit shrinks when many tools ran in parallel —
+          // prevents 5 large file reads from creating 130K chars of context.
+          const batchSize = toolResults.length;
           for (const { toolName, toolResult } of toolResults) {
-            const truncatedContent = this.truncateToolResult(toolResult.content, toolName, task.modelAlias);
+            const truncatedContent = this.truncateToolResult(toolResult.content, toolName, task.modelAlias, batchSize);
             conversationMessages.push({
               role: 'tool',
               content: truncatedContent,
