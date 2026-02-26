@@ -94,7 +94,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_read_file',
-      description: 'Read a file from a GitHub repository. Supports files up to 50KB (truncated beyond that). Authentication is handled automatically. Works with both public and private repos.',
+      description: 'Read a file from a GitHub repository. Returns content for source code files (truncated at 30KB). Binary files (images, fonts, etc.) and generated files (package-lock.json, yarn.lock) return metadata only — do not read these for summarization. Authentication is handled automatically.',
       parameters: {
         type: 'object',
         properties: {
@@ -617,6 +617,23 @@ async function fetchUrl(url: string): Promise<string> {
 /**
  * Read a file from GitHub
  */
+/** File extensions that are binary — return metadata instead of content. */
+const BINARY_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'svg', 'webp', 'avif',
+  'mp3', 'mp4', 'wav', 'ogg', 'webm', 'avi', 'mov',
+  'woff', 'woff2', 'ttf', 'eot', 'otf',
+  'zip', 'tar', 'gz', 'bz2', 'xz', 'rar', '7z',
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+  'exe', 'dll', 'so', 'dylib', 'wasm',
+]);
+
+/** Filenames that are generated/lock files — return description instead of content. */
+const GENERATED_FILES = new Set([
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb',
+  'composer.lock', 'Gemfile.lock', 'Cargo.lock', 'poetry.lock',
+  'go.sum', 'flake.lock', 'Pipfile.lock',
+]);
+
 export async function githubReadFile(
   owner: string,
   repo: string,
@@ -624,6 +641,19 @@ export async function githubReadFile(
   ref?: string,
   token?: string
 ): Promise<string> {
+  // Pre-flight: check file extension for binary files
+  const filename = path.split('/').pop() || '';
+  const ext = filename.includes('.') ? filename.split('.').pop()?.toLowerCase() || '' : '';
+
+  if (BINARY_EXTENSIONS.has(ext)) {
+    return `[Binary file: ${path} (${ext})] This is a binary file and cannot be meaningfully displayed as text. Use github_list_files to see its size.`;
+  }
+
+  // Pre-flight: check for generated/lock files
+  if (GENERATED_FILES.has(filename)) {
+    return `[Generated file: ${path}] This is an auto-generated dependency lock file. It pins exact package versions for reproducible builds. Reading its content is not useful for code analysis.`;
+  }
+
   const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}${ref ? `?ref=${ref}` : ''}`;
 
   const headers: Record<string, string> = {
@@ -642,7 +672,7 @@ export async function githubReadFile(
     throw new Error(`GitHub API error ${response.status}: ${error}`);
   }
 
-  const data = await response.json() as { content?: string; encoding?: string; message?: string };
+  const data = await response.json() as { content?: string; encoding?: string; message?: string; size?: number };
 
   if (data.message) {
     throw new Error(data.message);
@@ -655,9 +685,9 @@ export async function githubReadFile(
   // GitHub returns base64 encoded content
   const content = atob(data.content.replace(/\n/g, ''));
 
-  // Truncate very long files
-  if (content.length > 50000) {
-    return content.slice(0, 50000) + '\n\n[Content truncated - exceeded 50KB]';
+  // Truncate long files (30KB keeps ~7.5K tokens of context budget)
+  if (content.length > 30000) {
+    return content.slice(0, 30000) + `\n\n[Content truncated at 30KB — full file is ${Math.round(content.length / 1024)}KB]`;
   }
 
   return content;

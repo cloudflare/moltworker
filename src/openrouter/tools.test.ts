@@ -2454,9 +2454,9 @@ describe('github_create_pr tool', () => {
     expect(changesParam.description).toContain('read the file first');
   });
 
-  it('github_read_file description mentions 50KB limit', () => {
+  it('github_read_file description mentions 30KB limit', () => {
     const tool = AVAILABLE_TOOLS.find(t => t.function.name === 'github_read_file')!;
-    expect(tool.function.description).toContain('50KB');
+    expect(tool.function.description).toContain('30KB');
   });
 
   it('should be included in TOOLS_WITHOUT_BROWSER (available in DOs)', () => {
