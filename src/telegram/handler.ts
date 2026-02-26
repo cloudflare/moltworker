@@ -28,6 +28,7 @@ import {
 } from '../orchestra/orchestra';
 import type { TaskProcessor, TaskRequest } from '../durable-objects/task-processor';
 import { fetchDOWithRetry } from '../utils/do-retry';
+import { runSmokeTests, formatTestResults, getTestNames } from './smoke-tests';
 import { classifyTaskComplexity } from '../utils/task-classifier';
 import { routeByComplexity } from '../openrouter/model-router';
 import { markdownToTelegramHtml } from '../utils/telegram-format';
@@ -1188,6 +1189,48 @@ export class TelegramHandler {
           unblockModels(currentBlocked);
         }
         await this.bot.sendMessage(chatId, '🗑️ Dynamic models and blocked list cleared.\nOnly static catalog models are available now.');
+        break;
+      }
+
+      case '/test': {
+        // Run smoke tests against TaskProcessor DO
+        if (!this.taskProcessor) {
+          await this.bot.sendMessage(chatId, 'Task processor not available.');
+          break;
+        }
+
+        const testFilter = args.length > 0 ? args[0] : undefined;
+
+        if (testFilter === 'list') {
+          const names = getTestNames();
+          await this.bot.sendMessage(chatId,
+            'Available smoke tests:\n\n' + names.map(n => `  ${n}`).join('\n') +
+            '\n\nUsage: /test [name] — run one test, or /test to run all'
+          );
+          break;
+        }
+
+        await this.bot.sendMessage(chatId,
+          `Running smoke tests${testFilter ? ` (filter: ${testFilter})` : ''}...\nThis may take up to 2 minutes.`
+        );
+
+        try {
+          const results = await runSmokeTests({
+            taskProcessor: this.taskProcessor,
+            userId,
+            chatId,
+            telegramToken: this.telegramToken,
+            openrouterKey: this.openrouterKey,
+            githubToken: this.githubToken,
+            braveSearchKey: this.braveSearchKey,
+          }, testFilter);
+
+          const summary = formatTestResults(results);
+          await this.bot.sendMessage(chatId, summary);
+        } catch (err) {
+          console.error('[Telegram] Smoke test error:', err);
+          await this.bot.sendMessage(chatId, `Smoke test runner failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
         break;
       }
 
@@ -3589,6 +3632,8 @@ Each /orch next picks up where the last one left off.`;
 /cancel — Stop a running task
 /status — Bot status
 /ping — Latency check
+/test — Run smoke tests (DO health check)
+/test list — Show available tests
 
 ━━━ Costs & Credits ━━━
 /credits — OpenRouter balance
