@@ -33,6 +33,7 @@ vi.mock('../openrouter/tools', () => ({
   }),
   AVAILABLE_TOOLS: [],
   TOOLS_WITHOUT_BROWSER: [],
+  getToolsForPhase: vi.fn(() => []),
 }));
 
 // Use deepseek provider to go through the raw fetch() path (not streaming)

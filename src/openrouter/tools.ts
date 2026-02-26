@@ -2917,6 +2917,34 @@ export const TOOLS_WITHOUT_BROWSER: ToolDefinition[] = AVAILABLE_TOOLS.filter(
 );
 
 /**
+ * Mutation tools that should only be available during the "work" phase.
+ * During "plan" phase, only read-only/discovery tools are injected to
+ * reduce token usage and prevent premature mutations.
+ */
+const MUTATION_TOOLS = new Set([
+  'github_api',
+  'github_create_pr',
+  'cloudflare_api',
+]);
+
+/**
+ * Get tools filtered by task phase.
+ * - plan: Read-only discovery tools only (saves ~500 tokens per request)
+ * - work: All DO-available tools including mutation tools
+ * - review: No tools (returns empty — caller should pass undefined)
+ */
+export function getToolsForPhase(phase?: string): ToolDefinition[] {
+  if (phase === 'review') {
+    return [];
+  }
+  if (phase === 'plan') {
+    return TOOLS_WITHOUT_BROWSER.filter(t => !MUTATION_TOOLS.has(t.function.name));
+  }
+  // work phase or no phase: all DO tools
+  return TOOLS_WITHOUT_BROWSER;
+}
+
+/**
  * Check if a model supports tools
  */
 export function modelSupportsTools(modelAlias: string): boolean {
