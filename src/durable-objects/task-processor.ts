@@ -352,6 +352,20 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
    * to false — making it safe for the alarm to resume from checkpoint.
    */
   private isRunning = false;
+  /**
+   * In-memory heartbeat timestamp. Updated by streaming onProgress callbacks
+   * without hitting DO storage. The alarm handler checks this first — if it's
+   * recent, the task is alive (streaming) and doesn't need a storage.put to
+   * prove it. This eliminates ~90% of the storage writes during streaming.
+   */
+  private lastHeartbeatMs = 0;
+  /**
+   * In-memory cancellation flag. Set by the /cancel fetch handler so that
+   * processTask() can break out of its loop immediately without waiting for
+   * the next storage.get('task') round-trip. Prevents the race where
+   * processTask's put() overwrites the cancellation status.
+   */
+  private isCancelled = false;
 
   constructor(state: DurableObjectState, env: TaskProcessorEnv) {
     super(state, env);
@@ -557,9 +571,17 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       return;
     }
 
-    // If task updated recently, it's still running - reschedule watchdog
-    if (timeSinceUpdate < stuckThreshold) {
-      console.log('[TaskProcessor] Task still active, rescheduling watchdog');
+    // Check in-memory heartbeat first (avoids false stuck detection when streaming
+    // is active but task.lastUpdate in storage is stale because we stopped persisting
+    // heartbeats to storage during streaming — see onProgress optimization).
+    const timeSinceHeartbeat = this.lastHeartbeatMs > 0
+      ? Date.now() - this.lastHeartbeatMs
+      : Infinity; // No heartbeat recorded → fall through to storage check
+
+    // If either the storage timestamp or in-memory heartbeat is recent, task is alive
+    if (timeSinceUpdate < stuckThreshold || timeSinceHeartbeat < stuckThreshold) {
+      const source = timeSinceHeartbeat < timeSinceUpdate ? 'in-memory heartbeat' : 'storage lastUpdate';
+      console.log(`[TaskProcessor] Task still active (${source}), rescheduling watchdog`);
       await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
       return;
     }
@@ -844,8 +866,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           // No tools — reviewer just analyzes text
           idleTimeoutMs: 30000,
           onProgress: () => {
-            // Keep watchdog alive during reviewer call
-            task.lastUpdate = Date.now();
+            // Keep watchdog alive during reviewer call (in-memory only)
+            this.lastHeartbeatMs = Date.now();
           },
         },
       );
@@ -972,6 +994,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         task.status = 'cancelled';
         task.error = 'Cancelled by user';
         await this.doState.storage.put('task', task);
+        // Set in-memory flag so processTask() can break out immediately
+        // without waiting for its next storage.get() round-trip
+        this.isCancelled = true;
 
         // Cancel watchdog alarm
         await this.doState.storage.deleteAlarm();
@@ -1002,6 +1027,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   private async processTask(request: TaskRequest): Promise<void> {
     // Execution lock: prevent concurrent processTask() from alarm handler
     this.isRunning = true;
+    this.isCancelled = false; // Reset for new/resumed task
+    this.lastHeartbeatMs = Date.now(); // Initialize heartbeat
 
     // Check if this is a resume of the same task (used for cache + state preservation)
     const existingTask = await this.doState.storage.get<TaskState>('task');
@@ -1227,9 +1254,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
     try {
       while (task.iterations < maxIterations) {
-        // Check if cancelled
-        const currentTask = await this.doState.storage.get<TaskState>('task');
-        if (currentTask?.status === 'cancelled') {
+        // Check if cancelled — in-memory flag is set by /cancel handler instantly,
+        // no storage round-trip needed. Prevents processTask from overwriting
+        // the cancellation with its own put() after a tool finishes.
+        if (this.isCancelled) {
+          console.log('[TaskProcessor] Cancelled via in-memory flag, exiting loop');
           return; // Exit silently - cancel handler already notified user
         }
 
@@ -1374,11 +1403,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   responseFormat: request.responseFormat,
                   onProgress: () => {
                     progressCount++;
-                    // Update watchdog every 10 chunks to keep alive during slow generation
-                    // (was 50 — too infrequent for models like Gemini that generate slowly)
+                    // Update in-memory heartbeat every 10 chunks — alarm handler reads this
+                    // directly without a storage round-trip. No more storage.put() per-chunk.
                     if (progressCount % 10 === 0) {
-                      task.lastUpdate = Date.now();
-                      this.doState.storage.put('task', task).catch(() => {});
+                      this.lastHeartbeatMs = Date.now();
                     }
                     // Log progress less frequently to avoid log spam
                     if (progressCount % 100 === 0) {
@@ -1456,8 +1484,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               result = await parseSSEStream(response.body, 45000, () => {
                 directProgressCount++;
                 if (directProgressCount % 10 === 0) {
-                  task.lastUpdate = Date.now();
-                  this.doState.storage.put('task', task).catch(() => {});
+                  this.lastHeartbeatMs = Date.now();
                 }
                 if (directProgressCount % 100 === 0) {
                   console.log(`[TaskProcessor] ${provider} streaming: ${directProgressCount} chunks`);
@@ -1883,6 +1910,14 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               task.phase,
               request.modelAlias
             );
+          }
+
+          // Check cancellation before persisting — prevents overwriting
+          // the 'cancelled' status that /cancel handler may have set during
+          // a slow tool execution
+          if (this.isCancelled) {
+            console.log('[TaskProcessor] Cancelled after tool execution, exiting');
+            return;
           }
 
           // Update lastUpdate and refresh watchdog alarm
