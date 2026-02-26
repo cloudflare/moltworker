@@ -273,15 +273,18 @@ interface TaskProcessorEnv {
 // Watchdog alarm interval (90 seconds)
 const WATCHDOG_INTERVAL_MS = 90000;
 // Max time without update before considering task stuck
-// Free models: 60s (fast, cheap — don't waste resources)
+// Free models: 120s (streaming over OpenRouter regularly takes >60s per API call)
 // Paid models: 180s (may generate complex code, need more time)
-const STUCK_THRESHOLD_FREE_MS = 60000;
+const STUCK_THRESHOLD_FREE_MS = 120000;
 const STUCK_THRESHOLD_PAID_MS = 180000;
 // Save checkpoint every N tools (more frequent = less lost progress on crash)
 const CHECKPOINT_EVERY_N_TOOLS = 3;
+// Always save checkpoint when total tools is at or below this threshold.
+// Ensures small tasks (1-3 tool calls) are checkpointed before the watchdog fires.
+const CHECKPOINT_EARLY_THRESHOLD = 3;
 // Max auto-resume attempts before requiring manual intervention
 const MAX_AUTO_RESUMES_DEFAULT = 10;
-const MAX_AUTO_RESUMES_FREE = 15; // Was 50 — caused 21+ resume spin loops with no progress
+const MAX_AUTO_RESUMES_FREE = 8; // Was 15 — 5-resume spins still happened; 8 is enough for legitimate complex tasks
 // Max total elapsed time before stopping (15min for free, 30min for paid)
 const MAX_ELAPSED_FREE_MS = 15 * 60 * 1000;
 const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
@@ -956,13 +959,22 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
    * Process the AI task with unlimited time
    */
   private async processTask(request: TaskRequest): Promise<void> {
-    // Reset tool cache for each new task session
-    this.toolResultCache.clear();
-    this.toolInFlightCache.clear();
-    this.toolCacheHits = 0;
-    this.toolCacheMisses = 0;
-    this.prefetchPromises.clear();
-    this.prefetchHits = 0;
+    // Check if this is a resume of the same task (used for cache + state preservation)
+    const existingTask = await this.doState.storage.get<TaskState>('task');
+    const isResumingSameTask = existingTask?.taskId === request.taskId;
+
+    // Only reset tool cache for NEW tasks — preserve cache on auto-resume
+    // so the model doesn't re-fetch the same data (weather, crypto, etc.)
+    if (!isResumingSameTask) {
+      this.toolResultCache.clear();
+      this.toolInFlightCache.clear();
+      this.toolCacheHits = 0;
+      this.toolCacheMisses = 0;
+      this.prefetchPromises.clear();
+      this.prefetchHits = 0;
+    } else {
+      console.log(`[TaskProcessor] Preserving tool cache for resume (${this.toolResultCache.size} entries)`);
+    }
 
     const task: TaskState = {
       taskId: request.taskId,
@@ -999,8 +1011,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       console.log('[TaskProcessor] Simple query detected — skipping plan phase');
     }
     // Keep existing resume/stall counters only if resuming the SAME task
-    const existingTask = await this.doState.storage.get<TaskState>('task');
-    if (existingTask?.taskId === request.taskId) {
+    // (existingTask was already fetched above for cache preservation)
+    if (isResumingSameTask && existingTask) {
       if (existingTask.autoResumeCount !== undefined) {
         task.autoResumeCount = existingTask.autoResumeCount;
       }
@@ -1795,7 +1807,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
           // Save checkpoint periodically (not every tool - saves CPU)
           // Trade-off: may lose up to N tool results on crash
-          if (this.r2 && task.toolsUsed.length % CHECKPOINT_EVERY_N_TOOLS === 0) {
+          // Always save for the first few tool calls (CHECKPOINT_EARLY_THRESHOLD) so
+          // small tasks are checkpointed before the watchdog alarm fires.
+          const shouldCheckpoint = task.toolsUsed.length <= CHECKPOINT_EARLY_THRESHOLD
+            || task.toolsUsed.length % CHECKPOINT_EVERY_N_TOOLS === 0;
+          if (this.r2 && shouldCheckpoint) {
             await this.saveCheckpoint(
               this.r2,
               request.userId,
