@@ -506,14 +506,20 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       // Retry loop for rate-limited external APIs (429/503).
       // Retries the tool call natively with backoff instead of burning an LLM
       // iteration to process the error and re-request the same tool.
+      // Jitter is added to prevent thundering herd when parallel tool calls
+      // all hit 429 simultaneously and would otherwise retry in lockstep.
       const maxToolRetries = 2;
       let result = await executeTool(toolCall, toolContext);
 
       for (let retry = 0; retry < maxToolRetries; retry++) {
         if (!this.isRateLimitError(result.content)) break;
-        const delay = (retry + 1) * 3000; // 3s, 6s
+        const jitter = Math.floor(Math.random() * 2000); // 0-2s random jitter
+        const delay = (retry + 1) * 3000 + jitter; // 3-5s, 6-8s
         console.log(`[TaskProcessor] Tool ${toolName} rate-limited, retrying in ${delay}ms (${retry + 1}/${maxToolRetries})`);
+        // Keep heartbeat alive during backoff to prevent watchdog false alarms
+        this.lastHeartbeatMs = Date.now();
         await new Promise(r => setTimeout(r, delay));
+        this.lastHeartbeatMs = Date.now();
         result = await executeTool(toolCall, toolContext);
       }
 
@@ -1354,13 +1360,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           return; // Exit silently - cancel handler already notified user
         }
 
-        // Inject pending steering messages from /steer endpoint
+        // Inject pending steering messages from /steer endpoint as system messages.
+        // Using 'system' role gives them higher priority in context compression
+        // (45 + position vs 40 + position for user role), making them resistant
+        // to eviction during long task loops.
         if (this.steerMessages.length > 0) {
           const instructions = this.steerMessages.splice(0); // drain queue
           for (const instruction of instructions) {
             console.log(`[TaskProcessor] Injecting steer message: "${instruction.slice(0, 80)}"`);
             conversationMessages.push({
-              role: 'user',
+              role: 'system',
               content: `[USER OVERRIDE] ${instruction}`,
             });
           }
