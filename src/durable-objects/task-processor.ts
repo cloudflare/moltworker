@@ -219,6 +219,9 @@ interface TaskState {
   // Stall detection: track tool count at last resume to detect spinning
   toolCountAtLastResume?: number; // toolsUsed.length when last resume fired
   noProgressResumes?: number; // Consecutive resumes with no new tool calls
+  // Cross-resume tool signature dedup: track unique tool call signatures (name:argsHash)
+  // to detect when the model re-calls identical tools across resumes
+  toolSignatures?: string[];
   // Reasoning level override
   reasoningLevel?: ReasoningLevel;
   // Structured output format
@@ -336,6 +339,19 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   /** Pre-fetched file contents keyed by "owner/repo/path" (Phase 7B.3) */
   private prefetchPromises = new Map<string, Promise<string | null>>();
   private prefetchHits = 0;
+  /**
+   * In-memory execution lock.
+   * Prevents the alarm handler from spawning a concurrent processTask() when the
+   * original is still running (just slow on an await). Because DOs use cooperative
+   * multitasking, any `await` yields the thread — if the alarm fires during that
+   * yield and calls waitUntil(processTask()), two loops would interleave, corrupt
+   * caches, overwrite checkpoints, and cause runaway token usage.
+   *
+   * This flag is set at the start of processTask() and cleared in its finally block.
+   * If the DO is evicted/crashed, in-memory state is lost, so `isRunning` defaults
+   * to false — making it safe for the alarm to resume from checkpoint.
+   */
+  private isRunning = false;
 
   constructor(state: DurableObjectState, env: TaskProcessorEnv) {
     super(state, env);
@@ -532,6 +548,15 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       return;
     }
 
+    // In-memory execution lock: if processTask() is still running in this DO instance,
+    // the task is NOT stuck — it's just waiting on a slow external API call (await yields
+    // the thread in cooperative multitasking). Do NOT spawn a concurrent processTask().
+    if (this.isRunning) {
+      console.log('[TaskProcessor] processTask() still running (isRunning=true), rescheduling watchdog');
+      await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
+      return;
+    }
+
     // If task updated recently, it's still running - reschedule watchdog
     if (timeSinceUpdate < stuckThreshold) {
       console.log('[TaskProcessor] Task still active, rescheduling watchdog');
@@ -539,8 +564,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       return;
     }
 
-    // Task appears stuck - likely DO was terminated by Cloudflare
-    console.log('[TaskProcessor] Task appears stuck');
+    // Task appears stuck - DO was evicted/crashed (isRunning is false because
+    // in-memory state was lost), and lastUpdate is stale.
+    console.log('[TaskProcessor] Task appears stuck (isRunning=false, no recent updates)');
 
     // Delete stale status message if it exists
     if (task.telegramToken && task.statusMessageId) {
@@ -553,21 +579,36 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     // Check if auto-resume is enabled and under limit
     if (task.autoResume && resumeCount < maxResumes && task.telegramToken && task.openrouterKey) {
       // --- STALL DETECTION ---
-      // Check if the task made any progress (new tool calls) since the last resume.
-      // If no progress for MAX_NO_PROGRESS_RESUMES consecutive resumes, stop — the model is spinning.
+      // Two layers:
+      // 1. Raw tool count: no new tool calls at all → obvious stall
+      // 2. Tool signature dedup: new tool calls, but all are duplicates of previous
+      //    calls → model is spinning (re-calling get_weather("Prague") each resume)
       const toolCountNow = task.toolsUsed.length;
       const toolCountAtLastResume = task.toolCountAtLastResume ?? 0;
       const newTools = toolCountNow - toolCountAtLastResume;
       let noProgressResumes = task.noProgressResumes ?? 0;
 
-      if (newTools === 0 && resumeCount > 0) {
+      // Check for duplicate tool signatures across resumes
+      let allNewToolsDuplicate = false;
+      if (newTools > 0 && task.toolSignatures && task.toolSignatures.length > newTools) {
+        // Get the signatures added since last resume
+        const recentSigs = task.toolSignatures.slice(-newTools);
+        const priorSigs = new Set(task.toolSignatures.slice(0, -newTools));
+        allNewToolsDuplicate = recentSigs.every(sig => priorSigs.has(sig));
+        if (allNewToolsDuplicate) {
+          console.log(`[TaskProcessor] All ${newTools} new tool calls are duplicates of prior calls — counting as no progress`);
+        }
+      }
+
+      if ((newTools === 0 || allNewToolsDuplicate) && resumeCount > 0) {
         noProgressResumes++;
-        console.log(`[TaskProcessor] No new tools since last resume (stall ${noProgressResumes}/${MAX_NO_PROGRESS_RESUMES})`);
+        const reason = allNewToolsDuplicate ? 'duplicate tools' : 'no new tools';
+        console.log(`[TaskProcessor] No real progress since last resume: ${reason} (stall ${noProgressResumes}/${MAX_NO_PROGRESS_RESUMES})`);
 
         if (noProgressResumes >= MAX_NO_PROGRESS_RESUMES) {
           console.log(`[TaskProcessor] Task stalled: ${noProgressResumes} consecutive resumes with no progress`);
           task.status = 'failed';
-          task.error = `Task stalled: no new tool calls across ${noProgressResumes} auto-resumes (${task.iterations} iterations, ${toolCountNow} tools total). The model may not be capable of this task.`;
+          task.error = `Task stalled: no real progress across ${noProgressResumes} auto-resumes (${task.iterations} iterations, ${toolCountNow} tools total). The model may not be capable of this task.`;
           await this.doState.storage.put('task', task);
 
           if (task.telegramToken) {
@@ -959,6 +1000,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
    * Process the AI task with unlimited time
    */
   private async processTask(request: TaskRequest): Promise<void> {
+    // Execution lock: prevent concurrent processTask() from alarm handler
+    this.isRunning = true;
+
     // Check if this is a resume of the same task (used for cache + state preservation)
     const existingTask = await this.doState.storage.get<TaskState>('task');
     const isResumingSameTask = existingTask?.taskId === request.taskId;
@@ -1025,6 +1069,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       // Preserve stall detection state across resumes
       task.toolCountAtLastResume = existingTask.toolCountAtLastResume;
       task.noProgressResumes = existingTask.noProgressResumes;
+      // Preserve tool signatures for cross-resume duplicate detection
+      task.toolSignatures = existingTask.toolSignatures;
     }
     await this.doState.storage.put('task', task);
 
@@ -1638,6 +1684,18 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
           const toolNames = choice.message.tool_calls.map(tc => tc.function.name);
           task.toolsUsed.push(...toolNames);
+
+          // Track unique tool call signatures for cross-resume stall detection.
+          // If the model keeps calling get_weather("Prague") across resumes, the
+          // alarm handler can detect this as spinning even though tool count increases.
+          if (!task.toolSignatures) task.toolSignatures = [];
+          for (const tc of choice.message.tool_calls) {
+            task.toolSignatures.push(`${tc.function.name}:${tc.function.arguments}`);
+          }
+          // Cap at 100 to avoid unbounded growth in long tasks
+          if (task.toolSignatures.length > 100) {
+            task.toolSignatures = task.toolSignatures.slice(-100);
+          }
 
           // Determine execution strategy: parallel (safe read-only tools) vs sequential (mutation tools)
           const modelInfo = getModel(task.modelAlias);
@@ -2548,6 +2606,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           `❌ Task failed: ${task.error}`
         );
       }
+    } finally {
+      this.isRunning = false;
     }
   }
 
