@@ -2917,30 +2917,22 @@ export const TOOLS_WITHOUT_BROWSER: ToolDefinition[] = AVAILABLE_TOOLS.filter(
 );
 
 /**
- * Mutation tools that should only be available during the "work" phase.
- * During "plan" phase, only read-only/discovery tools are injected to
- * reduce token usage and prevent premature mutations.
- */
-const MUTATION_TOOLS = new Set([
-  'github_api',
-  'github_create_pr',
-  'cloudflare_api',
-]);
-
-/**
- * Get tools filtered by task phase.
- * - plan: Read-only discovery tools only (saves ~500 tokens per request)
- * - work: All DO-available tools including mutation tools
+ * Get tools for a given task phase.
+ *
+ * Previously this filtered mutation tools during the "plan" phase to save
+ * ~500 tokens. However, LLMs base their strategy on the tool schemas in
+ * context — hiding write tools during planning causes the model to generate
+ * massive text blocks instead of planning tool-based execution. Reverted to
+ * always returning the full tool set so the planner can reason about the
+ * complete action space.
+ *
  * - review: No tools (returns empty — caller should pass undefined)
+ * - all other phases: Full DO-available tools
  */
 export function getToolsForPhase(phase?: string): ToolDefinition[] {
   if (phase === 'review') {
     return [];
   }
-  if (phase === 'plan') {
-    return TOOLS_WITHOUT_BROWSER.filter(t => !MUTATION_TOOLS.has(t.function.name));
-  }
-  // work phase or no phase: all DO tools
   return TOOLS_WITHOUT_BROWSER;
 }
 
