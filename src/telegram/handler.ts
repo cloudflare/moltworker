@@ -921,6 +921,45 @@ export class TelegramHandler {
         }
         break;
 
+      case '/steer': {
+        // Inject a steering message into a running task
+        const steerInstruction = args.join(' ').trim();
+        if (!steerInstruction) {
+          await this.bot.sendMessage(chatId,
+            '🧭 *Steer a running task*\n\n' +
+            'Usage: `/steer <instruction>`\n' +
+            'Example: `/steer Use TypeScript instead of Python`\n\n' +
+            'The instruction is injected on the next iteration.',
+            { parseMode: 'Markdown' }
+          );
+          break;
+        }
+        if (this.taskProcessor) {
+          try {
+            const doId = this.taskProcessor.idFromName(userId);
+            const doStub = this.taskProcessor.get(doId);
+            const response = await fetchDOWithRetry(doStub, new Request('https://do/steer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ instruction: steerInstruction }),
+            }));
+            const result = await response.json() as { status: string; queued?: number; error?: string };
+            if (result.status === 'steered') {
+              await this.bot.sendMessage(chatId, `🧭 Steering message queued. The task will pick it up on its next iteration.`);
+            } else if (result.status === 'not_processing') {
+              await this.bot.sendMessage(chatId, 'No task is currently running.');
+            } else {
+              await this.bot.sendMessage(chatId, `Failed to steer: ${result.error || 'unknown'}`);
+            }
+          } catch (error) {
+            await this.bot.sendMessage(chatId, 'Failed to send steering message.');
+          }
+        } else {
+          await this.bot.sendMessage(chatId, 'Task processor not available.');
+        }
+        break;
+      }
+
       case '/cloudflare':
       case '/cf': {
         // Cloudflare API via Code Mode MCP

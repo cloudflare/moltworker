@@ -6,7 +6,7 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, parseSSEStream, type ChatMessage, type ResponseFormat } from '../openrouter/client';
-import { executeTool, AVAILABLE_TOOLS, githubReadFile, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER } from '../openrouter/tools';
+import { executeTool, AVAILABLE_TOOLS, githubReadFile, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER, getToolsForPhase } from '../openrouter/tools';
 import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, isAnthropicModel, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { injectCacheControl } from '../openrouter/prompt-cache';
@@ -371,6 +371,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
    * processTask's put() overwrites the cancellation status.
    */
   private isCancelled = false;
+  /**
+   * Pending steering messages injected by the /steer endpoint.
+   * Consumed at the top of each iteration in processTask().
+   */
+  private steerMessages: string[] = [];
 
   constructor(state: DurableObjectState, env: TaskProcessorEnv) {
     super(state, env);
@@ -435,6 +440,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     return !/^error(?: executing)?/i.test(content.trimStart());
   }
 
+  /** Check if a tool result indicates a rate limit (429/503) from an external API. */
+  private isRateLimitError(content: string): boolean {
+    return /\bHTTP[_ ](?:429|503)\b/i.test(content)
+      || /\b(?:rate.?limit|too many requests|service unavailable)\b/i.test(content);
+  }
+
   private async executeToolWithCache(
     toolCall: ToolCall,
     toolContext: ToolContext
@@ -492,7 +503,19 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
     // Execute the tool (wrapped in a promise for in-flight dedup)
     const executionPromise = (async (): Promise<{ tool_call_id: string; content: string }> => {
-      const result = await executeTool(toolCall, toolContext);
+      // Retry loop for rate-limited external APIs (429/503).
+      // Retries the tool call natively with backoff instead of burning an LLM
+      // iteration to process the error and re-request the same tool.
+      const maxToolRetries = 2;
+      let result = await executeTool(toolCall, toolContext);
+
+      for (let retry = 0; retry < maxToolRetries; retry++) {
+        if (!this.isRateLimitError(result.content)) break;
+        const delay = (retry + 1) * 3000; // 3s, 6s
+        console.log(`[TaskProcessor] Tool ${toolName} rate-limited, retrying in ${delay}ms (${retry + 1}/${maxToolRetries})`);
+        await new Promise(r => setTimeout(r, delay));
+        result = await executeTool(toolCall, toolContext);
+      }
 
       if (isCacheable && this.shouldCacheToolResult(result.content)) {
         this.toolResultCache.set(cacheKey, result.content);
@@ -1058,6 +1081,29 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       });
     }
 
+    if (url.pathname === '/steer' && request.method === 'POST') {
+      const task = await this.doState.storage.get<TaskState>('task');
+      if (!task || task.status !== 'processing') {
+        return new Response(JSON.stringify({ status: 'not_processing', current: task?.status }), {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const body = await request.json() as { instruction?: string };
+      const instruction = body.instruction?.trim();
+      if (!instruction) {
+        return new Response(JSON.stringify({ error: 'Missing instruction' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      // Queue the steering message in memory — processTask reads it on next iteration
+      this.steerMessages.push(instruction);
+      console.log(`[TaskProcessor] Steer message queued: "${instruction.slice(0, 80)}..."`);
+      return new Response(JSON.stringify({ status: 'steered', queued: this.steerMessages.length }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response('Not found', { status: 404 });
   }
 
@@ -1302,6 +1348,18 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           return; // Exit silently - cancel handler already notified user
         }
 
+        // Inject pending steering messages from /steer endpoint
+        if (this.steerMessages.length > 0) {
+          const instructions = this.steerMessages.splice(0); // drain queue
+          for (const instruction of instructions) {
+            console.log(`[TaskProcessor] Injecting steer message: "${instruction.slice(0, 80)}"`);
+            conversationMessages.push({
+              role: 'user',
+              content: `[USER OVERRIDE] ${instruction}`,
+            });
+          }
+        }
+
         // Defense-in-depth: check elapsed time cap in the main loop
         // The alarm handler also checks this, but this catches cases where
         // the task runs continuously without the alarm firing.
@@ -1436,8 +1494,8 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 {
                   maxTokens: 16384,
                   temperature: getTemperature(task.modelAlias),
-                  tools: useTools ? TOOLS_WITHOUT_BROWSER : undefined,
-                  toolChoice: useTools ? 'auto' : undefined,
+                  tools: useTools ? getToolsForPhase(task.phase) : undefined,
+                  toolChoice: useTools && task.phase !== 'review' ? 'auto' : undefined,
                   idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
                   reasoningLevel: request.reasoningLevel,
                   responseFormat: request.responseFormat,
@@ -1478,8 +1536,11 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 stream: true,
               };
               if (useTools) {
-                requestBody.tools = TOOLS_WITHOUT_BROWSER;
-                requestBody.tool_choice = 'auto';
+                const phaseTools = getToolsForPhase(task.phase);
+                if (phaseTools.length > 0) {
+                  requestBody.tools = phaseTools;
+                  requestBody.tool_choice = 'auto';
+                }
               }
               if (request.responseFormat) {
                 requestBody.response_format = request.responseFormat;
