@@ -30,10 +30,18 @@ export async function fetchDOWithRetry(
 ): Promise<Response> {
   let lastError: unknown;
 
+  // Read body into memory once upfront. After stub.fetch() consumes the body
+  // stream, `new Request(request)` would throw "Body has already been consumed"
+  // on subsequent attempts. Since DO payloads are small JSON, buffering is safe.
+  const bodyText = request.body ? await request.clone().text() : null;
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Clone the request for each retry (body may have been consumed)
-      const req = attempt === 0 ? request : new Request(request);
+      const req = new Request(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: bodyText,
+      });
       return await stub.fetch(req);
     } catch (err) {
       lastError = err;
