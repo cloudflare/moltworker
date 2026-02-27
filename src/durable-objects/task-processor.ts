@@ -283,11 +283,13 @@ interface TaskProcessorEnv {
 
 // Watchdog alarm interval (90 seconds)
 const WATCHDOG_INTERVAL_MS = 90000;
-// Max time without update before considering task stuck
-// Free models: 120s (streaming over OpenRouter regularly takes >60s per API call)
-// Paid models: 180s (may generate complex code, need more time)
-const STUCK_THRESHOLD_FREE_MS = 120000;
-const STUCK_THRESHOLD_PAID_MS = 180000;
+// Max time without update before considering task stuck.
+// Must be > max idle timeout (180s for 60K+ tokens) to avoid false positives.
+// Free models: 150s — covers 120s max idle timeout + 30s buffer
+// Paid models: 240s — covers 180s max idle timeout + 60s buffer (paid models
+//   handle larger contexts and deserve more patience)
+const STUCK_THRESHOLD_FREE_MS = 150000;
+const STUCK_THRESHOLD_PAID_MS = 240000;
 // Save checkpoint every N tools (more frequent = less lost progress on crash)
 const CHECKPOINT_EVERY_N_TOOLS = 3;
 // Always save checkpoint when total tools is at or below this threshold.
@@ -1514,16 +1516,26 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         } | null = null;
         let lastError: Error | null = null;
 
-        // Scale SSE idle timeout based on context size: large prompts (60K+ tokens)
-        // cause slower first-token latency, especially on DeepSeek V3.2 Direct.
+        // Scale SSE idle timeout based on context size AND model.
+        // Large prompts (60K+ tokens) cause slower first-token latency, especially on
+        // DeepSeek V3.2 through OpenRouter where routing adds overhead.
         // Default 45s is fine for <30K tokens but causes STREAM_READ_TIMEOUT on resumes
         // where checkpoint context is 60-80K tokens.
+        //
+        // Paid models get more generous timeouts because:
+        // 1. Users are paying — don't waste their money on premature timeouts
+        // 2. Paid models often handle larger/harder tasks with more context
+        // 3. DeepSeek V3.2 via OpenRouter routinely needs >120s for 60K+ tokens
         const estimatedCtx = this.estimateTokens(conversationMessages);
-        const idleTimeout = estimatedCtx > 60000 ? 120000
-          : estimatedCtx > 30000 ? 90000
-          : 45000;
+        const isPaid = getModel(task.modelAlias)?.isFree !== true;
+        const baseTimeout = estimatedCtx > 60000 ? 180000  // 3min for 60K+ tokens
+          : estimatedCtx > 30000 ? 120000                  // 2min for 30K-60K tokens
+          : estimatedCtx > 15000 ? 90000                   // 90s for 15K-30K tokens
+          : 45000;                                          // 45s default
+        // Paid models: minimum 90s even for small contexts (they handle complex tasks)
+        const idleTimeout = isPaid ? Math.max(baseTimeout, 90000) : baseTimeout;
         if (idleTimeout > 45000) {
-          console.log(`[TaskProcessor] Scaled idle timeout: ${idleTimeout / 1000}s (estimated ${estimatedCtx} tokens)`);
+          console.log(`[TaskProcessor] Scaled idle timeout: ${idleTimeout / 1000}s (estimated ${estimatedCtx} tokens, ${isPaid ? 'paid' : 'free'})`);
         }
 
         // 7B.1: Create speculative executor for this iteration
@@ -1557,11 +1569,12 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   responseFormat: request.responseFormat,
                   onProgress: () => {
                     progressCount++;
-                    // Update in-memory heartbeat every 10 chunks — alarm handler reads this
-                    // directly without a storage round-trip. No more storage.put() per-chunk.
-                    if (progressCount % 10 === 0) {
-                      this.lastHeartbeatMs = Date.now();
-                    }
+                    // Update in-memory heartbeat on every chunk — alarm handler reads this
+                    // directly without a storage round-trip. Previously updated every 10
+                    // chunks, but on slow models (DeepSeek V3.2) the gap between chunks can
+                    // be 5-15s, making 10-chunk intervals = 50-150s between heartbeats,
+                    // which exceeds the stuck threshold and triggers false auto-resumes.
+                    this.lastHeartbeatMs = Date.now();
                     // Log progress less frequently to avoid log spam
                     if (progressCount % 100 === 0) {
                       console.log(`[TaskProcessor] Streaming progress: ${progressCount} chunks received`);
@@ -1578,7 +1591,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               // Non-OpenRouter providers: use SSE streaming (same as OpenRouter)
               // This prevents DO termination during long Kimi/DeepSeek API calls
               const abortController = new AbortController();
-              const fetchTimeout = setTimeout(() => abortController.abort(), 90000); // 90s (was 120s)
+              // Fetch timeout must be >= idle timeout. The fetch timeout covers the
+              // initial connection + first chunk, then parseSSEStream's per-chunk
+              // idle timeout takes over. Using idleTimeout + 30s buffer.
+              const fetchTimeout = setTimeout(() => abortController.abort(), idleTimeout + 30000);
 
               // Inject cache_control on system messages for Anthropic models (prompt caching)
               const sanitized = sanitizeMessages(conversationMessages);
@@ -1622,7 +1638,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               } catch (fetchError) {
                 clearTimeout(fetchTimeout);
                 if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
-                  throw new Error(`${provider} API timeout (2 min) — connection aborted`);
+                  throw new Error(`${provider} API timeout (${Math.round((idleTimeout + 30000) / 1000)}s) — connection aborted`);
                 }
                 throw fetchError;
               }
@@ -1642,9 +1658,9 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               let directProgressCount = 0;
               result = await parseSSEStream(response.body, idleTimeout, () => {
                 directProgressCount++;
-                if (directProgressCount % 5 === 0) {
-                  this.lastHeartbeatMs = Date.now();
-                }
+                // Update heartbeat on every chunk (was every 5). Same reasoning as
+                // OpenRouter path — slow models can have 5-15s between chunks.
+                this.lastHeartbeatMs = Date.now();
                 if (directProgressCount % 100 === 0) {
                   console.log(`[TaskProcessor] ${provider} streaming: ${directProgressCount} chunks`);
                 }
