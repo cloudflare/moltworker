@@ -1226,10 +1226,30 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       cloudflareApiToken: request.cloudflareApiToken,
     };
 
+    // Pre-validate: if the requested model no longer exists, switch to a free model
+    // instead of waiting for a 404 from OpenRouter (which wastes an API round-trip).
+    if (!getModel(task.modelAlias)) {
+      const freeAlternatives = getFreeToolModels();
+      if (freeAlternatives.length > 0) {
+        const oldAlias = task.modelAlias;
+        task.modelAlias = freeAlternatives[0];
+        await this.doState.storage.put('task', task);
+        console.log(`[TaskProcessor] Model /${oldAlias} no longer available, pre-switching to /${task.modelAlias}`);
+        if (statusMessageId) {
+          try {
+            await this.editTelegramMessage(
+              request.telegramToken, request.chatId, statusMessageId,
+              `⚠️ /${oldAlias} unavailable. Using /${task.modelAlias} (free)`
+            );
+          } catch { /* non-fatal */ }
+        }
+      }
+    }
+
     // Capability-aware free model rotation: prioritize models matching the task type
     const freeModels = getFreeToolModels();
     const taskCategory = detectTaskCategory(request.messages);
-    const rotationOrder = buildRotationOrder(request.modelAlias, freeModels, taskCategory);
+    const rotationOrder = buildRotationOrder(task.modelAlias, freeModels, taskCategory);
     let rotationIndex = 0;
     const MAX_FREE_ROTATIONS = rotationOrder.length;
     console.log(`[TaskProcessor] Task category: ${taskCategory}, rotation order: ${rotationOrder.join(', ')} (${MAX_FREE_ROTATIONS} candidates)`);

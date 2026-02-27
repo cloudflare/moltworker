@@ -2313,10 +2313,24 @@ export class TelegramHandler {
       modelAlias = DEFAULT_MODEL;
     }
 
-    // If user's model was removed/blocked/sunset, fall back to default
+    // If user's model was removed/blocked/sunset, fall back to best free model (not /auto)
     if (modelAlias !== DEFAULT_MODEL && !getModel(modelAlias)) {
-      await this.bot.sendMessage(chatId, `⚠️ Model /${modelAlias} is no longer available. Switching to /${DEFAULT_MODEL}.\nRun /models to pick a new one.`);
-      modelAlias = DEFAULT_MODEL;
+      const unavailableAlias = modelAlias;
+      // Try to find a free model with tools instead of expensive /auto
+      const freeModels = getFreeToolModels();
+      if (freeModels.length > 0) {
+        modelAlias = freeModels[0]; // Best free model (sorted by context size)
+        await this.bot.sendMessage(
+          chatId,
+          `⚠️ Model /${unavailableAlias} is no longer available. Switching to /${modelAlias} (free).\nRun /pick to choose a different model.`
+        );
+      } else {
+        modelAlias = DEFAULT_MODEL;
+        await this.bot.sendMessage(
+          chatId,
+          `⚠️ Model /${unavailableAlias} is no longer available. No free models found — switching to /${DEFAULT_MODEL}.\nRun /pick to choose a model.`
+        );
+      }
       await this.storage.setUserModel(userId, modelAlias);
     }
     // Classify task complexity to skip expensive R2 reads for trivial queries (Phase 7A.2)
