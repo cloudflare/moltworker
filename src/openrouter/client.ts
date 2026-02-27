@@ -677,8 +677,10 @@ export class OpenRouterClient {
 
     const controller = new AbortController();
 
-    // Set a timeout for the initial fetch (in case connection hangs)
-    const fetchTimeout = setTimeout(() => controller.abort(), 60000);
+    // Set a timeout for the initial fetch (in case connection hangs).
+    // Must be >= idle timeout so slow first-token latency doesn't abort the fetch
+    // before parseSSEStream even starts.
+    const fetchTimeout = setTimeout(() => controller.abort(), Math.max(idleTimeoutMs, 60000) + 30000);
 
     try {
       // Add unique query param to bypass stale pooled connections
@@ -729,7 +731,7 @@ export class OpenRouterClient {
     } catch (err: unknown) {
       clearTimeout(fetchTimeout);
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`Streaming connection timeout (no response after 60s) - model: ${modelId}`);
+        throw new Error(`Streaming connection timeout (no response after ${Math.round((Math.max(idleTimeoutMs, 60000) + 30000) / 1000)}s) - model: ${modelId}`);
       }
       throw err;
     }
