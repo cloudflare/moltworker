@@ -7,6 +7,11 @@ import { createAcontextClient } from '../acontext/client';
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
 
+/** Build --token arg for openclaw CLI commands (required when gateway uses token auth) */
+function tokenArg(env: { MOLTBOT_GATEWAY_TOKEN?: string }): string {
+  return env.MOLTBOT_GATEWAY_TOKEN ? ` --token ${env.MOLTBOT_GATEWAY_TOKEN}` : '';
+}
+
 /**
  * API routes
  * - /api/admin/* - Protected admin API routes (Cloudflare Access required)
@@ -33,7 +38,7 @@ adminApi.get('/devices', async (c) => {
 
     // Run OpenClaw CLI to list devices
     // Must specify --url to connect to the gateway running in the same container
-    const proc = await sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789');
+    const proc = await sandbox.startProcess(`openclaw devices list --json --url ws://localhost:18789${tokenArg(c.env)}`);
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -85,7 +90,7 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     await ensureMoltbotGateway(sandbox, c.env);
 
     // Run OpenClaw CLI to approve the device
-    const proc = await sandbox.startProcess(`openclaw devices approve ${requestId} --url ws://localhost:18789`);
+    const proc = await sandbox.startProcess(`openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg(c.env)}`);
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
@@ -117,7 +122,7 @@ adminApi.post('/devices/approve-all', async (c) => {
     await ensureMoltbotGateway(sandbox, c.env);
 
     // First, get the list of pending devices
-    const listProc = await sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789');
+    const listProc = await sandbox.startProcess(`openclaw devices list --json --url ws://localhost:18789${tokenArg(c.env)}`);
     await waitForProcess(listProc, CLI_TIMEOUT_MS);
 
     const listLogs = await listProc.getLogs();
@@ -144,7 +149,7 @@ adminApi.post('/devices/approve-all', async (c) => {
 
     for (const device of pending) {
       try {
-        const approveProc = await sandbox.startProcess(`openclaw devices approve ${device.requestId} --url ws://localhost:18789`);
+        const approveProc = await sandbox.startProcess(`openclaw devices approve ${device.requestId} --url ws://localhost:18789${tokenArg(c.env)}`);
         await waitForProcess(approveProc, CLI_TIMEOUT_MS);
 
         const approveLogs = await approveProc.getLogs();
