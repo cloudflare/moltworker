@@ -18,6 +18,7 @@ import type {
   OpenRouterApiResponse,
   SyncCatalog,
   SyncResult,
+  ScoredModel,
   DeprecationEntry,
 } from './types';
 import {
@@ -105,6 +106,61 @@ function buildSpecialty(
   return parts.join(' ');
 }
 
+// === Model Scoring (heuristic ranking for top-N recommendations) ===
+
+/** Flagship providers and their recognition scores (0-30). */
+const PROVIDER_SCORES: Record<string, number> = {
+  'anthropic': 30, 'openai': 30, 'google': 28,
+  'meta-llama': 25, 'deepseek': 24, 'qwen': 22,
+  'mistralai': 20, 'x-ai': 18, 'microsoft': 16,
+  'nvidia': 14, 'cohere': 12, 'arcee-ai': 11,
+  'zhipuai': 10, 'z-ai': 10, 'stepfun': 8,
+};
+
+/**
+ * Score a model for ranking in top-N recommendations.
+ * Higher score = more likely to be interesting/useful to the user.
+ * Max ~100 points across 5 dimensions.
+ */
+function scoreModel(
+  model: ModelInfo,
+  raw: OpenRouterApiModel,
+): number {
+  let score = 0;
+
+  // 1. Provider reputation (0-30)
+  const provider = raw.id.split('/')[0];
+  score += PROVIDER_SCORES[provider] || 0;
+
+  // 2. Capability breadth (0-30)
+  if (model.supportsTools) score += 12;
+  if (model.supportsVision) score += 8;
+  if (model.reasoning && model.reasoning !== 'none') score += 10;
+
+  // 3. Context window (0-15)
+  const ctx = raw.context_length;
+  if (ctx >= 200_000) score += 15;
+  else if (ctx >= 128_000) score += 12;
+  else if (ctx >= 64_000) score += 8;
+  else if (ctx >= 32_000) score += 4;
+
+  // 4. Cost efficiency (0-15)
+  const compCost = Number(raw.pricing?.completion || '0') * 1_000_000;
+  if (compCost === 0) score += 15;       // Free
+  else if (compCost < 1) score += 12;    // Under $1/M output
+  else if (compCost < 5) score += 8;     // Under $5/M
+  else if (compCost < 15) score += 4;    // Under $15/M
+
+  // 5. Recency indicators (0-10)
+  const id = raw.id.toLowerCase();
+  if (/2026|v[4-9]\b|4\.\d|5\.\d|-latest/.test(id)) score += 10;
+  else if (/2025|v3\b|3\.\d/.test(id)) score += 5;
+
+  return score;
+}
+
+const TOP_MODELS_COUNT = 20;
+
 /**
  * Update deprecation entries based on which models are currently in the API.
  */
@@ -186,9 +242,10 @@ export async function runFullSync(
     const existingAliases = collectExistingAliases(MODELS, dynamicModels);
     const aliasMap = { ...previousAliasMap };
 
-    // 5. Process each model
+    // 5. Process each model (+ score for top-N recommendations)
     const syncedModels: Record<string, ModelInfo> = {};
     const currentApiIds = new Set<string>();
+    const scoredEntries: Array<{ model: ModelInfo; raw: OpenRouterApiModel; score: number }> = [];
 
     for (const raw of usableModels) {
       currentApiIds.add(raw.id);
@@ -210,6 +267,11 @@ export async function runFullSync(
       // Normalize to ModelInfo
       const modelInfo = normalizeModel(raw, alias, caps);
       syncedModels[alias] = modelInfo;
+
+      // Score for top-N (skip image-gen models from recommendations)
+      if (!caps.isImageGen.value) {
+        scoredEntries.push({ model: modelInfo, raw, score: scoreModel(modelInfo, raw) });
+      }
     }
 
     // 6. Update deprecation lifecycle
@@ -274,7 +336,26 @@ export async function runFullSync(
     const removedModels = Object.values(deprecations).filter(d => d.state === 'removed').length;
     const staleModels = Object.values(deprecations).filter(d => d.state === 'stale' || d.state === 'deprecated').length;
 
-    console.log(`[ModelSync] Sync complete: ${totalFetched} fetched, ${currentSyncedCount} synced, ${newModels} new, ${staleModels} stale, ${removedModels} removed`);
+    // 11. Build top-N model recommendations by heuristic score
+    const topModels: ScoredModel[] = scoredEntries
+      .filter(e => syncedModels[e.model.alias]) // Only include models still in catalog (not removed)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, TOP_MODELS_COUNT)
+      .map(e => ({
+        alias: e.model.alias,
+        name: e.model.name,
+        modelId: e.model.id,
+        score: e.score,
+        contextK: Math.round((e.raw.context_length || 0) / 1024),
+        tools: !!e.model.supportsTools,
+        vision: !!e.model.supportsVision,
+        reasoning: !!e.model.reasoning && e.model.reasoning !== 'none',
+        isFree: !!e.model.isFree,
+        cost: e.model.cost,
+        category: categorizeModel(e.raw.id, e.raw.name, !!e.model.reasoning && e.model.reasoning !== 'none'),
+      }));
+
+    console.log(`[ModelSync] Sync complete: ${totalFetched} fetched, ${currentSyncedCount} synced, ${newModels} new, ${staleModels} stale, ${removedModels} removed, top ${topModels.length} scored`);
 
     return {
       success: true,
@@ -284,6 +365,7 @@ export async function runFullSync(
       removedModels,
       staleModels,
       durationMs: Date.now() - startTime,
+      topModels,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);

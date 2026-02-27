@@ -83,6 +83,22 @@ export const SYNC_CATALOG_VERSION = 1;
 export const SYNC_CATALOG_R2_KEY = 'sync/full-catalog.json';
 export const SYNC_CATALOG_TMP_KEY = 'sync/full-catalog.tmp.json';
 
+// === Scored Model (for top-N recommendations after sync) ===
+
+export interface ScoredModel {
+  alias: string;
+  name: string;
+  modelId: string;
+  score: number;
+  contextK: number;
+  tools: boolean;
+  vision: boolean;
+  reasoning: boolean;
+  isFree: boolean;
+  cost: string;
+  category: string;
+}
+
 // === Sync Result ===
 
 export interface SyncResult {
@@ -94,4 +110,5 @@ export interface SyncResult {
   staleModels: number;
   error?: string;
   durationMs: number;
+  topModels?: ScoredModel[];
 }
