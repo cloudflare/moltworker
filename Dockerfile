@@ -37,7 +37,7 @@ RUN mkdir -p /root/repos
 RUN npm install -g pnpm
 
 # Install OpenClaw (formerly clawdbot/moltbot)
-RUN npm install -g openclaw@2026.2.6-3 \
+RUN npm install -g openclaw@2026.2.26 \
     && openclaw --version
 
 # Create OpenClaw directories
@@ -46,7 +46,7 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
-# Build cache bust: 2026-02-24-openclaw-upgrade
+# Build cache bust: 2026-02-27-openclaw-2026.2.26
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 
