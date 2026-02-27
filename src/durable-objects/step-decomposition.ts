@@ -52,6 +52,8 @@ Rules:
 - Each step has "action" (read/edit/create/run/verify/search), "files" (array of file paths this step needs), and "description" (what it does)
 - List ALL file paths you expect to read or modify
 - Keep steps concrete and ordered — 3-8 steps is ideal
+- BUDGET: Each github_read_file call costs ~7K tokens. Plan to read at most 5-7 files total. Use github_list_files first (free overview), then read only the files you truly need
+- For repo overview/summary queries: start with github_list_files on root (includes README outline and repo metadata), then read only 3-5 key source files — do NOT read lock files, configs, or binaries
 - After outputting the JSON plan, proceed immediately with execution`;
 
 // ─── Parser ─────────────────────────────────────────────────────────────────

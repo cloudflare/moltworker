@@ -94,7 +94,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_read_file',
-      description: 'Read a file from a GitHub repository. Returns content for source code files (truncated at 30KB). Binary files (images, fonts, etc.) and generated files (package-lock.json, yarn.lock) return metadata only — do not read these for summarization. Authentication is handled automatically.',
+      description: 'Read a file from a GitHub repository. EXPENSIVE: each call uses ~7K tokens of context. Only read files you truly need — prefer github_list_files first for overview. Returns content for source code files (truncated at 30KB). Binary files (images, fonts, etc.) and generated files (package-lock.json, yarn.lock) return metadata only. Authentication is handled automatically.',
       parameters: {
         type: 'object',
         properties: {
@@ -123,7 +123,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
     type: 'function',
     function: {
       name: 'github_list_files',
-      description: 'List files in a directory of a GitHub repository. Authentication is handled automatically.',
+      description: 'List files in a directory of a GitHub repository. When listing the root directory, also returns repo metadata (description, language, stars) and README headings for a quick overview — use this FIRST before reading individual files. Authentication is handled automatically.',
       parameters: {
         type: 'object',
         properties: {
@@ -694,7 +694,9 @@ export async function githubReadFile(
 }
 
 /**
- * List files in a GitHub directory
+ * List files in a GitHub directory.
+ * When listing the root directory (path is empty), also fetches repo metadata
+ * and README headings to provide a quick overview without reading files individually.
  */
 async function githubListFiles(
   owner: string,
@@ -703,8 +705,6 @@ async function githubListFiles(
   ref?: string,
   token?: string
 ): Promise<string> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}${ref ? `?ref=${ref}` : ''}`;
-
   const headers: Record<string, string> = {
     'User-Agent': 'MoltworkerBot/1.0',
     'Accept': 'application/vnd.github.v3+json',
@@ -714,6 +714,7 @@ async function githubListFiles(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}${ref ? `?ref=${ref}` : ''}`;
   const response = await fetch(url, { headers });
 
   if (!response.ok) {
@@ -733,7 +734,86 @@ async function githubListFiles(
     return `${icon} ${item.path}${size}`;
   }).join('\n');
 
-  return `Files in ${owner}/${repo}/${path || '(root)'}:\n\n${listing}`;
+  let result = `Files in ${owner}/${repo}/${path || '(root)'}:\n\n${listing}`;
+
+  // For root directory listings, append repo metadata + README outline
+  // This gives the model enough context to avoid reading files unnecessarily
+  if (!path || path === '' || path === '/') {
+    const overview = await fetchRepoOverview(owner, repo, ref, headers);
+    if (overview) {
+      result += '\n\n' + overview;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Fetch repo metadata and README headings for a quick overview.
+ * Returns a formatted string, or null if fetches fail (non-fatal).
+ */
+async function fetchRepoOverview(
+  owner: string,
+  repo: string,
+  ref: string | undefined,
+  headers: Record<string, string>,
+): Promise<string | null> {
+  const parts: string[] = [];
+
+  // Fetch repo metadata (description, language, stars, topics) — one lightweight API call
+  try {
+    const repoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+    if (repoResp.ok) {
+      const repoData = await repoResp.json() as {
+        description?: string;
+        language?: string;
+        stargazers_count?: number;
+        topics?: string[];
+        default_branch?: string;
+      };
+      const meta: string[] = [];
+      if (repoData.description) meta.push(`Description: ${repoData.description}`);
+      if (repoData.language) meta.push(`Primary language: ${repoData.language}`);
+      if (repoData.stargazers_count !== undefined) meta.push(`Stars: ${repoData.stargazers_count}`);
+      if (repoData.topics && repoData.topics.length > 0) meta.push(`Topics: ${repoData.topics.join(', ')}`);
+      if (meta.length > 0) {
+        parts.push('--- Repository Overview ---\n' + meta.join('\n'));
+      }
+    }
+  } catch {
+    // Non-fatal — skip metadata
+  }
+
+  // Fetch README and extract headings (structure map without reading full content)
+  try {
+    const readmeUrl = `https://api.github.com/repos/${owner}/${repo}/readme${ref ? `?ref=${ref}` : ''}`;
+    const readmeResp = await fetch(readmeUrl, { headers });
+    if (readmeResp.ok) {
+      const readmeData = await readmeResp.json() as { content?: string; encoding?: string; size?: number };
+      if (readmeData.content) {
+        const content = atob(readmeData.content.replace(/\n/g, ''));
+        // Extract markdown headings as a structural outline
+        const headings = content.split('\n')
+          .filter(line => /^#{1,3}\s/.test(line))
+          .slice(0, 20) // Cap at 20 headings
+          .join('\n');
+        if (headings) {
+          parts.push('--- README Outline ---\n' + headings);
+        }
+        // Extract any "key files" or "project structure" section for direct hints
+        const keyFilesMatch = content.match(/(?:^|\n)(#{1,3}\s*(?:Key Files?|Project Structure|Architecture|File Structure|Important Files?).*?)(?=\n#{1,3}\s|\n*$)/is);
+        if (keyFilesMatch) {
+          const section = keyFilesMatch[1].trim();
+          // Limit to 2KB to avoid context bloat
+          parts.push('--- Key Files Section from README ---\n' + section.slice(0, 2000));
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — skip README
+  }
+
+  return parts.length > 0 ? parts.join('\n\n') : null;
 }
 
 /**

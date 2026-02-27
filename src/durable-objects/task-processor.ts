@@ -51,7 +51,10 @@ function isSimpleQuery(messages: ChatMessage[]): boolean {
   if (trimmed.length < 150) {
     // Check for multi-step coding indicators
     const complexPatterns = /\b(implement|refactor|create .+ (app|project|service)|build .+ (system|feature)|write .+ (test|code)|debug|fix .+ (bug|issue)|review .+ (code|pr)|analyze .+ (codebase|repo))\b/i;
-    if (!complexPatterns.test(trimmed)) {
+    // Repo-analysis queries require reading multiple files — must go through planning phase
+    // to pre-declare which files to read instead of reactive discovery loops
+    const repoAnalysisPatterns = /\b(top \d+ .*(files?|modules?|components?)|most important .*(files?|parts?)|summarize .*(repo|codebase|project)|overview .*(repo|codebase|project)|architecture|codebase structure|key files?)\b/i;
+    if (!complexPatterns.test(trimmed) && !repoAnalysisPatterns.test(trimmed)) {
       return true;
     }
   }
