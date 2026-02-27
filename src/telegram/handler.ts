@@ -50,6 +50,10 @@ import {
   blockModels,
   unblockModels,
   getBlockedAliases,
+  applyModelOverrides,
+  removeModelOverride,
+  getAllModelOverrides,
+  isCuratedModel,
   detectToolIntent,
   getFreeToolModels,
   formatOrchestraModelRecs,
@@ -575,6 +579,18 @@ export class TelegramHandler {
       }
     } catch (error) {
       console.error('[Telegram] Failed to load auto-synced models from R2:', error);
+    }
+
+    // Load model overrides (patches to curated models, e.g. from /modelupdate).
+    // Must run AFTER dynamic models since applyModelOverrides writes to DYNAMIC_MODELS.
+    try {
+      const overrideData = await this.storage.loadModelOverrides();
+      if (overrideData && Object.keys(overrideData.overrides).length > 0) {
+        const applied = applyModelOverrides(overrideData.overrides);
+        console.log(`[Telegram] Applied ${applied} model overrides from R2`);
+      }
+    } catch (error) {
+      console.error('[Telegram] Failed to load model overrides from R2:', error);
     }
   }
 
@@ -1191,6 +1207,10 @@ export class TelegramHandler {
         await this.bot.sendMessage(chatId, '🗑️ Dynamic models and blocked list cleared.\nOnly static catalog models are available now.');
         break;
       }
+
+      case '/modelupdate':
+        await this.handleModelUpdateCommand(chatId, args);
+        break;
 
       case '/test': {
         // Run smoke tests against TaskProcessor DO
@@ -2751,6 +2771,11 @@ export class TelegramHandler {
         await this.handleStartCallback(parts, chatId);
         break;
 
+      case 'mu':
+        // Model update from /synccheck: mu:cost:alias:newcost or mu:allcost
+        await this.handleModelUpdateCallback(parts, chatId, query);
+        break;
+
       default:
         console.log('[Telegram] Unknown callback action:', action);
     }
@@ -3247,9 +3272,231 @@ export class TelegramHandler {
       const { runSyncCheck, formatSyncCheckMessage } = await import('../openrouter/model-sync/synccheck');
       const result = await runSyncCheck(this.openrouterKey);
       const message = formatSyncCheckMessage(result);
-      await this.bot.sendMessage(chatId, message);
+
+      // Build actionable buttons for price changes and missing models
+      const priceChanged = result.curatedChecks.filter(c => c.status === 'price_changed');
+      const buttons: InlineKeyboardButton[][] = [];
+
+      if (priceChanged.length > 0) {
+        // Offer to update cost for each changed model
+        for (const m of priceChanged.slice(0, 5)) { // Cap at 5 buttons
+          buttons.push([{
+            text: `💰 Update /${m.alias} cost → ${m.liveCost}`,
+            callback_data: `mu:cost:${m.alias}:${m.liveCost}`,
+          }]);
+        }
+      }
+
+      // Offer to apply ALL price updates at once if multiple
+      if (priceChanged.length > 1) {
+        buttons.push([{
+          text: `⚡ Apply all ${priceChanged.length} price updates`,
+          callback_data: 'mu:allcost',
+        }]);
+      }
+
+      if (buttons.length > 0) {
+        await this.bot.sendMessageWithButtons(chatId, message, buttons);
+      } else {
+        await this.bot.sendMessage(chatId, message);
+      }
     } catch (error) {
       await this.bot.sendMessage(chatId, `❌ Sync check error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Handle /modelupdate command — patch curated model fields without code deploy.
+   *
+   * Usage:
+   *   /modelupdate <alias> <key>=<value> [key=value ...]
+   *   /modelupdate sonnet id=anthropic/claude-sonnet-4.6 name="Claude Sonnet 4.6"
+   *   /modelupdate sonnet revert   (remove override, revert to static catalog)
+   *   /modelupdate list             (show all active overrides)
+   *
+   * Allowed keys: id, name, cost, score, specialty, maxContext, supportsTools,
+   *               supportsVision, parallelCalls, structuredOutput, reasoning
+   */
+  private async handleModelUpdateCommand(chatId: number, args: string[]): Promise<void> {
+    if (args.length === 0) {
+      await this.bot.sendMessage(chatId, `🔧 /modelupdate — Patch curated models without deploy
+
+Usage:
+  /modelupdate <alias> <key>=<value> ...
+  /modelupdate <alias> revert
+  /modelupdate list
+
+Examples:
+  /modelupdate sonnet id=anthropic/claude-sonnet-4.6 name="Claude Sonnet 4.6"
+  /modelupdate sonnet cost=$3/$15 score="81% SWE, 200K ctx"
+  /modelupdate opus45 revert
+
+Allowed keys: id, name, cost, score, specialty, maxContext, supportsTools, supportsVision, parallelCalls, structuredOutput, reasoning`);
+      return;
+    }
+
+    // /modelupdate list — show active overrides
+    if (args[0] === 'list') {
+      const overrides = getAllModelOverrides();
+      if (Object.keys(overrides).length === 0) {
+        await this.bot.sendMessage(chatId, '📋 No active model overrides. All models using static catalog values.');
+        return;
+      }
+      const lines = ['📋 Active model overrides:\n'];
+      for (const [alias, patch] of Object.entries(overrides)) {
+        const base = MODELS[alias];
+        const fields = Object.entries(patch)
+          .map(([k, v]) => `  ${k}: ${(base as unknown as Record<string, unknown>)?.[k]} → ${v}`)
+          .join('\n');
+        lines.push(`/${alias}:\n${fields}`);
+      }
+      await this.bot.sendMessage(chatId, lines.join('\n\n'));
+      return;
+    }
+
+    const alias = args[0].replace(/^\//, '').toLowerCase();
+
+    // Validate alias exists in static catalog
+    if (!isCuratedModel(alias)) {
+      await this.bot.sendMessage(chatId, `❌ /${alias} is not a curated model. Only static catalog models can be overridden.`);
+      return;
+    }
+
+    // /modelupdate <alias> revert — remove override
+    if (args[1] === 'revert') {
+      const removed = removeModelOverride(alias);
+      if (removed) {
+        // Persist to R2
+        const overrides = getAllModelOverrides();
+        await this.storage.saveModelOverrides(overrides);
+        const base = MODELS[alias];
+        await this.bot.sendMessage(chatId, `✅ /${alias} reverted to static catalog.\nModel ID: ${base.id}\nName: ${base.name}`);
+      } else {
+        await this.bot.sendMessage(chatId, `ℹ️ /${alias} has no override — already using static catalog.`);
+      }
+      return;
+    }
+
+    // Parse key=value pairs
+    const ALLOWED_STRING_KEYS = new Set(['id', 'name', 'cost', 'score', 'specialty', 'reasoning']);
+    const ALLOWED_NUMBER_KEYS = new Set(['maxContext']);
+    const ALLOWED_BOOL_KEYS = new Set(['supportsTools', 'supportsVision', 'parallelCalls', 'structuredOutput']);
+
+    const patch: Record<string, unknown> = {};
+    const rawPairs = args.slice(1).join(' ');
+
+    // Parse key=value and key="quoted value" pairs
+    const pairRegex = /(\w+)=("(?:[^"\\]|\\.)*"|[^\s]+)/g;
+    let match;
+    while ((match = pairRegex.exec(rawPairs)) !== null) {
+      const key = match[1];
+      let value: string = match[2];
+      // Strip surrounding quotes
+      if (value.startsWith('"') && value.endsWith('"')) {
+        value = value.slice(1, -1).replace(/\\"/g, '"');
+      }
+
+      if (ALLOWED_STRING_KEYS.has(key)) {
+        patch[key] = value;
+      } else if (ALLOWED_NUMBER_KEYS.has(key)) {
+        const num = parseInt(value, 10);
+        if (isNaN(num)) {
+          await this.bot.sendMessage(chatId, `❌ Invalid number for ${key}: ${value}`);
+          return;
+        }
+        patch[key] = num;
+      } else if (ALLOWED_BOOL_KEYS.has(key)) {
+        patch[key] = value === 'true' || value === '1' || value === 'yes';
+      } else {
+        await this.bot.sendMessage(chatId, `❌ Unknown key: ${key}\nAllowed: ${[...ALLOWED_STRING_KEYS, ...ALLOWED_NUMBER_KEYS, ...ALLOWED_BOOL_KEYS].join(', ')}`);
+        return;
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      await this.bot.sendMessage(chatId, '❌ No valid key=value pairs found.\nExample: /modelupdate sonnet id=anthropic/claude-sonnet-4.6');
+      return;
+    }
+
+    // Apply the override
+    const applied = applyModelOverrides({ [alias]: patch as Partial<ModelInfo> });
+    if (applied === 0) {
+      await this.bot.sendMessage(chatId, `❌ Failed to apply override for /${alias}.`);
+      return;
+    }
+
+    // Persist to R2
+    const allOverrides = getAllModelOverrides();
+    await this.storage.saveModelOverrides(allOverrides);
+
+    // Show result
+    const updatedModel = getModel(alias);
+    const base = MODELS[alias];
+    const changes = Object.entries(patch)
+      .map(([k, v]) => `  ${k}: ${(base as unknown as Record<string, unknown>)?.[k]} → ${v}`)
+      .join('\n');
+
+    await this.bot.sendMessage(chatId,
+      `✅ /${alias} updated:\n${changes}\n\nNow: ${updatedModel?.name} (${updatedModel?.id})\nCost: ${updatedModel?.cost}\n\n💡 Use /modelupdate ${alias} revert to undo.`
+    );
+  }
+
+  /**
+   * Handle model update button callbacks from /synccheck actionable results.
+   * Callback data formats:
+   *   mu:cost:<alias>:<newCost>  — update cost for single model
+   *   mu:allcost                 — apply all price updates (re-runs synccheck)
+   */
+  private async handleModelUpdateCallback(
+    parts: string[],
+    chatId: number,
+    query: TelegramCallbackQuery
+  ): Promise<void> {
+    const subAction = parts[1];
+
+    if (subAction === 'cost' && parts[2] && parts[3]) {
+      const alias = parts[2];
+      const newCost = parts.slice(3).join(':'); // Cost may contain $
+      if (!isCuratedModel(alias)) {
+        await this.bot.sendMessage(chatId, `❌ /${alias} is not a curated model.`);
+        return;
+      }
+      applyModelOverrides({ [alias]: { cost: newCost } });
+      const allOverrides = getAllModelOverrides();
+      await this.storage.saveModelOverrides(allOverrides);
+      // Remove buttons from message
+      if (query.message) {
+        await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+      }
+      await this.bot.sendMessage(chatId, `✅ /${alias} cost updated → ${newCost}`);
+    } else if (subAction === 'allcost') {
+      // Re-run synccheck and apply all price changes
+      try {
+        const { runSyncCheck } = await import('../openrouter/model-sync/synccheck');
+        const result = await runSyncCheck(this.openrouterKey);
+        const priceChanged = result.curatedChecks.filter(c => c.status === 'price_changed');
+        if (priceChanged.length === 0) {
+          await this.bot.sendMessage(chatId, 'ℹ️ No price changes found (already up to date).');
+          return;
+        }
+        const overridePatches: Record<string, Partial<ModelInfo>> = {};
+        for (const m of priceChanged) {
+          if (m.liveCost) {
+            overridePatches[m.alias] = { cost: m.liveCost };
+          }
+        }
+        applyModelOverrides(overridePatches);
+        const allOverrides = getAllModelOverrides();
+        await this.storage.saveModelOverrides(allOverrides);
+        // Remove buttons from message
+        if (query.message) {
+          await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+        }
+        const lines = priceChanged.map(m => `  /${m.alias}: ${m.curatedCost} → ${m.liveCost}`);
+        await this.bot.sendMessage(chatId, `✅ Updated ${priceChanged.length} model prices:\n${lines.join('\n')}`);
+      } catch (error) {
+        await this.bot.sendMessage(chatId, `❌ Failed to apply: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
@@ -3668,7 +3915,9 @@ Direct: /dcode /dreason /q3coder /kimidirect
 All:   /models for full list
 /syncmodels — Fetch latest free models (interactive picker)
 /syncall — Full catalog sync from OpenRouter (all models)
-/synccheck — Check curated models: missing, price changes, new releases
+/synccheck — Check for updates (actionable: apply price changes)
+/modelupdate <alias> key=val — Patch a model without deploy
+/modelupdate list — Show active overrides
 
 ━━━ Cloudflare API ━━━
 /cloudflare search <query> — Search CF API endpoints
