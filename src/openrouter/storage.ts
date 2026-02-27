@@ -375,6 +375,7 @@ export class UserStorage {
   // === Dynamic Models (synced from OpenRouter API) ===
 
   private static readonly DYNAMIC_MODELS_KEY = 'sync/dynamic-models.json';
+  private static readonly MODEL_OVERRIDES_KEY = 'sync/model-overrides.json';
   private static readonly SYNC_SESSION_PREFIX = 'sync/session-';
 
   /**
@@ -460,6 +461,35 @@ export class UserStorage {
         meta: { syncedAt: number; totalFetched: number };
       };
       return { models: data.models, blocked: data.blocked || [], meta: data.meta };
+    } catch {
+      return null;
+    }
+  }
+
+  // === Model Overrides (per-alias patches to static catalog) ===
+
+  /**
+   * Save model overrides to R2. These take priority over the static catalog.
+   * Each override patches fields on a curated model (id, name, cost, etc.).
+   */
+  async saveModelOverrides(overrides: Record<string, Partial<ModelInfo>>): Promise<void> {
+    await this.bucket.put(
+      UserStorage.MODEL_OVERRIDES_KEY,
+      JSON.stringify({ overrides, updatedAt: Date.now() })
+    );
+  }
+
+  /**
+   * Load model overrides from R2.
+   */
+  async loadModelOverrides(): Promise<{
+    overrides: Record<string, Partial<ModelInfo>>;
+    updatedAt: number;
+  } | null> {
+    const obj = await this.bucket.get(UserStorage.MODEL_OVERRIDES_KEY);
+    if (!obj) return null;
+    try {
+      return await obj.json() as { overrides: Record<string, Partial<ModelInfo>>; updatedAt: number };
     } catch {
       return null;
     }

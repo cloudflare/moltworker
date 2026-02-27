@@ -634,6 +634,73 @@ export function registerDynamicModels(models: Record<string, ModelInfo>): void {
 }
 
 /**
+ * Apply model overrides: merge partial patches on top of the static catalog
+ * and register the results as dynamic models (highest priority in getModel).
+ *
+ * Each key in `overrides` is an alias from the static MODELS catalog.
+ * The override fields are merged on top of the static entry to produce a
+ * complete ModelInfo that is stored in DYNAMIC_MODELS.
+ *
+ * Existing dynamic models (from /syncmodels) are preserved — only overridden
+ * aliases are replaced.
+ */
+export function applyModelOverrides(overrides: Record<string, Partial<ModelInfo>>): number {
+  let applied = 0;
+  for (const [alias, patch] of Object.entries(overrides)) {
+    const lower = alias.toLowerCase();
+    const base = MODELS[lower];
+    if (!base) continue; // Only override curated models
+    const merged: ModelInfo = { ...base, ...patch, alias: lower };
+    DYNAMIC_MODELS[lower] = merged;
+    applied++;
+  }
+  return applied;
+}
+
+/**
+ * Remove a model override, reverting to the static catalog entry.
+ */
+export function removeModelOverride(alias: string): boolean {
+  const lower = alias.toLowerCase();
+  if (!(lower in MODELS)) return false; // Not a curated model
+  delete DYNAMIC_MODELS[lower];
+  return true;
+}
+
+/**
+ * Get the current override for an alias (the diff from static), or null.
+ */
+export function getModelOverride(alias: string): Partial<ModelInfo> | null {
+  const lower = alias.toLowerCase();
+  const dynamic = DYNAMIC_MODELS[lower];
+  const base = MODELS[lower];
+  if (!dynamic || !base) return null;
+  // Compute diff: only fields that differ from base
+  const diff: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(dynamic)) {
+    if (key === 'alias') continue;
+    if (JSON.stringify(value) !== JSON.stringify((base as unknown as Record<string, unknown>)[key])) {
+      diff[key] = value;
+    }
+  }
+  return Object.keys(diff).length > 0 ? diff as Partial<ModelInfo> : null;
+}
+
+/**
+ * Get all current model overrides (for persistence).
+ */
+export function getAllModelOverrides(): Record<string, Partial<ModelInfo>> {
+  const result: Record<string, Partial<ModelInfo>> = {};
+  for (const alias of Object.keys(DYNAMIC_MODELS)) {
+    if (alias in MODELS) {
+      const override = getModelOverride(alias);
+      if (override) result[alias] = override;
+    }
+  }
+  return result;
+}
+
+/**
  * Add models to the blocked list (hidden from getModel/getAllModels).
  */
 export function blockModels(aliases: string[]): void {
