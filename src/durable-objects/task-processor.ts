@@ -301,6 +301,12 @@ const MAX_AUTO_RESUMES_FREE = 5; // Was 8 — aligned with paid; 5 is enough for
 // Max total elapsed time before stopping (15min for free, 30min for paid)
 const MAX_ELAPSED_FREE_MS = 15 * 60 * 1000;
 const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
+// Grace extension when task is actively making progress at the time cap.
+// Prevents killing tasks that are about to finish (e.g. mid-PR-creation at 28min).
+const ELAPSED_GRACE_FREE_MS = 5 * 60 * 1000; // +5min grace → 20min hard cap
+const ELAPSED_GRACE_PAID_MS = 15 * 60 * 1000; // +15min grace → 45min hard cap
+// "Recent progress" = tool call within this window qualifies for grace extension
+const RECENT_PROGRESS_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 // Max consecutive resumes with no new tool calls before declaring stall
 const MAX_NO_PROGRESS_RESUMES = 3;
 // Max consecutive iterations with no tool calls in main loop before stopping
@@ -596,13 +602,29 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
     const elapsed = Math.round(elapsedMs / 1000);
     console.log(`[TaskProcessor] Time since last update: ${timeSinceUpdate}ms, elapsed: ${elapsed}s (threshold: ${stuckThreshold / 1000}s, limit: ${Math.round(maxElapsedMs / 60000)}min, ${isPaidModel ? 'paid' : 'free'})`);
 
-    // Check elapsed time cap FIRST — even if the task is still active,
-    // stop it if it has exceeded the maximum allowed duration.
-    // This prevents runaway tasks that make slow progress indefinitely.
+    // Check elapsed time cap — with grace extension for active tasks.
+    // If the task made progress recently (tool call within last 5min), grant a grace
+    // period instead of hard-killing. This prevents aborting tasks that are about to
+    // finish (e.g. mid-PR-creation at 28min).
     if (elapsedMs > maxElapsedMs) {
-      console.log(`[TaskProcessor] Elapsed time cap reached: ${elapsed}s > ${maxElapsedMs / 1000}s`);
+      const graceMs = isFreeModel ? ELAPSED_GRACE_FREE_MS : ELAPSED_GRACE_PAID_MS;
+      const hardCapMs = maxElapsedMs + graceMs;
+      const madeRecentProgress = timeSinceUpdate < RECENT_PROGRESS_WINDOW_MS
+        || (this.lastHeartbeatMs > 0 && (Date.now() - this.lastHeartbeatMs) < RECENT_PROGRESS_WINDOW_MS);
+
+      if (madeRecentProgress && elapsedMs <= hardCapMs) {
+        // Task is past soft limit but still making progress — grant grace period
+        const remainingGrace = Math.round((hardCapMs - elapsedMs) / 1000);
+        console.log(`[TaskProcessor] Soft time cap reached but task is active — grace period: ${remainingGrace}s remaining (hard cap: ${Math.round(hardCapMs / 60000)}min)`);
+        await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
+        return;
+      }
+
+      // Hard cap reached or no recent progress — stop the task
+      const effectiveLimit = madeRecentProgress ? hardCapMs : maxElapsedMs;
+      console.log(`[TaskProcessor] Elapsed time cap reached: ${elapsed}s > ${Math.round(effectiveLimit / 1000)}s`);
       task.status = 'failed';
-      task.error = `Task exceeded time limit (${Math.round(maxElapsedMs / 60000)}min). Progress saved.`;
+      task.error = `Task exceeded time limit (${Math.round(effectiveLimit / 60000)}min). Progress saved.`;
       await this.doState.storage.put('task', task);
 
       if (task.telegramToken) {
@@ -612,7 +634,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         await this.sendTelegramMessageWithButtons(
           task.telegramToken,
           task.chatId,
-          `⏰ Task exceeded ${Math.round(maxElapsedMs / 60000)}min time limit (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\n💡 Progress saved. Tap Resume to continue from checkpoint.`,
+          `⏰ Task exceeded ${Math.round(effectiveLimit / 60000)}min time limit (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\n💡 Progress saved. Tap Resume to continue from checkpoint.`,
           [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
         );
       }
@@ -1001,6 +1023,59 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
   }
 
   /**
+   * Build a concise summary of the last actions before checkpoint, so the model
+   * knows exactly where it left off after context compression.
+   * Extracts: last assistant text, last tool calls, and last tool results.
+   */
+  private buildLastActionSummary(messages: ChatMessage[], toolsUsed: string[]): string {
+    const parts: string[] = ['[LAST ACTIONS BEFORE CHECKPOINT]'];
+
+    // Find last assistant message with meaningful content
+    let lastAssistantText = '';
+    let lastToolCalls: string[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'assistant') {
+        if (msg.content && typeof msg.content === 'string' && msg.content.trim().length > 10
+            && !msg.content.startsWith('[Previous work:') && !msg.content.startsWith('[SYSTEM')) {
+          lastAssistantText = msg.content.trim().slice(0, 500);
+        }
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+          lastToolCalls = msg.tool_calls.map(tc => {
+            const args = typeof tc.function?.arguments === 'string'
+              ? tc.function.arguments.slice(0, 100)
+              : '';
+            return `${tc.function?.name || 'unknown'}(${args}${args.length >= 100 ? '...' : ''})`;
+          });
+        }
+        if (lastAssistantText || lastToolCalls.length > 0) break;
+      }
+    }
+
+    // Find last tool results
+    const lastToolResults: string[] = [];
+    for (let i = messages.length - 1; i >= 0 && lastToolResults.length < 2; i--) {
+      const msg = messages[i];
+      if (msg.role === 'tool' && typeof msg.content === 'string' && msg.content.trim()) {
+        lastToolResults.unshift(msg.content.trim().slice(0, 200));
+      }
+    }
+
+    if (lastAssistantText) {
+      parts.push(`Last response: ${lastAssistantText}`);
+    }
+    if (lastToolCalls.length > 0) {
+      parts.push(`Last tool calls: ${lastToolCalls.join(', ')}`);
+    }
+    if (lastToolResults.length > 0) {
+      parts.push(`Last tool results (truncated): ${lastToolResults.join(' | ')}`);
+    }
+    parts.push(`Total tools used so far: ${toolsUsed.length} (${[...new Set(toolsUsed)].join(', ')})`);
+
+    return parts.join('\n');
+  }
+
+  /**
    * Handle incoming requests to the Durable Object
    */
   async fetch(request: Request): Promise<Response> {
@@ -1283,9 +1358,15 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             conversationMessages.splice(i, 1);
           }
         }
+
+        // Build a "last action summary" from the conversation tail BEFORE compression.
+        // This tells the model exactly what it was doing when interrupted, so it doesn't
+        // waste iterations re-reading files to rediscover its own progress.
+        const lastActionSummary = this.buildLastActionSummary(conversationMessages, checkpoint.toolsUsed);
+
         conversationMessages.push({
           role: 'user',
-          content: '[SYSTEM RESUME NOTICE] You are resuming from a checkpoint. Your previous work is preserved in this conversation. Do NOT re-read rules or re-acknowledge the task. Continue EXACTLY where you left off. If you were in the middle of creating files, continue creating them. If you showed "Ready to start", that phase is DONE - proceed to implementation immediately.',
+          content: `[SYSTEM RESUME NOTICE] You are resuming from a checkpoint. Your previous work is preserved in this conversation. Do NOT re-read rules or re-acknowledge the task. Continue EXACTLY where you left off. If you were in the middle of creating files, continue creating them. If you showed "Ready to start", that phase is DONE - proceed to implementation immediately.\n\n${lastActionSummary}`,
         });
 
         // Update status to show we're resuming
@@ -1305,11 +1386,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         // exceeds the SSE idle timeout (DeepSeek first-token latency >45s
         // on 60K+ token prompts). This was the root cause of the
         // "1 iteration then eviction" pattern on later resumes.
+        // keepRecent=8 (was 4) — preserves more recent work context so the model
+        // doesn't lose track of what it was doing (e.g. mid-PR-creation, file edits).
         const resumeTokens = this.estimateTokens(conversationMessages);
         const resumeBudget = this.getContextBudget(task.modelAlias);
         if (resumeTokens > resumeBudget * 0.5) {
           const beforeCount = conversationMessages.length;
-          const compressed = this.compressContext(conversationMessages, task.modelAlias, 4);
+          const compressed = this.compressContext(conversationMessages, task.modelAlias, 8);
           conversationMessages.length = 0;
           conversationMessages.push(...compressed);
           const afterTokens = this.estimateTokens(conversationMessages);
