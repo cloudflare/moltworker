@@ -2,7 +2,7 @@
  * Tests for model utility functions
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { detectToolIntent, getModel, getFreeToolModels, categorizeModel, getOrchestraRecommendations, formatOrchestraModelRecs, resolveTaskModel, detectTaskIntent, registerAutoSyncedModels, type RouterCheckpointMeta, type ModelInfo } from './models';
 
 // --- detectToolIntent ---
@@ -241,8 +241,13 @@ describe('getModel fuzzy matching', () => {
     },
   };
 
-  // Register before each test group
-  registerAutoSyncedModels(testModels);
+  // Register in beforeAll so models are available when tests run.
+  // describe-body code runs during collection (before any it() callbacks),
+  // so a bare registerAutoSyncedModels() + cleanup at the bottom would wipe
+  // the models before tests execute.
+  beforeAll(() => {
+    registerAutoSyncedModels(testModels);
+  });
 
   it('exact match still works for curated models', () => {
     const model = getModel('sonnet');
@@ -310,8 +315,9 @@ describe('getModel fuzzy matching', () => {
     expect(model!.id).toBe('anthropic/claude-sonnet-4.6');
   });
 
-  // Clean up
-  registerAutoSyncedModels({});
+  afterAll(() => {
+    registerAutoSyncedModels({});
+  });
 });
 
 // --- getOrchestraRecommendations ---
