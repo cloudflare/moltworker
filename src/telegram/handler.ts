@@ -502,6 +502,7 @@ export class TelegramHandler {
   private acontextKey?: string;
   private acontextBaseUrl?: string;
   private cloudflareApiToken?: string; // Cloudflare API token for Code Mode MCP
+  private dynamicModelsReady: Promise<void>; // Resolves when dynamic models are loaded from R2
   // (sync sessions now persisted in R2 via storage.saveSyncSession)
 
   constructor(
@@ -545,8 +546,8 @@ export class TelegramHandler {
     if (allowedUserIds && allowedUserIds.length > 0) {
       this.allowedUsers = new Set(allowedUserIds);
     }
-    // Load dynamic models from R2 (async, non-blocking)
-    this.loadDynamicModelsFromR2();
+    // Load dynamic models from R2 (async, non-blocking — awaited before model checks)
+    this.dynamicModelsReady = this.loadDynamicModelsFromR2();
   }
 
   /**
@@ -2313,25 +2314,30 @@ export class TelegramHandler {
       modelAlias = DEFAULT_MODEL;
     }
 
-    // If user's model was removed/blocked/sunset, fall back to best free model (not /auto)
+    // If user's model was removed/blocked/sunset, fall back to best free model (not /auto).
+    // First ensure dynamic models are loaded from R2 (may not be ready on cold start).
     if (modelAlias !== DEFAULT_MODEL && !getModel(modelAlias)) {
-      const unavailableAlias = modelAlias;
-      // Try to find a free model with tools instead of expensive /auto
-      const freeModels = getFreeToolModels();
-      if (freeModels.length > 0) {
-        modelAlias = freeModels[0]; // Best free model (sorted by context size)
-        await this.bot.sendMessage(
-          chatId,
-          `⚠️ Model /${unavailableAlias} is no longer available. Switching to /${modelAlias} (free).\nRun /pick to choose a different model.`
-        );
-      } else {
-        modelAlias = DEFAULT_MODEL;
-        await this.bot.sendMessage(
-          chatId,
-          `⚠️ Model /${unavailableAlias} is no longer available. No free models found — switching to /${DEFAULT_MODEL}.\nRun /pick to choose a model.`
-        );
+      await this.dynamicModelsReady;
+      // Re-check after dynamic models are loaded — the model may exist now
+      if (!getModel(modelAlias)) {
+        const unavailableAlias = modelAlias;
+        // Try to find a free model with tools instead of expensive /auto
+        const freeModels = getFreeToolModels();
+        if (freeModels.length > 0) {
+          modelAlias = freeModels[0]; // Best free model (sorted by context size)
+          await this.bot.sendMessage(
+            chatId,
+            `⚠️ Model /${unavailableAlias} is no longer available. Switching to /${modelAlias} (free).\nRun /pick to choose a different model.`
+          );
+        } else {
+          modelAlias = DEFAULT_MODEL;
+          await this.bot.sendMessage(
+            chatId,
+            `⚠️ Model /${unavailableAlias} is no longer available. No free models found — switching to /${DEFAULT_MODEL}.\nRun /pick to choose a model.`
+          );
+        }
+        await this.storage.setUserModel(userId, modelAlias);
       }
-      await this.storage.setUserModel(userId, modelAlias);
     }
     // Classify task complexity to skip expensive R2 reads for trivial queries (Phase 7A.2)
     const fullHistory = await this.storage.getConversation(userId, 10);
