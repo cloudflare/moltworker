@@ -37,6 +37,7 @@ export async function ensureRcloneConfig(sandbox: Sandbox, env: MoltbotEnv): Pro
 
   await sandbox.exec(`mkdir -p $(dirname ${RCLONE_CONF_PATH})`);
   await sandbox.writeFile(RCLONE_CONF_PATH, rcloneConfig);
+  await sandbox.exec(`chmod 600 ${RCLONE_CONF_PATH}`);
   await sandbox.exec(`touch ${CONFIGURED_FLAG}`);
 
   console.log('Rclone configured for R2 bucket:', getR2BucketName(env));
