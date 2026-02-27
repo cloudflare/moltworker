@@ -1296,6 +1296,23 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           );
         }
         console.log(`[TaskProcessor] Resumed from checkpoint: ${checkpoint.iterations} iterations`);
+
+        // CRITICAL: Force-compress context after checkpoint restore.
+        // Checkpoints can contain 60-80K tokens of uncompressed context.
+        // Without compression, the first API call sends a huge prompt that
+        // exceeds the SSE idle timeout (DeepSeek first-token latency >45s
+        // on 60K+ token prompts). This was the root cause of the
+        // "1 iteration then eviction" pattern on later resumes.
+        const resumeTokens = this.estimateTokens(conversationMessages);
+        const resumeBudget = this.getContextBudget(task.modelAlias);
+        if (resumeTokens > resumeBudget * 0.5) {
+          const beforeCount = conversationMessages.length;
+          const compressed = this.compressContext(conversationMessages, task.modelAlias, 4);
+          conversationMessages.length = 0;
+          conversationMessages.push(...compressed);
+          const afterTokens = this.estimateTokens(conversationMessages);
+          console.log(`[TaskProcessor] Post-restore compression: ${beforeCount} → ${compressed.length} messages, ${resumeTokens} → ${afterTokens} tokens`);
+        }
       }
     }
 
@@ -1497,6 +1514,18 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         } | null = null;
         let lastError: Error | null = null;
 
+        // Scale SSE idle timeout based on context size: large prompts (60K+ tokens)
+        // cause slower first-token latency, especially on DeepSeek V3.2 Direct.
+        // Default 45s is fine for <30K tokens but causes STREAM_READ_TIMEOUT on resumes
+        // where checkpoint context is 60-80K tokens.
+        const estimatedCtx = this.estimateTokens(conversationMessages);
+        const idleTimeout = estimatedCtx > 60000 ? 120000
+          : estimatedCtx > 30000 ? 90000
+          : 45000;
+        if (idleTimeout > 45000) {
+          console.log(`[TaskProcessor] Scaled idle timeout: ${idleTimeout / 1000}s (estimated ${estimatedCtx} tokens)`);
+        }
+
         // 7B.1: Create speculative executor for this iteration
         // Safe read-only tools will be started during streaming, before the full response arrives
         const specExec = createSpeculativeExecutor(
@@ -1523,7 +1552,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                   temperature: getTemperature(task.modelAlias),
                   tools: useTools ? getToolsForPhase(task.phase) : undefined,
                   toolChoice: useTools && task.phase !== 'review' ? 'auto' : undefined,
-                  idleTimeoutMs: 45000, // 45s without data = timeout (increased for network resilience)
+                  idleTimeoutMs: idleTimeout, // Scaled by context size (45s-120s)
                   reasoningLevel: request.reasoningLevel,
                   responseFormat: request.responseFormat,
                   onProgress: () => {
@@ -1611,7 +1640,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               // Direct APIs may stream slower with large context — update heartbeat
               // every 5 chunks (not 10) to prevent false "stuck" detection.
               let directProgressCount = 0;
-              result = await parseSSEStream(response.body, 45000, () => {
+              result = await parseSSEStream(response.body, idleTimeout, () => {
                 directProgressCount++;
                 if (directProgressCount % 5 === 0) {
                   this.lastHeartbeatMs = Date.now();
