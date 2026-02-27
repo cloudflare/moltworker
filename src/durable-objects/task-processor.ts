@@ -1271,7 +1271,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         await this.doState.storage.put('task', task);
 
         // CRITICAL: Add resume instruction to break the "re-read rules" loop
-        // The model tends to re-acknowledge on every resume; this prevents it
+        // The model tends to re-acknowledge on every resume; this prevents it.
+        // Deduplicate: remove any prior [SYSTEM RESUME NOTICE] to prevent token
+        // accumulation across multiple resumes (each adds ~250 tokens).
+        const resumeNoticePrefix = '[SYSTEM RESUME NOTICE]';
+        for (let i = conversationMessages.length - 1; i >= 0; i--) {
+          const msg = conversationMessages[i];
+          if (msg.role === 'user' && typeof msg.content === 'string' && msg.content.startsWith(resumeNoticePrefix)) {
+            conversationMessages.splice(i, 1);
+          }
+        }
         conversationMessages.push({
           role: 'user',
           content: '[SYSTEM RESUME NOTICE] You are resuming from a checkpoint. Your previous work is preserved in this conversation. Do NOT re-read rules or re-acknowledge the task. Continue EXACTLY where you left off. If you were in the middle of creating files, continue creating them. If you showed "Ready to start", that phase is DONE - proceed to implementation immediately.',
@@ -1598,11 +1607,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 throw new Error(`${provider} API returned no response body`);
               }
 
-              // Parse SSE stream with progress callback for watchdog heartbeat
+              // Parse SSE stream with progress callback for watchdog heartbeat.
+              // Direct APIs may stream slower with large context — update heartbeat
+              // every 5 chunks (not 10) to prevent false "stuck" detection.
               let directProgressCount = 0;
               result = await parseSSEStream(response.body, 45000, () => {
                 directProgressCount++;
-                if (directProgressCount % 10 === 0) {
+                if (directProgressCount % 5 === 0) {
                   this.lastHeartbeatMs = Date.now();
                 }
                 if (directProgressCount % 100 === 0) {
@@ -2019,6 +2030,18 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           const shouldCheckpoint = task.toolsUsed.length <= CHECKPOINT_EARLY_THRESHOLD
             || task.toolsUsed.length % CHECKPOINT_EVERY_N_TOOLS === 0;
           if (this.r2 && shouldCheckpoint) {
+            // Pre-checkpoint compression: ensure context is compact before R2 write.
+            // Without this, early checkpoints (before COMPRESS_AFTER_TOOLS triggers)
+            // store uncompressed context that bloats on each resume restoration.
+            const preCheckpointTokens = this.estimateTokens(conversationMessages);
+            const budget = this.getContextBudget(task.modelAlias);
+            if (preCheckpointTokens > budget * 0.8) {
+              const beforeCount = conversationMessages.length;
+              const compressed = this.compressContext(conversationMessages, task.modelAlias, 4);
+              conversationMessages.length = 0;
+              conversationMessages.push(...compressed);
+              console.log(`[TaskProcessor] Pre-checkpoint compression: ${beforeCount} -> ${compressed.length} messages (${preCheckpointTokens} tokens > 80% budget)`);
+            }
             await this.saveCheckpoint(
               this.r2,
               request.userId,
