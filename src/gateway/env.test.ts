@@ -144,6 +144,23 @@ describe('buildEnvVars', () => {
     expect(result.CF_ACCOUNT_ID).toBe('acct-123');
   });
 
+  it('passes CF_AIG_TOKEN to container', () => {
+    const env = createMockEnv({ CF_AIG_TOKEN: 'aig-token-abc123' });
+    const result = buildEnvVars(env);
+    expect(result.CF_AIG_TOKEN).toBe('aig-token-abc123');
+  });
+
+  it('does not include CF_AIG_TOKEN when not set', () => {
+    const env = createMockEnv();
+    const result = buildEnvVars(env);
+    expect(result.CF_AIG_TOKEN).toBeUndefined();
+  });
+
+  it('rejects CF_AIG_TOKEN with control characters', () => {
+    const env = createMockEnv({ CF_AIG_TOKEN: 'token\x00injected' });
+    expect(() => buildEnvVars(env)).toThrow('invalid control characters');
+  });
+
   it('combines all env vars correctly', () => {
     const env = createMockEnv({
       ANTHROPIC_API_KEY: 'sk-key',
