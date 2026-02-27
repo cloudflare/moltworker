@@ -1189,7 +1189,7 @@ export class TelegramHandler {
         break;
 
       case '/syncall':
-        await this.handleSyncAllCommand(chatId);
+        await this.handleSyncAllCommand(chatId, userId);
         break;
 
       case '/synccheck':
@@ -2768,12 +2768,17 @@ export class TelegramHandler {
 
       case 'start':
         // /start feature exploration: start:coding, start:research, etc.
-        await this.handleStartCallback(parts, chatId);
+        await this.handleStartCallback(parts, chatId, userId);
         break;
 
       case 'mu':
         // Model update from /synccheck: mu:cost:alias:newcost or mu:allcost
         await this.handleModelUpdateCallback(parts, chatId, query);
+        break;
+
+      case 'sa':
+        // Sync-all quick-use: sa:<alias> — switch active model
+        await this.handleSyncAllUseCallback(query, parts, userId, chatId);
         break;
 
       default:
@@ -2784,7 +2789,7 @@ export class TelegramHandler {
   /**
    * Handle /start menu button callbacks
    */
-  private async handleStartCallback(parts: string[], chatId: number): Promise<void> {
+  private async handleStartCallback(parts: string[], chatId: number, userId: string): Promise<void> {
     const feature = parts[1];
 
     if (feature === 'pick') {
@@ -2793,7 +2798,7 @@ export class TelegramHandler {
     }
 
     if (feature === 'sync') {
-      await this.handleSyncAllCommand(chatId);
+      await this.handleSyncAllCommand(chatId, userId);
       return;
     }
 
@@ -3228,9 +3233,10 @@ export class TelegramHandler {
 
   /**
    * Handle /syncall — run full model catalog sync from OpenRouter.
-   * Syncs ALL models (not just free), updates R2, and registers in runtime.
+   * Syncs ALL models (not just free), updates R2, registers in runtime,
+   * and shows top 20 recommended models with quick-use buttons.
    */
-  private async handleSyncAllCommand(chatId: number): Promise<void> {
+  private async handleSyncAllCommand(chatId: number, userId: string): Promise<void> {
     await this.bot.sendChatAction(chatId, 'typing');
     await this.bot.sendMessage(chatId, '🌐 Running full model catalog sync from OpenRouter...');
 
@@ -3239,6 +3245,7 @@ export class TelegramHandler {
       const result = await runFullSync(this.r2Bucket, this.openrouterKey);
 
       if (result.success) {
+        // Stats message
         const lines = [
           '✅ Full catalog sync complete!\n',
           `📊 ${result.totalFetched} models fetched from OpenRouter`,
@@ -3247,17 +3254,87 @@ export class TelegramHandler {
           `⏳ ${result.staleModels} stale/deprecated`,
           `🗑️ ${result.removedModels} removed`,
           `⚡ ${result.durationMs}ms`,
-          '',
-          'Auto-synced models are now available via /use <alias>.',
-          'Curated + /syncmodels models take priority.',
         ];
         await this.bot.sendMessage(chatId, lines.join('\n'));
+
+        // Top 20 recommendations with buttons
+        if (result.topModels && result.topModels.length > 0) {
+          const currentModel = await this.storage.getUserModel(userId);
+          const { text, buttons } = this.buildTopModelsMessage(result.topModels, currentModel);
+          await this.bot.sendMessageWithButtons(chatId, text, buttons);
+        }
       } else {
         await this.bot.sendMessage(chatId, `❌ Sync failed: ${result.error}`);
       }
     } catch (error) {
       await this.bot.sendMessage(chatId, `❌ Sync error: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Build the top models recommendation message with quick-use buttons.
+   */
+  private buildTopModelsMessage(
+    topModels: Array<{ alias: string; name: string; score: number; contextK: number; tools: boolean; vision: boolean; reasoning: boolean; isFree: boolean; cost: string; category: string }>,
+    currentModel: string,
+  ): { text: string; buttons: InlineKeyboardButton[][] } {
+    const categoryLabels: Record<string, string> = {
+      coding: '💻 Coding',
+      reasoning: '🧠 Reasoning',
+      fast: '⚡ Fast',
+      general: '🌐 General',
+    };
+
+    let text = '🏆 Top 20 Recommended Models\n';
+    text += 'Ranked by capabilities, context, cost & provider.\n';
+    text += 'Tap to switch your active model.\n';
+
+    // Group by category
+    const byCategory = new Map<string, typeof topModels>();
+    for (const m of topModels) {
+      const cat = m.category || 'general';
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat)!.push(m);
+    }
+
+    const catOrder = ['coding', 'reasoning', 'fast', 'general'];
+    for (const cat of catOrder) {
+      const models = byCategory.get(cat);
+      if (!models || models.length === 0) continue;
+
+      text += `\n━━━ ${categoryLabels[cat] || cat} ━━━\n`;
+      for (const m of models) {
+        const badges = [
+          m.tools ? '🔧' : '',
+          m.vision ? '👁️' : '',
+          m.reasoning ? '💭' : '',
+        ].filter(Boolean).join('');
+        const badgeStr = badges ? ` ${badges}` : '';
+        const active = m.alias === currentModel ? ' ◀️' : '';
+        const freeTag = m.isFree ? ' FREE' : ` ${m.cost}`;
+        text += `/${m.alias} — ${m.name}${badgeStr}${active}\n`;
+        text += `   ${m.contextK}K ctx |${freeTag}\n`;
+      }
+    }
+
+    // Build buttons: 2 per row
+    const buttons: InlineKeyboardButton[][] = [];
+    for (let i = 0; i < topModels.length; i += 2) {
+      const row: InlineKeyboardButton[] = [];
+      for (let j = i; j < Math.min(i + 2, topModels.length); j++) {
+        const m = topModels[j];
+        const badges = [m.tools ? '🔧' : '', m.vision ? '👁️' : ''].filter(Boolean).join('');
+        const suffix = badges ? ` ${badges}` : '';
+        const active = m.alias === currentModel ? ' ◀️' : '';
+        row.push({
+          text: `${m.alias}${suffix}${active}`,
+          callback_data: `sa:${m.alias}`,
+        });
+      }
+      buttons.push(row);
+    }
+
+    return { text, buttons };
   }
 
   /**
@@ -3498,6 +3575,41 @@ Allowed keys: id, name, cost, score, specialty, maxContext, supportsTools, suppo
         await this.bot.sendMessage(chatId, `❌ Failed to apply: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+  }
+
+  /**
+   * Handle /syncall top-model quick-use button: immediately switch active model.
+   * Callback data: sa:<alias>
+   */
+  private async handleSyncAllUseCallback(
+    query: TelegramCallbackQuery,
+    parts: string[],
+    userId: string,
+    chatId: number,
+  ): Promise<void> {
+    const alias = parts[1];
+    if (!alias) {
+      await this.bot.answerCallbackQuery(query.id, { text: 'Invalid button data.' });
+      return;
+    }
+
+    const model = getModel(alias);
+    if (!model) {
+      await this.bot.answerCallbackQuery(query.id, { text: `Model /${alias} not found.` });
+      return;
+    }
+
+    await this.storage.setUserModel(userId, model.alias);
+    await this.bot.answerCallbackQuery(query.id, {
+      text: `Switched to ${model.name}`,
+    });
+    await this.bot.sendMessage(
+      chatId,
+      `✅ Model set to: ${model.name}\n` +
+      `Alias: /${model.alias}\n` +
+      `${model.specialty}\n` +
+      `Cost: ${model.cost}`
+    );
   }
 
   /**
@@ -3914,7 +4026,7 @@ Free:  /trinity /deepfree /qwencoderfree /devstral
 Direct: /dcode /dreason /q3coder /kimidirect
 All:   /models for full list
 /syncmodels — Fetch latest free models (interactive picker)
-/syncall — Full catalog sync from OpenRouter (all models)
+/syncall — Full catalog sync + top 20 recommendations
 /synccheck — Check for updates (actionable: apply price changes)
 /modelupdate <alias> key=val — Patch a model without deploy
 /modelupdate list — Show active overrides

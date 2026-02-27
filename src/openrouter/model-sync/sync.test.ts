@@ -265,6 +265,131 @@ describe('loadCatalog', () => {
   });
 });
 
+describe('runFullSync topModels', () => {
+  it('returns scored top models after sync', async () => {
+    // Extended sample with enough diversity to test scoring
+    const richApiResponse = {
+      data: [
+        {
+          id: 'anthropic/claude-sonnet-4.6',
+          name: 'Claude Sonnet 4.6',
+          context_length: 200000,
+          architecture: { modality: 'text+image->text', input_modalities: ['text', 'image'], output_modalities: ['text'] },
+          pricing: { prompt: '0.000003', completion: '0.000015' },
+          supported_parameters: ['tools', 'tool_choice', 'reasoning'],
+        },
+        {
+          id: 'google/gemini-2.5-flash',
+          name: 'Gemini 2.5 Flash',
+          context_length: 1048576,
+          architecture: { modality: 'text+image->text', input_modalities: ['text', 'image'], output_modalities: ['text'] },
+          pricing: { prompt: '0', completion: '0' },
+          supported_parameters: ['tools'],
+        },
+        {
+          id: 'newprovider/basic-llm',
+          name: 'Basic LLM',
+          context_length: 8192,
+          architecture: { modality: 'text->text' },
+          pricing: { prompt: '0.00005', completion: '0.0001' },
+          supported_parameters: [],
+        },
+      ],
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => richApiResponse,
+    });
+
+    const bucket = createMockBucket();
+    const result = await runFullSync(bucket, 'test-key');
+
+    expect(result.success).toBe(true);
+    expect(result.topModels).toBeDefined();
+    expect(result.topModels!.length).toBeGreaterThan(0);
+
+    // Top models should be sorted by score (descending)
+    for (let i = 1; i < result.topModels!.length; i++) {
+      expect(result.topModels![i - 1].score).toBeGreaterThanOrEqual(result.topModels![i].score);
+    }
+
+    // Each top model should have expected fields
+    for (const m of result.topModels!) {
+      expect(m.alias).toBeTruthy();
+      expect(m.name).toBeTruthy();
+      expect(m.modelId).toBeTruthy();
+      expect(typeof m.score).toBe('number');
+      expect(typeof m.contextK).toBe('number');
+      expect(typeof m.tools).toBe('boolean');
+      expect(typeof m.vision).toBe('boolean');
+      expect(typeof m.reasoning).toBe('boolean');
+      expect(typeof m.isFree).toBe('boolean');
+      expect(m.cost).toBeTruthy();
+      expect(m.category).toBeTruthy();
+    }
+  });
+
+  it('caps top models at 20', async () => {
+    // Generate 30 models to ensure we cap at 20
+    const manyModels = Array.from({ length: 30 }, (_, i) => ({
+      id: `provider-${i}/model-${i}`,
+      name: `Model ${i}`,
+      context_length: 32768 + i * 1000,
+      architecture: { modality: 'text->text' },
+      pricing: { prompt: '0', completion: '0' },
+      supported_parameters: i % 2 === 0 ? ['tools'] : [],
+    }));
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: manyModels }),
+    });
+
+    const bucket = createMockBucket();
+    const result = await runFullSync(bucket, 'test-key');
+
+    expect(result.success).toBe(true);
+    expect(result.topModels!.length).toBeLessThanOrEqual(20);
+  });
+
+  it('excludes image-gen models from top models', async () => {
+    const apiWithImageGen = {
+      data: [
+        {
+          id: 'newprovider/text-model',
+          name: 'Text Model',
+          context_length: 32768,
+          architecture: { modality: 'text->text' },
+          pricing: { prompt: '0', completion: '0' },
+          supported_parameters: ['tools'],
+        },
+        {
+          id: 'newprovider/image-gen-flux',
+          name: 'Image Generator',
+          context_length: 4096,
+          architecture: { modality: 'text->image', output_modalities: ['image'] },
+          pricing: { prompt: '0', completion: '0' },
+          supported_parameters: [],
+        },
+      ],
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => apiWithImageGen,
+    });
+
+    const bucket = createMockBucket();
+    const result = await runFullSync(bucket, 'test-key');
+
+    expect(result.success).toBe(true);
+    // Image gen model should not appear in topModels
+    const imageGenInTop = result.topModels?.find(m => m.modelId.includes('image-gen'));
+    expect(imageGenInTop).toBeUndefined();
+  });
+});
+
 describe('loadAutoSyncedModels', () => {
   it('returns 0 when no catalog exists', async () => {
     const bucket = createMockBucket();
