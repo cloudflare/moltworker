@@ -298,15 +298,8 @@ const CHECKPOINT_EARLY_THRESHOLD = 3;
 // Max auto-resume attempts before requiring manual intervention
 const MAX_AUTO_RESUMES_DEFAULT = 5; // Was 10 — 10 resumes lets bad situations drag on for 30min
 const MAX_AUTO_RESUMES_FREE = 5; // Was 8 — aligned with paid; 5 is enough for legitimate complex tasks
-// Max total elapsed time before stopping (15min for free, 30min for paid)
-const MAX_ELAPSED_FREE_MS = 15 * 60 * 1000;
-const MAX_ELAPSED_PAID_MS = 30 * 60 * 1000;
-// Grace extension when task is actively making progress at the time cap.
-// Prevents killing tasks that are about to finish (e.g. mid-PR-creation at 28min).
-const ELAPSED_GRACE_FREE_MS = 5 * 60 * 1000; // +5min grace → 20min hard cap
-const ELAPSED_GRACE_PAID_MS = 15 * 60 * 1000; // +15min grace → 45min hard cap
-// "Recent progress" = tool call within this window qualifies for grace extension
-const RECENT_PROGRESS_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+// Elapsed time limits removed — other guards (max tool calls, stall detection,
+// auto-resume limits) are sufficient to prevent runaway tasks.
 // Max consecutive resumes with no new tool calls before declaring stall
 const MAX_NO_PROGRESS_RESUMES = 3;
 // Max consecutive iterations with no tool calls in main loop before stopping
@@ -595,51 +588,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
     const timeSinceUpdate = Date.now() - task.lastUpdate;
     const isPaidModel = getModel(task.modelAlias)?.isFree !== true;
-    const isFreeModel = !isPaidModel;
     const stuckThreshold = isPaidModel ? STUCK_THRESHOLD_PAID_MS : STUCK_THRESHOLD_FREE_MS;
-    const maxElapsedMs = isFreeModel ? MAX_ELAPSED_FREE_MS : MAX_ELAPSED_PAID_MS;
     const elapsedMs = Date.now() - task.startTime;
     const elapsed = Math.round(elapsedMs / 1000);
-    console.log(`[TaskProcessor] Time since last update: ${timeSinceUpdate}ms, elapsed: ${elapsed}s (threshold: ${stuckThreshold / 1000}s, limit: ${Math.round(maxElapsedMs / 60000)}min, ${isPaidModel ? 'paid' : 'free'})`);
-
-    // Check elapsed time cap — with grace extension for active tasks.
-    // If the task made progress recently (tool call within last 5min), grant a grace
-    // period instead of hard-killing. This prevents aborting tasks that are about to
-    // finish (e.g. mid-PR-creation at 28min).
-    if (elapsedMs > maxElapsedMs) {
-      const graceMs = isFreeModel ? ELAPSED_GRACE_FREE_MS : ELAPSED_GRACE_PAID_MS;
-      const hardCapMs = maxElapsedMs + graceMs;
-      const madeRecentProgress = timeSinceUpdate < RECENT_PROGRESS_WINDOW_MS
-        || (this.lastHeartbeatMs > 0 && (Date.now() - this.lastHeartbeatMs) < RECENT_PROGRESS_WINDOW_MS);
-
-      if (madeRecentProgress && elapsedMs <= hardCapMs) {
-        // Task is past soft limit but still making progress — grant grace period
-        const remainingGrace = Math.round((hardCapMs - elapsedMs) / 1000);
-        console.log(`[TaskProcessor] Soft time cap reached but task is active — grace period: ${remainingGrace}s remaining (hard cap: ${Math.round(hardCapMs / 60000)}min)`);
-        await this.doState.storage.setAlarm(Date.now() + WATCHDOG_INTERVAL_MS);
-        return;
-      }
-
-      // Hard cap reached or no recent progress — stop the task
-      const effectiveLimit = madeRecentProgress ? hardCapMs : maxElapsedMs;
-      console.log(`[TaskProcessor] Elapsed time cap reached: ${elapsed}s > ${Math.round(effectiveLimit / 1000)}s`);
-      task.status = 'failed';
-      task.error = `Task exceeded time limit (${Math.round(effectiveLimit / 60000)}min). Progress saved.`;
-      await this.doState.storage.put('task', task);
-
-      if (task.telegramToken) {
-        if (task.statusMessageId) {
-          await this.deleteTelegramMessage(task.telegramToken, task.chatId, task.statusMessageId);
-        }
-        await this.sendTelegramMessageWithButtons(
-          task.telegramToken,
-          task.chatId,
-          `⏰ Task exceeded ${Math.round(effectiveLimit / 60000)}min time limit (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\n💡 Progress saved. Tap Resume to continue from checkpoint.`,
-          [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
-        );
-      }
-      return;
-    }
+    console.log(`[TaskProcessor] Time since last update: ${timeSinceUpdate}ms, elapsed: ${elapsed}s (threshold: ${stuckThreshold / 1000}s)`);
 
     // In-memory execution lock: if processTask() is still running in this DO instance,
     // the task is NOT stuck — it's just waiting on a slow external API call (await yields
@@ -1265,9 +1217,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       if (existingTask.autoResumeCount !== undefined) {
         task.autoResumeCount = existingTask.autoResumeCount;
       }
-      // Preserve original startTime so elapsed time cap works across resumes.
-      // Without this, each auto-resume resets startTime to Date.now(), making
-      // the elapsed cap (15min free / 30min paid) never trigger.
+      // Preserve original startTime for accurate elapsed time logging across resumes.
       if (existingTask.startTime) {
         task.startTime = existingTask.startTime;
       }
@@ -1506,30 +1456,6 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               role: 'system',
               content: `[USER OVERRIDE] ${instruction}`,
             });
-          }
-        }
-
-        // Defense-in-depth: check elapsed time cap in the main loop
-        // The alarm handler also checks this, but this catches cases where
-        // the task runs continuously without the alarm firing.
-        {
-          const loopElapsedMs = Date.now() - task.startTime;
-          const loopMaxMs = (getModel(task.modelAlias)?.isFree === true) ? MAX_ELAPSED_FREE_MS : MAX_ELAPSED_PAID_MS;
-          if (loopElapsedMs > loopMaxMs) {
-            console.log(`[TaskProcessor] Elapsed time cap in main loop: ${Math.round(loopElapsedMs / 1000)}s > ${loopMaxMs / 1000}s`);
-            task.status = 'failed';
-            task.error = `Task exceeded time limit (${Math.round(loopMaxMs / 60000)}min). Progress saved.`;
-            await this.doState.storage.put('task', task);
-            await this.doState.storage.deleteAlarm();
-            if (statusMessageId) {
-              await this.deleteTelegramMessage(request.telegramToken, request.chatId, statusMessageId);
-            }
-            await this.sendTelegramMessageWithButtons(
-              request.telegramToken, request.chatId,
-              `⏰ Task exceeded ${Math.round(loopMaxMs / 60000)}min time limit (${task.iterations} iterations, ${task.toolsUsed.length} tools).\n\n💡 Progress saved. Tap Resume to continue from checkpoint.`,
-              [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
-            );
-            return;
           }
         }
 
