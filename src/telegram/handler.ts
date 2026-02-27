@@ -2792,6 +2792,7 @@ export class TelegramHandler {
   private async handleStartCallback(parts: string[], chatId: number, userId: string): Promise<void> {
     const feature = parts[1];
 
+    // Direct-action buttons
     if (feature === 'pick') {
       await this.sendModelPicker(chatId);
       return;
@@ -2807,9 +2808,27 @@ export class TelegramHandler {
       return;
     }
 
+    if (feature === 'menu') {
+      await this.sendStartMenu(chatId);
+      return;
+    }
+
+    // Sub-menu buttons: start:sub:<group>
+    if (feature === 'sub') {
+      const group = parts[2];
+      await this.sendStartSubMenu(chatId, userId, group);
+      return;
+    }
+
+    // Action buttons: start:cmd:<command>
+    if (feature === 'cmd') {
+      await this.handleStartCommandAction(chatId, userId, parts.slice(2).join(':'));
+      return;
+    }
+
+    // Feature info pages (coding, research, images, etc.)
     const text = this.getStartFeatureText(feature);
     if (text) {
-      // Send feature info with a "Back to menu" button
       const buttons: InlineKeyboardButton[][] = [
         [
           { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
@@ -2817,8 +2836,306 @@ export class TelegramHandler {
         ],
       ];
       await this.bot.sendMessageWithButtons(chatId, text, buttons);
-    } else if (feature === 'menu') {
-      await this.sendStartMenu(chatId);
+    }
+  }
+
+  /**
+   * Send a sub-menu with action buttons for a specific command group.
+   */
+  private async sendStartSubMenu(chatId: number, userId: string, group: string): Promise<void> {
+    let text: string;
+    let buttons: InlineKeyboardButton[][];
+
+    switch (group) {
+      case 'models': {
+        const current = await this.storage.getUserModel(userId);
+        const model = getModel(current);
+        text = `🤖 Models\n\nCurrent: ${model?.name || current} (/${current})\n\nQuick switch or browse the full catalog:`;
+        buttons = [
+          [
+            { text: '🤖 Pick a Model', callback_data: 'start:pick' },
+            { text: '📋 Full Catalog', callback_data: 'start:cmd:models' },
+          ],
+          [
+            { text: '📊 Current Model', callback_data: 'start:cmd:model' },
+          ],
+          [
+            { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
+          ],
+        ];
+        break;
+      }
+
+      case 'saves': {
+        text = '💾 Checkpoints & History\n\nSave and restore conversation states:';
+        buttons = [
+          [
+            { text: '📁 List Saves', callback_data: 'start:cmd:saves' },
+            { text: '📝 Learnings', callback_data: 'start:cmd:learnings' },
+          ],
+          [
+            { text: '📚 Sessions', callback_data: 'start:cmd:sessions' },
+          ],
+          [
+            { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
+          ],
+        ];
+        break;
+      }
+
+      case 'stats': {
+        text = '📊 Stats & Monitoring\n\nUsage, costs, and bot health:';
+        buttons = [
+          [
+            { text: '💰 Credits', callback_data: 'start:cmd:credits' },
+            { text: '📈 Costs', callback_data: 'start:cmd:costs' },
+          ],
+          [
+            { text: '📋 Weekly Costs', callback_data: 'start:cmd:costsweek' },
+            { text: '🏓 Ping', callback_data: 'start:cmd:ping' },
+          ],
+          [
+            { text: 'ℹ️ Status', callback_data: 'start:cmd:status' },
+            { text: '🧪 Smoke Tests', callback_data: 'start:cmd:test' },
+          ],
+          [
+            { text: '📰 Daily Briefing', callback_data: 'start:cmd:briefing' },
+          ],
+          [
+            { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
+          ],
+        ];
+        break;
+      }
+
+      case 'sync': {
+        text = '🔄 Model Sync\n\nKeep your model catalog up to date with OpenRouter:';
+        buttons = [
+          [
+            { text: '🔄 Free Models Sync', callback_data: 'start:cmd:syncmodels' },
+            { text: '🌐 Full Sync + Top 20', callback_data: 'start:sync' },
+          ],
+          [
+            { text: '🔍 Check for Updates', callback_data: 'start:cmd:synccheck' },
+          ],
+          [
+            { text: '📋 Model Overrides', callback_data: 'start:cmd:modelupdatelist' },
+            { text: '🗑️ Reset Dynamic', callback_data: 'start:cmd:syncreset' },
+          ],
+          [
+            { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
+          ],
+        ];
+        break;
+      }
+
+      case 'settings': {
+        text = '⚙️ Settings\n\nConfigure bot behavior:';
+        buttons = [
+          [
+            { text: '🔁 Auto-Resume', callback_data: 'start:cmd:ar' },
+            { text: '🛤️ Auto-Route', callback_data: 'start:cmd:autoroute' },
+          ],
+          [
+            { text: '🗑️ Clear Chat', callback_data: 'start:cmd:clear' },
+            { text: '🎭 Skills', callback_data: 'start:cmd:skill' },
+          ],
+          [
+            { text: '⬅️ Back to Menu', callback_data: 'start:menu' },
+          ],
+        ];
+        break;
+      }
+
+      default:
+        return;
+    }
+
+    await this.bot.sendMessageWithButtons(chatId, text, buttons);
+  }
+
+  /**
+   * Execute a command from a /start sub-menu button press.
+   * Each case mirrors the logic from the main command switch in handleMessage.
+   */
+  private async handleStartCommandAction(chatId: number, userId: string, cmd: string): Promise<void> {
+    switch (cmd) {
+      // === Models group ===
+      case 'models':
+        await this.bot.sendMessage(chatId, formatModelsList());
+        break;
+      case 'model': {
+        const currentModel = await this.storage.getUserModel(userId);
+        const modelInfo = getModel(currentModel);
+        await this.bot.sendMessage(
+          chatId,
+          `Current model: ${modelInfo?.name || currentModel}\n` +
+          `Alias: /${currentModel}\n` +
+          `${modelInfo?.specialty || ''}\n` +
+          `Cost: ${modelInfo?.cost || 'N/A'}`
+        );
+        break;
+      }
+
+      // === Saves group ===
+      case 'saves': {
+        const checkpoints = await this.storage.listCheckpoints(userId);
+        if (checkpoints.length === 0) {
+          await this.bot.sendMessage(chatId, '📭 No saved checkpoints found.\n\nCheckpoints are automatically created during long-running tasks.');
+          break;
+        }
+        let msg = '💾 *Saved Checkpoints:*\n\n';
+        for (const cp of checkpoints) {
+          const age = this.formatAge(cp.savedAt);
+          const status = cp.completed ? '✅' : '⏸️';
+          const prompt = cp.taskPrompt ? `\n   _${this.escapeMarkdown(cp.taskPrompt.substring(0, 50))}${cp.taskPrompt.length > 50 ? '...' : ''}_` : '';
+          const modelTag = cp.modelAlias ? ` [${cp.modelAlias}]` : '';
+          msg += `${status} \`${cp.slotName}\` - ${cp.iterations} iters, ${cp.toolsUsed} tools${modelTag} (${age})${prompt}\n`;
+        }
+        msg += '\n✅=completed ⏸️=interrupted\n_Use /delsave <name> to delete, /saveas <name> to backup_';
+        await this.bot.sendMessage(chatId, msg, { parseMode: 'Markdown' });
+        break;
+      }
+      case 'learnings': {
+        const learningHistory = await loadLearnings(this.r2Bucket, userId);
+        if (!learningHistory || learningHistory.learnings.length === 0) {
+          await this.bot.sendMessage(chatId, '📚 No task history yet. Complete some tasks and check back!');
+          break;
+        }
+        await this.bot.sendMessage(chatId, formatLearningSummary(learningHistory));
+        break;
+      }
+      case 'sessions': {
+        if (!this.acontextKey) {
+          await this.bot.sendMessage(chatId, '⚠️ Acontext not configured. Set ACONTEXT_API_KEY to enable session tracking.');
+          break;
+        }
+        try {
+          const acontext = createAcontextClient(this.acontextKey, this.acontextBaseUrl);
+          if (!acontext) {
+            await this.bot.sendMessage(chatId, '⚠️ Failed to create Acontext client.');
+            break;
+          }
+          const response = await acontext.listSessions({ user: userId, limit: 10, timeDesc: true });
+          await this.bot.sendMessage(chatId, formatSessionsList(response.items));
+        } catch {
+          await this.bot.sendMessage(chatId, '⚠️ Failed to fetch sessions. Try again later.');
+        }
+        break;
+      }
+
+      // === Stats group ===
+      case 'credits':
+        try {
+          const credits = await this.openrouter.getCredits();
+          await this.bot.sendMessage(
+            chatId,
+            `OpenRouter Credits\nRemaining: $${credits.credits.toFixed(4)}\nUsed: $${credits.usage.toFixed(4)}`
+          );
+        } catch (error) {
+          await this.bot.sendMessage(chatId, `Failed to get credits: ${error}`);
+        }
+        break;
+      case 'costs':
+        await this.handleCostsCommand(chatId, userId, []);
+        break;
+      case 'costsweek':
+        await this.handleCostsCommand(chatId, userId, ['week']);
+        break;
+      case 'ping': {
+        const pingStart = Date.now();
+        const pingMsg = await this.bot.sendMessage(chatId, '🏓 Pong!');
+        const pingLatency = Date.now() - pingStart;
+        await this.bot.editMessage(chatId, pingMsg.message_id, `🏓 Pong! (${pingLatency}ms)`);
+        break;
+      }
+      case 'status': {
+        const statusModel = await this.storage.getUserModel(userId);
+        const statusModelInfo = getModel(statusModel);
+        const statusHistory = await this.storage.getConversation(userId, 100);
+        const statusAutoResume = await this.storage.getUserAutoResume(userId);
+        const statusAutoRoute = await this.storage.getUserAutoRoute(userId);
+        await this.bot.sendMessage(
+          chatId,
+          `📊 Bot Status\n\n` +
+          `Model: ${statusModelInfo?.name || statusModel}\n` +
+          `Conversation: ${statusHistory.length} messages\n` +
+          `Auto-resume: ${statusAutoResume ? '✓ Enabled' : '✗ Disabled'}\n` +
+          `Auto-route: ${statusAutoRoute ? '✓ Enabled' : '✗ Disabled'}\n` +
+          `GitHub: ${this.githubToken ? '✓' : '✗'} | Browser: ${this.browser ? '✓' : '✗'} | Sandbox: ${this.sandbox ? '✓' : '✗'}`
+        );
+        break;
+      }
+      case 'test':
+        if (!this.taskProcessor) {
+          await this.bot.sendMessage(chatId, 'Task processor not available.');
+          break;
+        }
+        await this.bot.sendMessage(chatId, 'Running smoke tests...\nThis may take up to 2 minutes.');
+        try {
+          const testResults = await runSmokeTests({
+            taskProcessor: this.taskProcessor,
+            userId,
+            chatId,
+            telegramToken: this.telegramToken,
+            openrouterKey: this.openrouterKey,
+            githubToken: this.githubToken,
+            braveSearchKey: this.braveSearchKey,
+          });
+          await this.bot.sendMessage(chatId, formatTestResults(testResults));
+        } catch (error) {
+          await this.bot.sendMessage(chatId, `❌ Test error: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        break;
+      case 'briefing':
+        await this.handleBriefingCommand(chatId, userId, []);
+        break;
+
+      // === Sync group ===
+      case 'syncmodels':
+        await this.handleSyncModelsCommand(chatId, userId);
+        break;
+      case 'synccheck':
+        await this.handleSyncCheckCommand(chatId);
+        break;
+      case 'syncreset': {
+        await this.storage.saveDynamicModels({}, []);
+        registerDynamicModels({});
+        const blocked = getBlockedAliases();
+        if (blocked.length > 0) unblockModels(blocked);
+        await this.bot.sendMessage(chatId, '🗑️ Dynamic models and blocked list cleared.\nOnly static catalog models are available now.');
+        break;
+      }
+      case 'modelupdatelist':
+        await this.handleModelUpdateCommand(chatId, ['list']);
+        break;
+
+      // === Settings group ===
+      case 'ar': {
+        const curAR = await this.storage.getUserAutoResume(userId);
+        const newAR = !curAR;
+        await this.storage.setUserAutoResume(userId, newAR);
+        await this.bot.sendMessage(chatId, newAR
+          ? '✓ Auto-resume enabled. Tasks will automatically retry on timeout.'
+          : '✗ Auto-resume disabled.');
+        break;
+      }
+      case 'autoroute': {
+        const curRoute = await this.storage.getUserAutoRoute(userId);
+        const newRoute = !curRoute;
+        await this.storage.setUserAutoRoute(userId, newRoute);
+        await this.bot.sendMessage(chatId, newRoute
+          ? '✓ Auto-routing enabled. Simple queries → fast model.'
+          : '✗ Auto-routing disabled.');
+        break;
+      }
+      case 'clear':
+        await this.storage.clearConversation(userId);
+        await this.bot.sendMessage(chatId, '🆕 Conversation history cleared.');
+        break;
+      case 'skill':
+        await this.handleSkillCommand(chatId, []);
+        break;
     }
   }
 
@@ -3783,11 +4100,12 @@ Allowed keys: id, name, cost, score, specialty, maxContext, supportsTools, suppo
   private async sendStartMenu(chatId: number): Promise<void> {
     const welcome = `🤖 Welcome to Moltworker!
 
-Your multi-model AI assistant with 14 real-time tools and 30+ AI models.
+Your multi-model AI assistant with 15 real-time tools and 30+ AI models.
 
 Just type a message to chat, or tap a button below to explore:`;
 
     const buttons: InlineKeyboardButton[][] = [
+      // Row 1-2: Feature guides
       [
         { text: '💻 Coding', callback_data: 'start:coding' },
         { text: '🔍 Research', callback_data: 'start:research' },
@@ -3798,11 +4116,22 @@ Just type a message to chat, or tap a button below to explore:`;
         { text: '👁️ Vision', callback_data: 'start:vision' },
         { text: '🧠 Reasoning', callback_data: 'start:reasoning' },
       ],
+      // Row 3: Workflows
       [
         { text: '🎼 Orchestra', callback_data: 'start:orchestra' },
-        { text: '🤖 Pick a Model', callback_data: 'start:pick' },
-        { text: '🌐 Sync Models', callback_data: 'start:sync' },
+        { text: '☁️ Cloudflare', callback_data: 'start:cloudflare' },
       ],
+      // Row 4-5: Action sub-menus
+      [
+        { text: '🤖 Models ▸', callback_data: 'start:sub:models' },
+        { text: '💾 Saves ▸', callback_data: 'start:sub:saves' },
+        { text: '📊 Stats ▸', callback_data: 'start:sub:stats' },
+      ],
+      [
+        { text: '🔄 Sync ▸', callback_data: 'start:sub:sync' },
+        { text: '⚙️ Settings ▸', callback_data: 'start:sub:settings' },
+      ],
+      // Row 6: Help
       [
         { text: '📖 All Commands', callback_data: 'start:help' },
       ],
@@ -3928,6 +4257,22 @@ Best reasoning models:
 /deep — Great value, configurable thinking
 /flash — Strong reasoning + 1M context
 /opus — Maximum quality`;
+
+      case 'cloudflare':
+        return `☁️ Cloudflare API Integration
+
+Query and execute Cloudflare API calls directly from chat.
+
+━━━ Commands ━━━
+/cf search <query> — Search Cloudflare API endpoints
+/cf execute <code> — Run TypeScript against Cloudflare SDK
+
+━━━ Examples ━━━
+/cf search workers
+/cf execute list all zones
+/cf search dns records
+
+Uses Code Mode MCP for full Cloudflare SDK access. Requires CLOUDFLARE_API_TOKEN.`;
 
       case 'orchestra':
         return `🎼 Orchestra Mode — AI Project Execution
