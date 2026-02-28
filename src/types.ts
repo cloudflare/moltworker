@@ -68,6 +68,8 @@ export interface MoltbotEnv {
   // Acontext observability
   ACONTEXT_API_KEY?: string; // Acontext API key for session storage and observability
   ACONTEXT_BASE_URL?: string; // Acontext API base URL (default: https://api.acontext.io)
+  // Debug / simulation endpoint
+  DEBUG_API_KEY?: string; // Bearer token for /simulate/* endpoints (set via wrangler secret put DEBUG_API_KEY)
 }
 
 /**

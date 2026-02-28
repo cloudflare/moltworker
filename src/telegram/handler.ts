@@ -551,6 +551,15 @@ export class TelegramHandler {
   }
 
   /**
+   * Replace the bot instance. Used by /simulate endpoint to inject a CapturingBot
+   * that records all outputs instead of making Telegram API calls.
+   * @internal
+   */
+  _setBot(bot: TelegramBot): void {
+    this.bot = bot;
+  }
+
+  /**
    * Load previously synced dynamic models and blocked list from R2 into runtime.
    * Also loads auto-synced full catalog models.
    */

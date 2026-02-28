@@ -28,6 +28,7 @@ import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp, telegram, discord, dream } from './routes';
+import { simulate } from './routes/simulate';
 import { redactSensitiveParams, redactWsPayload } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -160,6 +161,10 @@ app.route('/cdp', cdp);
 // Mounted outside /api/ to avoid Cloudflare Access edge interception
 app.route('/dream-build', dream);
 
+// Mount simulation endpoint (uses Bearer token auth via DEBUG_API_KEY, not CF Access)
+// Allows testing bot behavior via HTTP without Telegram
+app.route('/simulate', simulate);
+
 // =============================================================================
 // PROTECTED ROUTES: Cloudflare Access authentication required
 // =============================================================================
@@ -180,6 +185,11 @@ app.use('*', async (c, next) => {
 
   // Skip validation for dream-build routes (uses Bearer token auth)
   if (url.pathname.startsWith('/dream-build')) {
+    return next();
+  }
+
+  // Skip validation for simulate routes (uses Bearer token auth via DEBUG_API_KEY)
+  if (url.pathname.startsWith('/simulate')) {
     return next();
   }
 
@@ -222,6 +232,11 @@ app.use('*', async (c, next) => {
 
   // Skip auth for dream-build routes (uses Bearer token auth)
   if (url.pathname.startsWith('/dream-build')) {
+    return next();
+  }
+
+  // Skip auth for simulate routes (uses Bearer token auth via DEBUG_API_KEY)
+  if (url.pathname.startsWith('/simulate')) {
     return next();
   }
 
