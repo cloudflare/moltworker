@@ -114,7 +114,7 @@ simulate.post('/chat', async (c) => {
   const text = body.text;
   const modelAlias = body.model || 'flash';
   const timeoutMs = Math.min(body.timeout || 60_000, 120_000); // Max 2 min
-  const userId = 'simulate-0';
+  const userId = '999999999'; // Numeric string — must match what handler extracts from from.id
   const chatId = 0; // Fake chat — Telegram messages will silently fail
   const taskId = `sim-${Date.now()}`;
 
@@ -213,7 +213,7 @@ simulate.post('/command', async (c) => {
   }
 
   const command = body.command.startsWith('/') ? body.command : `/${body.command}`;
-  const userId = 'simulate-0';
+  const userId = '999999999'; // Numeric string — must match what handler extracts from from.id
   const chatId = 0;
 
   // Create handler with all real bindings
