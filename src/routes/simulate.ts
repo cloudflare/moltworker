@@ -206,13 +206,14 @@ simulate.post('/command', async (c) => {
     return c.json({ error: 'MOLTBOT_BUCKET not configured' }, 503);
   }
 
-  const body = await c.req.json() as { command?: string };
+  const body = await c.req.json() as { command?: string; timeout?: number };
 
   if (!body.command) {
     return c.json({ error: 'Missing required field: command' }, 400);
   }
 
   const command = body.command.startsWith('/') ? body.command : `/${body.command}`;
+  const timeoutMs = body.timeout ? Math.min(body.timeout, 120_000) : 0;
   const userId = '999999999'; // Numeric string — must match what handler extracts from from.id
   const chatId = 0;
 
@@ -266,15 +267,32 @@ simulate.post('/command', async (c) => {
     };
 
     await handler.handleUpdate(fakeUpdate);
-    const durationMs = Date.now() - start;
 
     // Filter out noise (typing actions, etc.)
     const messages = bot.captured.filter(m => m.type !== 'action');
+
+    // If timeout is set and the command dispatched to a DO (orchestra commands),
+    // poll the DO for the task result. The handler dispatches orch tasks to
+    // a DO named after the userId.
+    let doResult: TaskStatus | undefined;
+    if (timeoutMs > 0 && env.TASK_PROCESSOR) {
+      const dispatchedToDO = bot.captured.some(
+        m => m.text?.includes('Orchestra') && m.text?.includes('started')
+      );
+      if (dispatchedToDO) {
+        const doId = env.TASK_PROCESSOR.idFromName(userId);
+        const doStub = env.TASK_PROCESSOR.get(doId);
+        doResult = await waitForCompletion(doStub, timeoutMs);
+      }
+    }
+
+    const durationMs = Date.now() - start;
 
     return c.json({
       command,
       messages,
       allCaptured: bot.captured,
+      ...(doResult ? { doResult } : {}),
       durationMs,
     });
   } catch (err) {

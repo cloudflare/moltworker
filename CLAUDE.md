@@ -132,6 +132,8 @@ curl -X POST https://moltbot-sandbox.petrantonft.workers.dev/simulate/command \
 
 Returns: `{ command, messages[], allCaptured[], durationMs }`
 
+Options: `command` (required), `timeout` (optional, max: 120000 — when set, polls the Durable Object for orchestra commands that dispatch async tasks, returning `doResult` with the full task status)
+
 ### Check status of a timed-out chat simulation
 
 ```bash
