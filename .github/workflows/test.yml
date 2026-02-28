@@ -79,16 +79,21 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - name: Install Playwright
-        run: npx playwright install --with-deps chromium
-
-      - name: Install playwright-cli
-        run: npm install -g @playwright/cli
+      - name: Install system dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg imagemagick bc
 
       - name: Install cctr
         uses: taiki-e/install-action@v2
         with:
           tool: cctr
+
+      - name: Install plwr
+        uses: taiki-e/install-action@v2
+        with:
+          tool: plwr@0.7.2
+
+      - name: Install Playwright browsers
+        run: npm install -g playwright && npx playwright install --with-deps chromium
 
       - name: Run E2E tests (${{ matrix.config.name }})
         id: e2e
@@ -109,7 +114,7 @@ jobs:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           AI_GATEWAY_BASE_URL: ${{ secrets.AI_GATEWAY_BASE_URL }}
           # Unique test run ID for parallel isolation
-          E2E_TEST_RUN_ID: ${{ github.run_id }}-${{ matrix.config.name }}
+          E2E_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.config.name }}
           # Matrix-specific config
           TELEGRAM_BOT_TOKEN: ${{ matrix.config.env.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
@@ -118,25 +123,20 @@ jobs:
           CF_AI_GATEWAY_MODEL: ${{ matrix.config.env.CF_AI_GATEWAY_MODEL }}
         run: cctr -vv test/e2e
 
-      - name: Convert video and generate thumbnail
-        id: convert
+      - name: Generate video thumbnail
+        id: video
         if: always()
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg imagemagick bc
-          if ls /tmp/moltworker-e2e-videos/*.webm 1>/dev/null 2>&1; then
-            for webm in /tmp/moltworker-e2e-videos/*.webm; do
-              mp4="${webm%.webm}.mp4"
-              thumb="${webm%.webm}.png"
-              
-              # Convert to mp4
-              ffmpeg -y -i "$webm" -c:v libx264 -preset fast -crf 22 -c:a aac "$mp4"
-              
+          if ls /tmp/moltworker-e2e-videos/*.mp4 1>/dev/null 2>&1; then
+            for mp4 in /tmp/moltworker-e2e-videos/*.mp4; do
+              thumb="${mp4%.mp4}.png"
+
               # Extract middle frame as thumbnail
               duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$mp4")
               midpoint=$(echo "$duration / 2" | bc -l)
               ffmpeg -y -ss "$midpoint" -i "$mp4" -vframes 1 -update 1 -q:v 2 "$thumb"
-              
-              # Add play button overlay using ImageMagick
+
+              # Add play button overlay
               width=$(identify -format '%w' "$thumb")
               height=$(identify -format '%h' "$thumb")
               cx=$((width / 2))
@@ -145,7 +145,7 @@ jobs:
                 -fill 'rgba(0,0,0,0.6)' -draw "circle ${cx},${cy} $((cx+50)),${cy}" \
                 -fill 'white' -draw "polygon $((cx-15)),$((cy-25)) $((cx-15)),$((cy+25)) $((cx+30)),${cy}" \
                 "$thumb"
-              
+
               echo "video_path=$mp4" >> $GITHUB_OUTPUT
               echo "video_name=$(basename $mp4)" >> $GITHUB_OUTPUT
               echo "thumb_path=$thumb" >> $GITHUB_OUTPUT
@@ -158,16 +158,16 @@ jobs:
 
       - name: Prepare video for upload
         id: prepare
-        if: always() && steps.convert.outputs.has_video == 'true'
+        if: always() && steps.video.outputs.has_video == 'true'
         run: |
           mkdir -p /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}
-          cp "${{ steps.convert.outputs.video_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
-          cp "${{ steps.convert.outputs.thumb_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
-          echo "video_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts-${{ matrix.config.name }}/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.convert.outputs.video_name }}" >> $GITHUB_OUTPUT
-          echo "thumb_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts-${{ matrix.config.name }}/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.convert.outputs.thumb_name }}" >> $GITHUB_OUTPUT
+          cp "${{ steps.video.outputs.video_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
+          cp "${{ steps.video.outputs.thumb_path }}" /tmp/e2e-video-upload/videos/${{ github.run_id }}-${{ matrix.config.name }}/
+          echo "video_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts-${{ matrix.config.name }}/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.video.outputs.video_name }}" >> $GITHUB_OUTPUT
+          echo "thumb_url=https://github.com/${{ github.repository }}/raw/e2e-artifacts-${{ matrix.config.name }}/videos/${{ github.run_id }}-${{ matrix.config.name }}/${{ steps.video.outputs.thumb_name }}" >> $GITHUB_OUTPUT
 
       - name: Upload video to e2e-artifacts branch
-        if: always() && steps.convert.outputs.has_video == 'true'
+        if: always() && steps.video.outputs.has_video == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -214,7 +214,7 @@ jobs:
         run: |
           echo "## E2E Test Recording" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.convert.outputs.has_video }}" == "true" ]; then
+          if [ "${{ steps.video.outputs.has_video }}" == "true" ]; then
             echo "📹 [Download video](${{ steps.prepare.outputs.video_url }})" >> $GITHUB_STEP_SUMMARY
           else
             echo "⚠️ No video recording found" >> $GITHUB_STEP_SUMMARY

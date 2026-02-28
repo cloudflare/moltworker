@@ -1,8 +1,8 @@
 #!/bin/bash
-# Stop playwright-cli browser session
+# Stop plwr browser session
 
 SESSION_NAME="moltworker-e2e"
 
-playwright-cli session-stop "$SESSION_NAME" 2>/dev/null || true
+plwr -S "$SESSION_NAME" stop 2>/dev/null || true
 
 echo "stopped"

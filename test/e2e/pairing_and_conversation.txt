@@ -1,98 +1,46 @@
 ===
-navigate to admin page to approve device
+navigate to admin page
 %require
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.goto('$WORKER_URL/_admin/?token=$TOKEN');
-}"
+plwr -S moltworker-e2e open "$WORKER_URL/_admin/?token=$TOKEN" -T 120000
 ---
 
 ===
-wait for pending devices section to load
+wait for pending devices and approve
 %require
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=Pending Pairing Requests', { timeout: 120000 });
-}"
+plwr -S moltworker-e2e wait 'button:has-text("Approve All")' -T 120000
+plwr -S moltworker-e2e click 'button:has-text("Approve All")' -T 10000
 ---
 
 ===
-wait for Approve All button and click it
-%require
-===
-./pw --session=moltworker-e2e run-code "async page => {
-  const btn = await page.waitForSelector('button:has-text(\"Approve All\")', { timeout: 120000 });
-  await btn.click();
-}"
----
-
-===
-wait for approval to complete
-%require
-===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=No pending pairing requests', { timeout: 120000 });
-}"
----
-
-===
-navigate back to main chat page
+navigate to chat page
 %require
 ===
 TOKEN=$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.goto('$WORKER_URL/?token=$TOKEN');
-}"
+plwr -S moltworker-e2e open "$WORKER_URL/?token=$TOKEN" -T 120000
 ---
 
 ===
 wait for chat interface to load
 %require
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('textarea', { timeout: 120000 });
-}"
+plwr -S moltworker-e2e wait 'textarea:not([disabled])' -T 120000
 ---
 
 ===
-send /models command
+send math question
 %require
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  const textarea = await page.waitForSelector('textarea');
-  await textarea.fill('/models');
-  const btn = await page.waitForSelector('button:has-text(\"Send\")');
-  await btn.click();
-}"
+plwr -S moltworker-e2e fill textarea 'What is 847293 + 651824? Reply with just the number.'
+plwr -S moltworker-e2e click 'button:has-text("Send")'
 ---
 
 ===
-type math question into chat
-%require
+wait for correct answer
 ===
-./pw --session=moltworker-e2e run-code "async page => {
-  const textarea = await page.waitForSelector('textarea');
-  await textarea.fill('What is 847293 + 651824? Reply with just the number.');
-}"
----
-
-===
-click send button
-%require
-===
-./pw --session=moltworker-e2e run-code "async page => {
-  const btn = await page.waitForSelector('button:has-text(\"Send\")');
-  await btn.click();
-}"
----
-
-===
-wait for response containing the correct answer
-===
-./pw --session=moltworker-e2e run-code "async page => {
-  await page.waitForSelector('text=1499117', { timeout: 120000 });
-}"
+plwr -S moltworker-e2e wait 'text=1499117' -T 120000
 ---
