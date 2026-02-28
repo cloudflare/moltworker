@@ -68,6 +68,7 @@ export const MODELS: Record<string, ModelInfo> = {
     score: 'Dynamic routing',
     cost: 'Variable (often FREE)',
     isFree: true,
+    supportsTools: true,
   },
 
   // === FREE MODELS ===
@@ -800,9 +801,18 @@ export function getModel(alias: string): ModelInfo | undefined {
   const lower = alias.toLowerCase();
   if (BLOCKED_ALIASES.has(lower)) return undefined;
 
-  // Exact match (highest priority)
+  // Exact match by alias (highest priority)
   const exact = DYNAMIC_MODELS[lower] || MODELS[lower] || AUTO_SYNCED_MODELS[lower];
   if (exact) return exact;
+
+  // Exact match by full model ID (e.g. "openai/gpt-oss-safeguard-20b:nitro")
+  if (lower.includes('/')) {
+    for (const reg of [DYNAMIC_MODELS, MODELS, AUTO_SYNCED_MODELS]) {
+      for (const model of Object.values(reg)) {
+        if (model.id.toLowerCase() === lower) return model;
+      }
+    }
+  }
 
   // Fuzzy fallback for auto-synced and hyphenated aliases
   return fuzzyMatchModel(lower);
@@ -892,6 +902,9 @@ export function isAnthropicModel(alias: string): boolean {
  */
 export function getModelId(alias: string): string {
   const model = getModel(alias);
+  if (!model) {
+    console.log(`[Models] Unknown alias '${alias}', falling back to openrouter/auto`);
+  }
   return model?.id || 'openrouter/auto';
 }
 

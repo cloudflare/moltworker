@@ -30,11 +30,18 @@ describe('generateAlias', () => {
   });
 
   it('resolves conflicts with counter', () => {
-    const existing = new Set<string>(['gpt-4o']);
+    const existing = new Set<string>(['gpt4o']);
     const aliasMap: Record<string, string> = {};
     const alias = generateAlias('openai/gpt-4o', existing, aliasMap);
-    expect(alias).not.toBe('gpt-4o');
+    expect(alias).not.toBe('gpt4o');
     expect(existing.has(alias)).toBe(true);
+  });
+
+  it('generates aliases without hyphens (Telegram bot command compat)', () => {
+    const existing = new Set<string>();
+    const aliasMap: Record<string, string> = {};
+    const alias = generateAlias('openai/gpt-4o-mini', existing, aliasMap);
+    expect(alias).not.toContain('-');
   });
 
   it('returns stable alias from map', () => {

@@ -55,8 +55,9 @@ function createNewAlias(modelId: string, existingAliases: Set<string>): string {
   // Remove common version/preview tags
   base = base.replace(/-(preview|latest|next|beta|alpha|exp|experimental|turbo|instruct|chat|online)$/gi, '');
 
-  // Collapse to lowercase, keep only alphanumeric and hyphens
-  base = base.toLowerCase().replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  // Collapse to lowercase alphanumeric only (no hyphens — Telegram bot commands
+  // only support [a-z0-9_], so hyphens break clickable /alias in messages)
+  base = base.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   // Remove common filler words to shorten
   if (base.length > 20) {
@@ -79,7 +80,7 @@ function createNewAlias(modelId: string, existingAliases: Set<string>): string {
     // Try appending provider short code
     const provider = modelId.includes('/') ? modelId.split('/')[0].slice(0, 3) : '';
     if (provider) {
-      alias = `${base}-${provider}`;
+      alias = `${base}${provider}`;
       if (!existingAliases.has(alias)) return alias;
     }
 

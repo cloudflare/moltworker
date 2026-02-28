@@ -6,8 +6,8 @@
 
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, parseSSEStream, type ChatMessage, type ResponseFormat } from '../openrouter/client';
-import { executeTool, AVAILABLE_TOOLS, githubReadFile, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER, getToolsForPhase } from '../openrouter/tools';
-import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, isAnthropicModel, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
+import { executeTool, AVAILABLE_TOOLS, githubReadFile, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER, getToolsForPhase, modelSupportsTools } from '../openrouter/tools';
+import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, isAnthropicModel, registerDynamicModels, blockModels, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { injectCacheControl } from '../openrouter/prompt-cache';
 import { markdownToTelegramHtml } from '../utils/telegram-format';
@@ -1251,23 +1251,58 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
       cloudflareApiToken: request.cloudflareApiToken,
     };
 
+    // Load dynamic + auto-synced model catalogs from R2 so the DO knows about
+    // models registered via /syncmodels or full-catalog sync (not just curated MODELS).
+    // Without this, any non-curated model alias falls through to the free-model fallback.
+    if (this.r2) {
+      try {
+        const { UserStorage } = await import('../openrouter/storage');
+        const storage = new UserStorage(this.r2);
+        const data = await storage.loadDynamicModels();
+        if (data) {
+          if (data.models && Object.keys(data.models).length > 0) {
+            registerDynamicModels(data.models);
+            console.log(`[TaskProcessor] Loaded ${Object.keys(data.models).length} dynamic models from R2`);
+          }
+          if (data.blocked && data.blocked.length > 0) {
+            blockModels(data.blocked);
+          }
+        }
+      } catch (err) {
+        console.error('[TaskProcessor] Failed to load dynamic models:', err);
+      }
+      try {
+        const { loadAutoSyncedModels } = await import('../openrouter/model-sync/sync');
+        const count = await loadAutoSyncedModels(this.r2);
+        if (count > 0) {
+          console.log(`[TaskProcessor] Loaded ${count} auto-synced models from R2`);
+        }
+      } catch (err) {
+        console.error('[TaskProcessor] Failed to load auto-synced models:', err);
+      }
+    }
+
     // Pre-validate: if the requested model no longer exists, switch to a free model
     // instead of waiting for a 404 from OpenRouter (which wastes an API round-trip).
     if (!getModel(task.modelAlias)) {
+      const oldAlias = task.modelAlias;
       const freeAlternatives = getFreeToolModels();
       if (freeAlternatives.length > 0) {
-        const oldAlias = task.modelAlias;
         task.modelAlias = freeAlternatives[0];
-        await this.doState.storage.put('task', task);
-        console.log(`[TaskProcessor] Model /${oldAlias} no longer available, pre-switching to /${task.modelAlias}`);
-        if (statusMessageId) {
-          try {
-            await this.editTelegramMessage(
-              request.telegramToken, request.chatId, statusMessageId,
-              `⚠️ /${oldAlias} unavailable. Using /${task.modelAlias} (free)`
-            );
-          } catch { /* non-fatal */ }
-        }
+      } else {
+        // All free models down — fall back to auto (OpenRouter's dynamic router)
+        console.log(`[TaskProcessor] No free models available, falling back to /auto`);
+        task.modelAlias = 'auto';
+      }
+      await this.doState.storage.put('task', task);
+      console.log(`[TaskProcessor] Model /${oldAlias} no longer available, pre-switching to /${task.modelAlias}`);
+      if (statusMessageId) {
+        try {
+          await this.editTelegramMessage(
+            request.telegramToken, request.chatId, statusMessageId,
+            `⚠️ /${oldAlias} unavailable. Using /${task.modelAlias} (free)`
+          );
+        } catch { /* non-fatal */ }
       }
     }
 
@@ -1513,8 +1548,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         console.log(`[TaskProcessor] Using provider: ${provider}, URL: ${providerConfig.baseUrl}`);
 
         // Check if current model supports tools (conditional injection)
+        // Use modelSupportsTools() which checks both the flag and a hardcoded fallback list,
+        // so tools work even if getModel() returns undefined for an unknown alias.
         const currentModel = getModel(task.modelAlias);
-        const useTools = currentModel?.supportsTools === true;
+        const useTools = modelSupportsTools(task.modelAlias);
 
         // Phase budget circuit breaker: check before API call
         if (task.phase) {
