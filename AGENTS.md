@@ -12,6 +12,10 @@ This is a Cloudflare Worker that runs [OpenClaw](https://github.com/openclaw/ope
 
 **Note:** The CLI tool and npm package are now named `openclaw`. Config files use `.openclaw/openclaw.json`. Legacy `.clawdbot` paths are supported for backward compatibility during transition.
 
+### Paso4 Extensions (`moltlazy/`)
+
+The `@moltlazy/` module is an external addition to the original Cloudflare project. This module is fully owned by the **Paso4 developers** and contains configuration utilities (like `patchConfig.ts`) used during the container startup process to adapt OpenClaw settings based on the Cloudflare environment.
+
 ## Project Structure
 
 ```
@@ -37,6 +41,8 @@ src/
     ├── App.tsx
     ├── api.ts        # API client
     └── pages/
+moltlazy/             # Paso4 proprietary configuration utilities
+└── patchConfig.ts    # CLI for patching OpenClaw config in container
 ```
 
 ## Key Patterns
