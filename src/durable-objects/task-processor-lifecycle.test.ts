@@ -40,6 +40,7 @@ vi.mock('../openrouter/tools', () => ({
   AVAILABLE_TOOLS: [],
   TOOLS_WITHOUT_BROWSER: [],
   getToolsForPhase: vi.fn(() => []),
+  modelSupportsTools: vi.fn(() => true),
 }));
 
 vi.mock('../openrouter/models', () => ({

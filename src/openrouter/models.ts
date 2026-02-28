@@ -68,6 +68,7 @@ export const MODELS: Record<string, ModelInfo> = {
     score: 'Dynamic routing',
     cost: 'Variable (often FREE)',
     isFree: true,
+    supportsTools: true,
   },
 
   // === FREE MODELS ===
@@ -892,6 +893,9 @@ export function isAnthropicModel(alias: string): boolean {
  */
 export function getModelId(alias: string): string {
   const model = getModel(alias);
+  if (!model) {
+    console.log(`[Models] Unknown alias '${alias}', falling back to openrouter/auto`);
+  }
   return model?.id || 'openrouter/auto';
 }
 
