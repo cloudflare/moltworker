@@ -743,7 +743,7 @@ export class TelegramHandler {
     const username = message.from?.username;
 
     const [command, ...args] = text.split(/\s+/);
-    const cmd = command.toLowerCase().replace('@.*$', ''); // Remove bot username if present
+    const cmd = command.toLowerCase().replace(/@.*$/, ''); // Remove bot username if present
 
     switch (cmd) {
       case '/start':
@@ -1290,7 +1290,7 @@ export class TelegramHandler {
     if (!model) {
       await this.bot.sendMessage(
         chatId,
-        `Unknown model: ${alias}\nType /models to see available models.`
+        `Unknown model: ${alias}\nType /models to see available models.\nTip: you can use the full OpenRouter ID (e.g. /use openai/gpt-4o)`
       );
       return;
     }
@@ -2682,13 +2682,16 @@ export class TelegramHandler {
     }
 
     // Parse callback data format: action:param1:param2...
+    // Split with limit 2 first to get action, then re-split payload as needed per action.
+    const colonIdx = callbackData.indexOf(':');
+    const action = colonIdx >= 0 ? callbackData.slice(0, colonIdx) : callbackData;
+    const payload = colonIdx >= 0 ? callbackData.slice(colonIdx + 1) : '';
     const parts = callbackData.split(':');
-    const action = parts[0];
 
     switch (action) {
       case 'model':
-        // Quick model switch: model:alias
-        const modelAlias = parts[1];
+        // Quick model switch: model:alias (payload preserves full alias even if it has colons)
+        const modelAlias = payload;
         if (modelAlias) {
           await this.handleUseCommand(chatId, userId, query.from.username, [modelAlias]);
           // Remove buttons after selection
@@ -3184,46 +3187,51 @@ export class TelegramHandler {
       return { m, score };
     });
 
-    // Free models with tools — top 3 by score
+    // Free models with tools — top 4 by score
     const freeScored = scored
       .filter(s => s.m.isFree)
       .sort((a, b) => b.score - a.score);
-    const freeTop = freeScored.slice(0, 3);
+    const freeTop = freeScored.slice(0, 4);
 
-    // Paid value models (exceptional + great tier) — top 3 by score
+    // Paid value models (exceptional + great tier) — top 4 by score
     const paidValue = scored
       .filter(s => !s.m.isFree && ['exceptional', 'great'].includes(getValueTier(s.m)))
       .sort((a, b) => b.score - a.score);
-    const valueTop = paidValue.slice(0, 3);
+    const valueTop = paidValue.slice(0, 4);
 
-    // Premium flagships — top 3 by score
+    // Premium flagships — top 4 by score
     const premium = scored
       .filter(s => !s.m.isFree && ['good', 'premium'].includes(getValueTier(s.m)))
       .sort((a, b) => b.score - a.score);
-    const premiumTop = premium.slice(0, 3);
+    const premiumTop = premium.slice(0, 4);
 
     const makeButton = (m: ModelInfo, prefix: string): InlineKeyboardButton => {
       const icons = [m.supportsTools && '🔧', m.supportsVision && '👁️'].filter(Boolean).join('');
-      // Truncate name to fit Telegram button (max ~20 chars visible)
-      const shortName = m.name.length > 14 ? m.name.slice(0, 13) + '…' : m.name;
+      // Truncate name to fit Telegram button (2 per row — ~28 chars visible)
+      const shortName = m.name.length > 18 ? m.name.slice(0, 17) + '…' : m.name;
       return { text: `${prefix} ${shortName} ${icons}`, callback_data: `model:${m.alias}` };
     };
 
+    // Build button grid: 2 buttons per row for readability
+    const toRows = (items: { m: ModelInfo; score: number }[], prefix: string): InlineKeyboardButton[][] => {
+      const rows: InlineKeyboardButton[][] = [];
+      for (let i = 0; i < items.length; i += 2) {
+        const row = [makeButton(items[i].m, prefix)];
+        if (i + 1 < items.length) row.push(makeButton(items[i + 1].m, prefix));
+        rows.push(row);
+      }
+      return rows;
+    };
+
     const buttons: InlineKeyboardButton[][] = [];
-    if (freeTop.length > 0) {
-      buttons.push(freeTop.map(s => makeButton(s.m, '🆓')));
-    }
-    if (valueTop.length > 0) {
-      buttons.push(valueTop.map(s => makeButton(s.m, '🏆')));
-    }
-    if (premiumTop.length > 0) {
-      buttons.push(premiumTop.map(s => makeButton(s.m, '💎')));
-    }
+    buttons.push(...toRows(freeTop, '🆓'));
+    buttons.push(...toRows(valueTop, '🏆'));
+    buttons.push(...toRows(premiumTop, '💎'));
 
     const totalCount = all.filter(m => !m.isImageGen).length;
     await this.bot.sendMessageWithButtons(
       chatId,
-      `🤖 Top models (${totalCount} available):\n🆓 = free  🏆 = best value  💎 = premium\n🔧 = tools  👁️ = vision\n\nFull list: /models`,
+      `🤖 Top models (${totalCount} available):\n🆓 = free  🏆 = best value  💎 = premium\n🔧 = tools  👁️ = vision\n\nTip: /use <alias> for any model\nFull list: /models`,
       buttons
     );
   }

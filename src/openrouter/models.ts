@@ -801,9 +801,18 @@ export function getModel(alias: string): ModelInfo | undefined {
   const lower = alias.toLowerCase();
   if (BLOCKED_ALIASES.has(lower)) return undefined;
 
-  // Exact match (highest priority)
+  // Exact match by alias (highest priority)
   const exact = DYNAMIC_MODELS[lower] || MODELS[lower] || AUTO_SYNCED_MODELS[lower];
   if (exact) return exact;
+
+  // Exact match by full model ID (e.g. "openai/gpt-oss-safeguard-20b:nitro")
+  if (lower.includes('/')) {
+    for (const reg of [DYNAMIC_MODELS, MODELS, AUTO_SYNCED_MODELS]) {
+      for (const model of Object.values(reg)) {
+        if (model.id.toLowerCase() === lower) return model;
+      }
+    }
+  }
 
   // Fuzzy fallback for auto-synced and hyphenated aliases
   return fuzzyMatchModel(lower);
