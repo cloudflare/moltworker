@@ -31,8 +31,12 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd \
     && mkdir -p /root/clawd/skills
 
+# Copy and build moltlazy module (config patching utilities)
+COPY moltlazy/ /app/moltlazy/
+RUN cd /app/moltlazy && npm install && npm run build
+
 # Copy startup script
-# Build cache bust: 2026-02-20-v32-diagnostic-endpoint
+# Build cache bust: 2026-02-28-v33-moltlazy-extract
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh
 

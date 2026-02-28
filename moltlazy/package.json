@@ -1,0 +1,18 @@
+{
+  "name": "moltlazy",
+  "version": "1.0.0",
+  "description": "OpenClaw configuration utilities for container startup",
+  "type": "module",
+  "main": "dist/patchConfig.js",
+  "bin": {
+    "patch-config": "./dist/patchConfig.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}
