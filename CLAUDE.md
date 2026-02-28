@@ -2,7 +2,7 @@
 
 > This file is automatically read by Claude Code. It contains critical rules and context.
 
-**Last Updated:** 2026-02-06
+**Last Updated:** 2026-02-28
 
 ---
 
@@ -52,6 +52,8 @@ If not available, commit with standard format and document changes in PR descrip
 | `src/routes/discord.ts` | Discord integration |
 | `src/gateway/process.ts` | Sandbox container management |
 | `src/client/App.tsx` | Admin dashboard UI |
+| `src/routes/simulate.ts` | Simulation/testing endpoint (no Telegram needed) |
+| `src/telegram/capturing-bot.ts` | CapturingBot for command simulation |
 | `brainstorming/future-integrations.md` | Feature roadmap |
 
 ---
@@ -95,6 +97,62 @@ npm run dev           # Vite dev server
 npm run start         # Local worker (wrangler dev)
 npm run typecheck     # TypeScript check
 ```
+
+---
+
+## Bot Testing (via /simulate)
+
+The `/simulate` endpoint lets Claude Code test the bot via HTTP — no Telegram needed.
+**After making changes to the bot, use these endpoints to verify behavior before committing.**
+
+**Base URL:** `https://moltbot-sandbox.petrantonft.workers.dev`
+**Auth:** `Authorization: Bearer $DEBUG_API_KEY` (set via `wrangler secret put DEBUG_API_KEY`)
+
+### Test a chat prompt (full DO pipeline with real models + tools)
+
+```bash
+curl -X POST https://moltbot-sandbox.petrantonft.workers.dev/simulate/chat \
+  -H "Authorization: Bearer $DEBUG_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "What is 2+2?", "model": "flash", "timeout": 60000}'
+```
+
+Returns: `{ status, result, toolsUsed, iterations, model: {requested, resolved}, durationMs, timedOut }`
+
+Options: `text` (required), `model` (default: "flash"), `timeout` (default: 60000, max: 120000), `systemPrompt` (optional)
+
+### Test a /command (captures all bot messages via CapturingBot)
+
+```bash
+curl -X POST https://moltbot-sandbox.petrantonft.workers.dev/simulate/command \
+  -H "Authorization: Bearer $DEBUG_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"command": "/models"}'
+```
+
+Returns: `{ command, messages[], allCaptured[], durationMs }`
+
+### Check status of a timed-out chat simulation
+
+```bash
+curl https://moltbot-sandbox.petrantonft.workers.dev/simulate/status/$TASK_ID \
+  -H "Authorization: Bearer $DEBUG_API_KEY"
+```
+
+### Health check
+
+```bash
+curl https://moltbot-sandbox.petrantonft.workers.dev/simulate/health \
+  -H "Authorization: Bearer $DEBUG_API_KEY"
+```
+
+### When to use
+
+- **After changing model resolution** — simulate `/models`, `/use`, `/pick` to verify
+- **After changing tool execution** — simulate a prompt that triggers tools (e.g. "search the web for X")
+- **After changing the DO pipeline** — simulate a chat to verify end-to-end
+- **Before committing** — run a quick simulation to sanity-check
+- **Debugging user-reported issues** — reproduce the exact prompt to see what happens
 
 ---
 
