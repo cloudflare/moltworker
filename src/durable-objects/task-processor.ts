@@ -1766,6 +1766,26 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
               break;
             }
 
+            // 400 "Input validation error" — context too large for provider.
+            // Compress conversation and retry once instead of failing immediately.
+            if (/\b400\b/.test(lastError.message) && /input.?validation|too.?long|too.?many.?tokens|context.?length|max.?tokens|maximum.?context/i.test(lastError.message)) {
+              const beforeLen = conversationMessages.length;
+              const beforeTokens = this.estimateTokens(conversationMessages);
+              const compressed = this.compressContext(conversationMessages, task.modelAlias, 4);
+              const afterTokens = this.estimateTokens(compressed);
+              console.log(`[TaskProcessor] 400 Input validation — compressing context: ${beforeLen}→${compressed.length} msgs, ~${beforeTokens}→${afterTokens} tokens`);
+
+              if (compressed.length < beforeLen) {
+                // Context was compressible — replace and retry
+                conversationMessages.length = 0;
+                conversationMessages.push(...compressed);
+                continue; // Retry with compressed context (same attempt slot)
+              }
+              // Already minimal — nothing more to compress, fail fast
+              console.log('[TaskProcessor] Context already minimal, cannot compress further — failing');
+              break;
+            }
+
             if (attempt < MAX_API_RETRIES) {
               console.log(`[TaskProcessor] Retrying in 2 seconds...`);
               await new Promise(r => setTimeout(r, 2000));
@@ -1781,9 +1801,10 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           const isQuotaExceeded = /\b402\b/.test(lastError.message);
           const isModelGone = /\b404\b/.test(lastError.message);
           const isContentFilter = /inappropriate.?content|data_inspection_failed/i.test(lastError.message);
+          const isInputValidation = /\b400\b/.test(lastError.message) && /input.?validation|too.?long|too.?many.?tokens|context.?length/i.test(lastError.message);
           const currentIsFree = getModel(task.modelAlias)?.isFree === true;
 
-          if ((isRateLimited || isQuotaExceeded || isModelGone || isContentFilter) && currentIsFree && rotationIndex < MAX_FREE_ROTATIONS) {
+          if ((isRateLimited || isQuotaExceeded || isModelGone || isContentFilter || isInputValidation) && currentIsFree && rotationIndex < MAX_FREE_ROTATIONS) {
             // Use capability-aware rotation order (preferred category first, emergency core last)
             const nextAlias = rotationOrder[rotationIndex];
             rotationIndex++;
@@ -1793,7 +1814,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             task.lastUpdate = Date.now();
             await this.doState.storage.put('task', task);
 
-            const reason = isContentFilter ? 'content filtered' : isModelGone ? 'unavailable (404)' : 'busy';
+            const reason = isInputValidation ? 'context too large (400)' : isContentFilter ? 'content filtered' : isModelGone ? 'unavailable (404)' : 'busy';
             const isEmergency = EMERGENCY_CORE_ALIASES.includes(nextAlias) && rotationIndex > MAX_FREE_ROTATIONS - EMERGENCY_CORE_ALIASES.length;
             console.log(`[TaskProcessor] Rotating from /${prevAlias} to /${nextAlias} — ${reason} (${rotationIndex}/${MAX_FREE_ROTATIONS}${isEmergency ? ', emergency core' : ''}, task: ${taskCategory})`);
 

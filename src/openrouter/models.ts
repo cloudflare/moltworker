@@ -1125,9 +1125,23 @@ export function formatModelsList(): string {
     }
   }
 
+  // --- Orchestra-capable models ---
+  const orchRecs = getOrchestraRecommendations();
+  lines.push('\n🎼 ORCHESTRA-READY (tool-calling + agentic):');
+  if (orchRecs.free.length > 0) {
+    lines.push('  Free: ' + orchRecs.free.map(r => `/${r.alias}`).join('  '));
+  }
+  if (orchRecs.paid.length > 0) {
+    lines.push('  Paid: ' + orchRecs.paid.map(r => `/${r.alias}`).join('  '));
+  }
+  if (orchRecs.avoid.length > 0) {
+    lines.push('  Avoid: ' + orchRecs.avoid.map(a => `/${a}`).join('  '));
+  }
+  lines.push('  Use /orch with these for best results');
+
   lines.push('\n━━━ Legend ━━━');
   lines.push('🏆=best $/perf  ⭐=strong value  ✅=solid  💎=flagship  ⚠️=outdated');
-  lines.push('👁️=vision  🔧=tools  Cost: $input/$output per M tokens');
+  lines.push('👁️=vision  🔧=tools  🎼=orchestra  Cost: $input/$output per M tokens');
   lines.push('Usage: /use <alias> or /<alias>');
 
   return lines.join('\n');
