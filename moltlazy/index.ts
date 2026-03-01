@@ -38,6 +38,7 @@ export function patchGateway(config: MoltLazyOpenClawConfig): void {
   if (process.env.OPENCLAW_DEV_MODE === "true") {
     config.gateway.controlUi = config.gateway.controlUi || {};
     config.gateway.controlUi.allowInsecureAuth = true;
+    config.gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback = true;
   }
 }
 
@@ -119,12 +120,12 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
     }
   } else {
     if (config.models?.providers) {
-      for (const key of Object.keys(config.models.providers)) {
-        if (key.startsWith("cf-ai-gw-")) {
-          delete config.models.providers[key];
-          console.log("Removed stale AI Gateway provider: " + key);
-        }
-      }
+      // for (const key of Object.keys(config.models.providers)) {
+      //   if (key.startsWith("cf-ai-gw-")) {
+      //     // delete config.models.providers[key];
+      //     // console.log("Removed stale AI Gateway provider: " + key);
+      //   }
+      // }
     }
     if (config.agents?.defaults?.model) {
       const modelCfg = config.agents.defaults.model as AgentModelConfig;
@@ -257,4 +258,5 @@ export function patchConfig(filePath: string = CONFIG_PATH): void {
   patchSlack(config);
 
   saveConfig(config, filePath);
+  console.log(`Final config: ${JSON.stringify(config)}`);
 }
