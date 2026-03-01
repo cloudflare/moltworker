@@ -13,8 +13,10 @@ import {
   patchTelegram,
   patchDiscord,
   patchSlack,
-} from "../patchConfig.js";
+  validateConfig,
+} from "../index.js";
 import { MoltLazyOpenClawConfig } from "../types.js";
+import * as fs from "fs";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -445,5 +447,46 @@ describe("OPENCLAW_VERSION", () => {
     setEnv({ OPENCLAW_VERSION: "1.2.3" });
     const version = process.env["OPENCLAW_VERSION"] ?? "latest";
     expect(version).toBe("1.2.3");
+  });
+});
+
+// ── Validation ───────────────────────────────────────────────────────────────
+
+describe("validateConfig", () => {
+  const TEST_CONFIG_PATH = "./test-config.json";
+
+  afterEach(() => {
+    if (fs.existsSync(TEST_CONFIG_PATH)) {
+      fs.unlinkSync(TEST_CONFIG_PATH);
+    }
+  });
+
+  it("returns false if file does not exist", () => {
+    expect(validateConfig("non-existent.json")).toBe(false);
+  });
+
+  it("returns true for a valid minimal config object", () => {
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ gateway: {}, agents: {} }));
+    expect(validateConfig(TEST_CONFIG_PATH)).toBe(true);
+  });
+
+  it("returns false for invalid JSON syntax", () => {
+    fs.writeFileSync(TEST_CONFIG_PATH, "{ invalid json }");
+    expect(validateConfig(TEST_CONFIG_PATH)).toBe(false);
+  });
+
+  it("returns false if config is not an object (e.g., array)", () => {
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify([1, 2, 3]));
+    expect(validateConfig(TEST_CONFIG_PATH)).toBe(false);
+  });
+
+  it("returns false if gateway is not an object", () => {
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ gateway: "not-an-object" }));
+    expect(validateConfig(TEST_CONFIG_PATH)).toBe(false);
+  });
+
+  it("returns false if agents is not an object", () => {
+    fs.writeFileSync(TEST_CONFIG_PATH, JSON.stringify({ agents: 123 }));
+    expect(validateConfig(TEST_CONFIG_PATH)).toBe(false);
   });
 });

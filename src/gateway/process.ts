@@ -17,6 +17,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
       // Match gateway process (openclaw gateway or legacy clawdbot gateway)
       // Don't match CLI commands like "openclaw devices list"
       const isGatewayProcess =
+
         proc.command.includes('start-openclaw.sh') ||
         proc.command.includes('openclaw gateway') ||
         // Legacy: match old startup script during transition
@@ -58,50 +59,26 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   // The startup script uses rclone to restore data from R2 on boot.
   await ensureRcloneConfig(sandbox, env);
 
-  // Check if gateway is already running or starting
-  const existingProcess = await findExistingMoltbotProcess(sandbox);
-  if (existingProcess) {
-    console.log(
-      'Found existing gateway process:',
-      existingProcess.id,
-      'status:',
-      existingProcess.status,
-    );
-
-    // Always use full startup timeout - a process can be "running" but not ready yet
-    // (e.g., just started by another concurrent request). Using a shorter timeout
-    // causes race conditions where we kill processes that are still initializing.
-    try {
-      console.log('Waiting for gateway on port', MOLTBOT_PORT, 'timeout:', STARTUP_TIMEOUT_MS);
-      await existingProcess.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS });
-      console.log('Gateway is reachable');
-      return existingProcess;
-      // eslint-disable-next-line no-unused-vars
-    } catch (_e) {
-      // Timeout waiting for port - process is likely dead or stuck, kill and restart
-      console.log('Existing process not reachable after full timeout, killing and restarting...');
-      try {
-        await existingProcess.kill();
-      } catch (killError) {
-        console.log('Failed to kill process:', killError);
-      }
-    }
+  let existingProcess;
+  if ((existingProcess = await getExistingProcess(sandbox)) != null) {
+    console.log("[Gateway] Reused existing process, not running script.");
+    return existingProcess;
   }
 
-  // Start a new OpenClaw gateway
   console.log('Starting new OpenClaw gateway...');
+
+  let newProcess: Process;
   const envVars = buildEnvVars(env);
   const command = '/usr/local/bin/start-openclaw.sh';
 
   console.log('Starting process with command:', command);
   console.log('Environment vars being passed:', Object.keys(envVars));
 
-  let process: Process;
   try {
-    process = await sandbox.startProcess(command, {
+    newProcess = await sandbox.startProcess(command, {
       env: Object.keys(envVars).length > 0 ? envVars : undefined,
     });
-    console.log('Process started with id:', process.id, 'status:', process.status);
+    console.log('Process started with id:', newProcess.id, 'status:', newProcess.status);
   } catch (startErr) {
     console.error('Failed to start process:', startErr);
     throw startErr;
@@ -110,29 +87,106 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
   // Wait for the gateway to be ready
   try {
     console.log('[Gateway] Waiting for OpenClaw gateway to be ready on port', MOLTBOT_PORT);
-    await process.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS });
-    console.log('[Gateway] OpenClaw gateway is ready!');
-
-    const logs = await process.getLogs();
-    if (logs.stdout) console.log('[Gateway] stdout:', logs.stdout);
-    if (logs.stderr) console.log('[Gateway] stderr:', logs.stderr);
+    await newProcess.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS }).then(async () => {
+      console.log('[Gateway] OpenClaw gateway is ready!');
+      await logProcessOutput(newProcess);
+    });
   } catch (e) {
     console.error('[Gateway] waitForPort failed:', e);
-    try {
-      const logs = await process.getLogs();
-      console.error('[Gateway] startup failed. Stderr:', logs.stderr);
+    await logProcessOutput(newProcess).then(async (logs) => {
       console.error('[Gateway] startup failed. Stdout:', logs.stdout);
       throw new Error(`OpenClaw gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`, {
         cause: e,
       });
-    } catch (logErr) {
+    }).catch((logErr) => {
       console.error('[Gateway] Failed to get logs:', logErr);
       throw e;
-    }
+    });
   }
 
   // Verify gateway is actually responding
   console.log('[Gateway] Verifying gateway health...');
 
-  return process;
+  return newProcess;
+}
+
+async function logProcessOutput(process: Process) {
+  const logs = await process.getLogs();
+  if (logs.stdout) console.log('[Gateway] stdout:', logs.stdout);
+  if (logs.stderr) console.log('[Gateway] stderr:', logs.stderr);
+  return logs;
+}
+
+async function getExistingProcess(sandbox: Sandbox): Promise<Process | null> {
+  const existingProcess = await findExistingMoltbotProcess(sandbox);
+  if (!existingProcess) { return null; }
+  console.log(
+    'Found existing gateway process:',
+    existingProcess.id,
+    'status:',
+    existingProcess.status,
+  );
+
+  // Always use full startup timeout - a process can be "running" but not ready yet
+  // (e.g., just started by another concurrent request). Using a shorter timeout
+  // causes race conditions where we kill processes that are still initializing.
+  try {
+    console.log('Waiting for gateway on port', MOLTBOT_PORT, 'timeout:', STARTUP_TIMEOUT_MS);
+    await existingProcess.waitForPort(MOLTBOT_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS });
+    console.log('Gateway is reachable');
+    return existingProcess;
+    // eslint-disable-next-line no-unused-vars
+  } catch (_e) {
+    // Timeout waiting for port - process is likely dead or stuck, kill and restart
+    console.warn('Existing process not reachable after full timeout, killing and restarting...');
+    try {
+      await existingProcess.kill();
+    } catch (killError) {
+      console.error('Failed to kill process:', killError);
+    } finally {
+      return null;
+    }
+  }
+}
+
+
+
+export async function cleanupOldProcess(sandbox: Sandbox): Promise<Process | null> {
+  try {
+    await sandbox.exec('pkill -9 -f "openclaw gateway" 2>/dev/null || true');
+  } catch {
+    console.warn("[SANDBOX + Exec] Tried to kill process `openclaw gateway` which didn't exist");
+  }
+
+  // Also try the Process API
+  const existingProcess = await findExistingMoltbotProcess(sandbox);
+  if (existingProcess) {
+    console.log('Also killing via Process API:', existingProcess.id);
+    try {
+      await existingProcess.kill();
+    } catch {
+      console.warn("[API] Tried to kill process `openclaw gateway` which didn't exist");
+    }
+  }
+
+  // Clean up lock files
+  try {
+    await sandbox.exec(
+      'rm -f /tmp/openclaw-gateway.lock /root/.openclaw/gateway.lock 2>/dev/null || true',
+    );
+  } catch {
+    // Ignore
+  }
+
+  // Wait for process to fully die
+  await new Promise((r) => setTimeout(r, 3000));
+
+  // Verify it's dead
+  try {
+    const check = await sandbox.exec('pgrep -f "openclaw gateway" || echo "dead"');
+    console.log('[Restart] Process check after kill:', check.stdout?.trim());
+  } catch {
+    // Ignore
+  }
+  return existingProcess;
 }

@@ -128,6 +128,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo "Onboard completed"
 else
     echo "Using existing config"
+    # Validate existing /tbefore patching
+    node /app/moltlazy/dist/cli.js validate || echo "WARNING: Existing config is invalid. Patching will attempt to fix it."
 fi
 
 # ============================================================
@@ -141,7 +143,10 @@ fi
 #
 # IMPORTANT: This script MERGES with existing config to preserve user settings.
 # Only env-var-derived values are overwritten; user-added fields are kept.
-node /app/moltlazy/dist/patchConfig.js
+node /app/moltlazy/dist/cli.js patch || {
+    echo "ERROR: Failed to patch configuration. OpenClaw cannot start."
+    exit 1
+}
 
 # ============================================================
 # BACKGROUND SYNC LOOP

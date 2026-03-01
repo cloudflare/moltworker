@@ -1,4 +1,4 @@
-FROM docker.io/cloudflare/sandbox:0.7.0
+FROM docker.io/cloudflare/sandbox:0.7.8
 
 # Install Node.js 22 (required by OpenClaw) and rclone (for R2 persistence)
 # The base image has Node 20, we need to replace it with Node 22
@@ -17,8 +17,8 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 \
     && rm /tmp/node.tar.xz \
     && node --version \
-    && npm --version
-
+    && bun --version && npm --version
+ 
 # Install OpenClaw (formerly clawdbot/moltbot)
 # Pin to specific version for reproducible builds; override with --build-arg OPENCLAW_VERSION=x.y.z
 ARG OPENCLAW_VERSION=latest
@@ -36,7 +36,7 @@ RUN mkdir -p /root/.openclaw \
 # Uses Bun for faster installs; the compiled output runs on Node 22
 COPY moltlazy/ /app/moltlazy/
 WORKDIR /app/moltlazy
-RUN npm install -g bun && bun install && bun run build
+RUN bun install && bun run build
 
 # Copy startup script
 # Build cache bust: 2026-02-28-v33-moltlazy-extract

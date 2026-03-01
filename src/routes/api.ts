@@ -8,6 +8,8 @@ import {
   syncToR2,
   waitForProcess,
 } from '../gateway';
+import { Process, Sandbox } from '@cloudflare/sandbox';
+import { cleanupOldProcess } from '../gateway/process';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -264,84 +266,7 @@ adminApi.post('/gateway/restart', async (c) => {
 
   try {
     // Force kill gateway via exec (more reliable than Process.kill())
-    try {
-      await sandbox.exec('pkill -9 -f "openclaw gateway" 2>/dev/null || true');
-    } catch {
-      // Ignore - process may not exist
-    }
-
-    // Also try the Process API
-    const existingProcess = await findExistingMoltbotProcess(sandbox);
-    if (existingProcess) {
-      console.log('Also killing via Process API:', existingProcess.id);
-      try {
-        await existingProcess.kill();
-      } catch {
-        // Ignore
-      }
-    }
-
-    // Clean up lock files
-    try {
-      await sandbox.exec(
-        'rm -f /tmp/openclaw-gateway.lock /root/.openclaw/gateway.lock 2>/dev/null || true',
-      );
-    } catch {
-      // Ignore
-    }
-
-    // Wait for process to fully die
-    await new Promise((r) => setTimeout(r, 3000));
-
-    // Verify it's dead
-    try {
-      const check = await sandbox.exec('pgrep -f "openclaw gateway" || echo "dead"');
-      console.log('[Restart] Process check after kill:', check.stdout?.trim());
-    } catch {
-      // Ignore
-    }
-
-    // Clean up stale providers and ensure API key is in config
-    try {
-      const anthropicKey = c.env.ANTHROPIC_API_KEY || '';
-      const fixScript = `node -e "
-        const fs = require('fs');
-        const p = '/root/.openclaw/openclaw.json';
-        if (fs.existsSync(p)) {
-          const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-          let changed = false;
-          c.models = c.models || {};
-          c.models.providers = c.models.providers || {};
-          // Remove stale AI Gateway providers
-          for (const k of Object.keys(c.models.providers)) {
-            if (k.startsWith('cf-ai-gw-') || k === 'cloudflare-ai-gateway') {
-              delete c.models.providers[k];
-              changed = true;
-              console.log('Removed provider: ' + k);
-            }
-          }
-          // Reset default model if it references a removed provider
-          if (c.agents && c.agents.defaults && c.agents.defaults.model) {
-            const pr = (c.agents.defaults.model.primary || '');
-            if (pr.startsWith('cf-ai-gw-') || pr.startsWith('cloudflare-ai-gateway')) {
-              delete c.agents.defaults.model;
-              changed = true;
-              console.log('Reset default model: ' + pr);
-            }
-          }
-          if (changed) {
-            fs.writeFileSync(p, JSON.stringify(c, null, 2));
-            console.log('Config fixed');
-          } else {
-            console.log('Config OK');
-          }
-        }
-      "`;
-      const result = await sandbox.exec(fixScript);
-      console.log('[Config cleanup] stdout:', result.stdout, 'stderr:', result.stderr);
-    } catch (fixErr) {
-      console.error('[Config cleanup] Failed:', fixErr);
-    }
+    const existingProcess = await cleanupOldProcess(sandbox);
 
     // Start a new gateway in the background
     const bootPromise = ensureMoltbotGateway(sandbox, c.env).catch((err) => {
