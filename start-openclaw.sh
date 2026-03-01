@@ -199,15 +199,35 @@ fi
 echo "Starting OpenClaw Gateway..."
 echo "Gateway will be available on port 18789"
 
-rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
-rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
-
 echo "Dev mode: ${OPENCLAW_DEV_MODE:-false}"
 
-if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
-    echo "Starting gateway with token auth..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan --token "$OPENCLAW_GATEWAY_TOKEN"
-else
-    echo "Starting gateway with device pairing (no token)..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
-fi
+RETRY_COUNT=${RETRY_STARTUP:-2}
+ATTEMPT=0
+
+while [ $ATTEMPT -lt $RETRY_COUNT ]; do
+    # Cleanup before each attempt
+    rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
+    rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
+
+    ATTEMPT=$((ATTEMPT + 1))
+
+    if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+        echo "Starting gateway with token auth (Attempt $ATTEMPT of $RETRY_COUNT)..."
+        openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan --token "$OPENCLAW_GATEWAY_TOKEN" && exit 0
+    else
+        echo "Starting gateway with device pairing (Attempt $ATTEMPT of $RETRY_COUNT)..."
+        openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan && exit 0
+    fi
+
+    echo "Gateway exited with error on attempt $ATTEMPT of $RETRY_COUNT."
+
+    echo "All $RETRY_COUNT attempts failed. Running openclaw doctor --non-interactive..."
+
+    if [ $ATTEMPT -lt $RETRY_COUNT ]; then
+        echo "Retrying in 5 seconds..."
+        openclaw doctor --repair --force --non-interactive
+    fi
+
+done
+
+exit 1
