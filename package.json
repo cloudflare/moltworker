@@ -8,7 +8,7 @@
     "build": "vite build",
     "deploy": "npm run build && wrangler deploy",
     "dev": "vite dev",
-    "start": "wrangler dev --env-file .env -e DEV_MODE=true",
+    "start": "wrangler dev --env-file .dev.vars -e DEV_MODE=true",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src/",
