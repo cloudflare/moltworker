@@ -17,5 +17,8 @@
     "@types/bun": "latest",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "openclaw": "^2026.2.26"
   }
 }

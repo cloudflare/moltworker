@@ -14,11 +14,11 @@ import {
   patchDiscord,
   patchSlack,
 } from "../patchConfig.js";
-import type { OpenClawConfig } from "../types.js";
+import { MoltLazyOpenClawConfig } from "../types.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function freshConfig(): OpenClawConfig {
+function freshConfig(): MoltLazyOpenClawConfig {
   return { gateway: {}, channels: {} };
 }
 
@@ -84,7 +84,7 @@ describe("patchGateway", () => {
   });
 
   it("preserves existing gateway fields not touched by env", () => {
-    const config: OpenClawConfig = {
+    const config: MoltLazyOpenClawConfig = {
       gateway: { port: 9999, trustedProxies: ["1.2.3.4"] },
       channels: {},
     };
@@ -118,7 +118,7 @@ describe("patchAiGatewayModel", () => {
       apiKey: "key-abc",
       baseUrl: "https://gateway.ai.cloudflare.com/v1/acct123/gw456/anthropic",
     });
-    expect(config.agents?.defaults?.model?.primary).toBe(
+    expect((config.agents?.defaults?.model as { primary?: string })?.primary).toBe(
       "cf-ai-gw-anthropic/claude-sonnet-4-5"
     );
   });
@@ -228,13 +228,13 @@ describe("patchAiGatewayModel", () => {
   });
 
   it("removes stale cf-ai-gw-* providers when model is unset", () => {
-    const config: OpenClawConfig = {
+    const config: MoltLazyOpenClawConfig = {
       gateway: {},
       channels: {},
       models: {
         providers: {
-          "cf-ai-gw-anthropic": { api: "anthropic-messages" },
-          "my-provider": { api: "openai-completions" },
+          "cf-ai-gw-anthropic": { api: "anthropic-messages", baseUrl: "", models: [] },
+          "my-provider": { api: "openai-completions", baseUrl: "", models: [] },
         },
       },
       agents: { defaults: { model: { primary: "cf-ai-gw-anthropic/claude-3-5-sonnet" } } },
@@ -248,10 +248,10 @@ describe("patchAiGatewayModel", () => {
   });
 
   it("preserves non-cf-ai-gw providers when model is unset", () => {
-    const config: OpenClawConfig = {
+    const config: MoltLazyOpenClawConfig = {
       gateway: {},
       channels: {},
-      models: { providers: { "custom-provider": { api: "openai-completions" } } },
+      models: { providers: { "custom-provider": { api: "openai-completions", baseUrl: "", models: [] } } },
     };
     patchAiGatewayModel(config);
     expect(config.models?.providers?.["custom-provider"]).toBeDefined();
@@ -303,7 +303,7 @@ describe("patchTelegram", () => {
 
   it("preserves existing user allowFrom when policy stays pairing", () => {
     setEnv({ TELEGRAM_BOT_TOKEN: "tg-token-123" });
-    const config: OpenClawConfig = {
+    const config: MoltLazyOpenClawConfig = {
       gateway: {},
       channels: { telegram: { allowFrom: ["custom-user"] } },
     };
@@ -352,7 +352,7 @@ describe("patchDiscord", () => {
 
   it("preserves existing dm.allowFrom when policy=open but allowFrom already set", () => {
     setEnv({ DISCORD_BOT_TOKEN: "dc-token-456", DISCORD_DM_POLICY: "open" });
-    const config: OpenClawConfig = {
+    const config: MoltLazyOpenClawConfig = {
       gateway: {},
       channels: { discord: { dm: { policy: "open", allowFrom: ["server1"] } } },
     };
@@ -411,7 +411,7 @@ describe("patchSlack", () => {
 
   it("preserves existing Slack settings not provided by env", () => {
     setEnv({ SLACK_BOT_TOKEN: "xoxb-new", SLACK_APP_TOKEN: "xapp-new" });
-    const config: OpenClawConfig = {
+    const config: MoltLazyOpenClawConfig = {
       gateway: {},
       channels: { slack: { botToken: "xoxb-old", enabled: false } },
     };

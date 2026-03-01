@@ -13,7 +13,7 @@
  */
 
 import * as fs from "fs";
-import { DiscordDmConfig, OpenClawConfig } from "./types.js";
+import { DmPolicy, OpenClawConfig, ModelApi, MoltLazyOpenClawConfig, ModelProviderConfig, AgentModelConfig } from "./types.js";
 
 
 const CONFIG_PATH = "/root/.openclaw/openclaw.json";
@@ -28,7 +28,7 @@ const API_MAP: Record<string, string> = {
   // openai, groq, mistral, openrouter, etc. use openai-completions
 };
 
-function loadConfig(path: fs.PathOrFileDescriptor): OpenClawConfig {
+function loadConfig(path: fs.PathOrFileDescriptor): MoltLazyOpenClawConfig {
   try {
     return JSON.parse(fs.readFileSync(path, "utf8"));
   } catch {
@@ -37,12 +37,12 @@ function loadConfig(path: fs.PathOrFileDescriptor): OpenClawConfig {
   }
 }
 
-function saveConfig(config: OpenClawConfig): void {
+function saveConfig(config: MoltLazyOpenClawConfig): void {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
   console.log("Configuration patched successfully (merged with existing settings)");
 }
 
-export function patchGateway(config: OpenClawConfig): void {
+export function patchGateway(config: MoltLazyOpenClawConfig): void {
   config.gateway = config.gateway || {};
   config.gateway.port = 18789;
   config.gateway.mode = "local";
@@ -59,7 +59,7 @@ export function patchGateway(config: OpenClawConfig): void {
   }
 }
 
-export function patchAiGatewayModel(config: OpenClawConfig): void {
+export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
   // AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
   // Adds a provider entry for any AI Gateway provider and sets it as default model.
   // Examples:
@@ -96,7 +96,7 @@ export function patchAiGatewayModel(config: OpenClawConfig): void {
     if (baseUrl && apiKey) {
       if (gwProvider === "google-ai-studio") baseUrl += "/v1beta";
 
-      let api = API_MAP[gwProvider] || "openai-completions";
+      let api = (API_MAP[gwProvider] || "openai-completions") as ModelApi;
 
       // workers-ai: parse @cf/<vendor>/<model> to select API based on vendor
       if (gwProvider === "workers-ai") {
@@ -121,7 +121,7 @@ export function patchAiGatewayModel(config: OpenClawConfig): void {
         apiKey: apiKey,
         api: api,
         models: [
-          { id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 },
+          { id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192, reasoning: true, input: ["text", "image"], cost: { input:  0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0} },
         ],
       };
       config.agents = config.agents || {};
@@ -152,7 +152,8 @@ export function patchAiGatewayModel(config: OpenClawConfig): void {
       }
     }
     if (config.agents?.defaults?.model) {
-      const primary = config.agents.defaults.model.primary || "";
+      const modelCfg = config.agents.defaults.model as AgentModelConfig;
+      const primary = typeof modelCfg === "string" ? modelCfg : (modelCfg.primary || "");
       if (primary.startsWith("cf-ai-gw-")) {
         delete config.agents.defaults.model;
         console.log(
@@ -165,14 +166,13 @@ export function patchAiGatewayModel(config: OpenClawConfig): void {
   }
 }
 
-export function patchTelegram(config: OpenClawConfig): void {
+export function patchTelegram(config: MoltLazyOpenClawConfig): void {
   // Telegram configuration
   // Merge with existing config to preserve user-added fields (e.g., custom allowFrom lists)
   // Only overwrite fields that come from environment variables
   if (process.env.TELEGRAM_BOT_TOKEN) {
     const existing = config.channels!.telegram || {};
-    const dmPolicy =
-      process.env.TELEGRAM_DM_POLICY || existing.dmPolicy || "pairing";
+    const dmPolicy = (process.env.TELEGRAM_DM_POLICY || existing.dmPolicy || "pairing") as DmPolicy;
 
     config.channels!.telegram = {
       ...existing, // Preserve user settings
@@ -191,16 +191,15 @@ export function patchTelegram(config: OpenClawConfig): void {
   }
 }
 
-export function patchDiscord(config: OpenClawConfig): void {
+export function patchDiscord(config: MoltLazyOpenClawConfig): void {
   // Discord configuration
   // Merge with existing config to preserve user-added fields
   if (process.env.DISCORD_BOT_TOKEN) {
     const existing = config.channels!.discord || {};
     const existingDm = existing.dm || {};
-    const dmPolicy =
-      process.env.DISCORD_DM_POLICY || existingDm.policy || "pairing";
+    const dmPolicy = (process.env.DISCORD_DM_POLICY || existingDm.policy || "pairing") as DmPolicy;
 
-    const dm: DiscordDmConfig = {
+    const dm: NonNullable<NonNullable<OpenClawConfig["channels"]>["discord"]>["dm"] = {
       ...existingDm, // Preserve user settings like custom allowFrom
       policy: dmPolicy,
     };
@@ -217,7 +216,7 @@ export function patchDiscord(config: OpenClawConfig): void {
   }
 }
 
-export function patchSlack(config: OpenClawConfig): void {
+export function patchSlack(config: MoltLazyOpenClawConfig): void {
   // Slack configuration
   
   // Handle missing token warnings

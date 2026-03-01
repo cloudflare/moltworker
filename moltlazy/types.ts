@@ -1,90 +1,57 @@
+import type { 
+  OpenClawConfig, 
+  DmPolicy,
+} from "openclaw/plugin-sdk";
+
 /**
- * OpenClaw Configuration Types
- *
- * Type definitions for the OpenClaw JSON configuration schema.
- * These mirror the OpenClaw config structure at /root/.openclaw/openclaw.json.
- *
- * References:
- * - OpenClaw config schema: https://docs.openclaw.ai/
- * - Model API types: https://github.com/openclaw/openclaw/blob/main/src/config/types.models.ts
+ * Re-exported from https://github.com/openclaw/openclaw/blob/main/src/config/types.models.ts#L3
  */
+export type ModelApi = 
+  | "openai-completions"
+  | "openai-responses"
+  | "openai-codex-responses"
+  | "anthropic-messages"
+  | "google-generative-ai"
+  | "github-copilot"
+  | "bedrock-converse-stream"
+  | "ollama";
 
-export interface GatewayAuth {
-  token?: string;
-}
-
-export interface ControlUi {
-  allowInsecureAuth?: boolean;
-}
-
-export interface GatewayConfig {
-  port?: number;
-  mode?: string;
-  trustedProxies?: string[];
-  auth?: GatewayAuth;
-  controlUi?: ControlUi;
-}
-
-export interface ModelEntry {
+export type ModelDefinitionConfig = {
   id: string;
   name: string;
+  api?: ModelApi;
+  reasoning: boolean;
+  input: Array<"text" | "image">;
+  cost: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+  };
   contextWindow: number;
   maxTokens: number;
-}
+  headers?: Record<string, string>;
+};
 
-export interface ProviderConfig {
-  baseUrl?: string;
+export type ModelProviderConfig = {
+  baseUrl: string;
   apiKey?: string;
-  api?: string;
-  models?: ModelEntry[];
+  api?: ModelApi;
+  models: ModelDefinitionConfig[];
+};
+
+export type AgentModelConfig = string | {
+  primary?: string;
+  fallbacks?: string[];
+};
+
+export interface MoltLazyOpenClawConfig extends OpenClawConfig {
+  models?: {
+    providers?: Record<string, ModelProviderConfig>;
+  };
 }
 
-export interface ModelsConfig {
-  providers?: Record<string, ProviderConfig>;
-}
-
-export interface AgentDefaults {
-  model?: { primary: string };
-}
-
-export interface AgentsConfig {
-  defaults?: AgentDefaults;
-}
-
-export interface TelegramConfig {
-  botToken?: string;
-  enabled?: boolean;
-  dmPolicy?: string;
-  allowFrom?: string[];
-}
-
-export interface DiscordDmConfig {
-  policy?: string;
-  allowFrom?: string[];
-}
-
-export interface DiscordConfig {
-  token?: string;
-  enabled?: boolean;
-  dm?: DiscordDmConfig;
-}
-
-export interface SlackConfig {
-  botToken?: string;
-  appToken?: string;
-  enabled?: boolean;
-}
-
-export interface ChannelsConfig {
-  telegram?: TelegramConfig;
-  discord?: DiscordConfig;
-  slack?: SlackConfig;
-}
-
-export interface OpenClawConfig {
-  gateway?: GatewayConfig;
-  channels?: ChannelsConfig;
-  models?: ModelsConfig;
-  agents?: AgentsConfig;
-}
-
+export type { 
+  DmPolicy,
+  OpenClawConfig
+};
