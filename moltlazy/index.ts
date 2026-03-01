@@ -305,8 +305,8 @@ export function patchConfig(filePath: string = CONFIG_PATH): void {
   config.channels = config.channels || {};
 
   patchGateway(config);
-  populateCloudflareAiGateway(config);
   patchAiGatewayModel(config);
+  populateCloudflareAiGateway(config);
   patchAgents(config);
   patchTelegram(config);
   patchDiscord(config);
