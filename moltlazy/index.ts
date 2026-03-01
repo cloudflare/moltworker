@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { DmPolicy, OpenClawConfig, ModelApi, MoltLazyOpenClawConfig, AgentModelConfig } from "./types.js";
+import { CF_AI_GATEWAY_PROVIDERS } from "./cfAiGateway.js";
 
 export const CONFIG_PATH = "/root/.openclaw/openclaw.json";
 
@@ -211,6 +212,57 @@ export function patchSlack(config: MoltLazyOpenClawConfig): void {
   }
 }
 
+/**
+ * Registers all known Cloudflare AI Gateway providers (Google, Anthropic,
+ * OpenAI) into the OpenClaw model config, using the CF AI Gateway base URLs.
+ *
+ * Requires:
+ *   CF_AI_GATEWAY_ACCOUNT_ID   – Cloudflare account ID
+ *   CF_AI_GATEWAY_GATEWAY_ID   – AI Gateway name
+ *   CLOUDFLARE_AI_GATEWAY_API_KEY – CF AI Gateway API key
+ *
+ * Each provider is registered as "cf-ai-gw-<provider>" and all models from
+ * cfAiGateway.ts are included. The existing per-model override
+ * (patchAiGatewayModel) still takes precedence when CF_AI_GATEWAY_MODEL is set.
+ */
+export function populateCloudflareAiGateway(config: MoltLazyOpenClawConfig): void {
+  const accountId = process.env.CF_AI_GATEWAY_ACCOUNT_ID;
+  const gatewayId = process.env.CF_AI_GATEWAY_GATEWAY_ID;
+  const apiKey = process.env.CLOUDFLARE_AI_GATEWAY_API_KEY;
+
+  if (!accountId || !gatewayId || !apiKey) {
+    return;
+  }
+
+  config.models = config.models || {};
+  config.models.providers = config.models.providers || {};
+
+  for (const [gwProvider, entry] of Object.entries(CF_AI_GATEWAY_PROVIDERS)) {
+    const baseUrl =
+      "https://gateway.ai.cloudflare.com/v1/" +
+      accountId +
+      "/" +
+      gatewayId +
+      "/" +
+      gwProvider +
+      entry.baseUrlSuffix;
+
+    const providerName = "cf-ai-gw-" + gwProvider;
+
+    config.models.providers[providerName] = {
+      ...config.models.providers[providerName],
+      baseUrl,
+      apiKey,
+      api: entry.api,
+      models: entry.models,
+    };
+
+    console.log(
+      "CF AI Gateway provider registered: " + providerName + " -> " + baseUrl
+    );
+  }
+}
+
 export function validateConfig(filePath: string = CONFIG_PATH): boolean {
   if (!fs.existsSync(filePath)) {
     console.error(`Config file not found: ${filePath}`);
@@ -252,6 +304,7 @@ export function patchConfig(filePath: string = CONFIG_PATH): void {
   config.channels = config.channels || {};
 
   patchGateway(config);
+  populateCloudflareAiGateway(config);
   patchAiGatewayModel(config);
   patchTelegram(config);
   patchDiscord(config);
