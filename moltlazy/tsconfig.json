@@ -13,6 +13,6 @@
     "declaration": true,
     "types": ["node", "bun-types"]
   },
-  "include": ["*.ts", "tests/**/*.ts"],
+  "include": ["*.ts", "tests/**/*.ts", "models/cfAiGateway.ts"],
   "exclude": ["node_modules", "dist"]
 }

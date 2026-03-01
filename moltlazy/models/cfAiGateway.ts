@@ -1,4 +1,4 @@
-import { ModelApi, ModelDefinitionConfig } from "./types.js";
+import { ModelApi, ModelDefinitionConfig } from "../types.js";
 
 /**
  * Model catalogue for Cloudflare AI Gateway providers.

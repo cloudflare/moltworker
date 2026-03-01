@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import { DmPolicy, OpenClawConfig, ModelApi, MoltLazyOpenClawConfig, AgentModelConfig } from "./types.js";
-import { CF_AI_GATEWAY_PROVIDERS } from "./cfAiGateway.js";
+import { CF_AI_GATEWAY_PROVIDERS } from "./models/cfAiGateway.js";
 
 export const CONFIG_PATH = "/root/.openclaw/openclaw.json";
 
