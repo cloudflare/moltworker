@@ -105,9 +105,9 @@ const API_MAP: Record<string, string> = {
   // openai, groq, mistral, openrouter, etc. use openai-completions
 };
 
-function loadConfig(): OpenClawConfig {
+function loadConfig(path: fs.PathOrFileDescriptor): OpenClawConfig {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    return JSON.parse(fs.readFileSync(path, "utf8"));
   } catch {
     console.log("Starting with empty config");
     return {};
@@ -119,7 +119,7 @@ function saveConfig(config: OpenClawConfig): void {
   console.log("Configuration patched successfully (merged with existing settings)");
 }
 
-function patchGateway(config: OpenClawConfig): void {
+export function patchGateway(config: OpenClawConfig): void {
   config.gateway = config.gateway || {};
   config.gateway.port = 18789;
   config.gateway.mode = "local";
@@ -136,7 +136,7 @@ function patchGateway(config: OpenClawConfig): void {
   }
 }
 
-function patchAiGatewayModel(config: OpenClawConfig): void {
+export function patchAiGatewayModel(config: OpenClawConfig): void {
   // AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
   // Adds a provider entry for any AI Gateway provider and sets it as default model.
   // Examples:
@@ -242,7 +242,7 @@ function patchAiGatewayModel(config: OpenClawConfig): void {
   }
 }
 
-function patchTelegram(config: OpenClawConfig): void {
+export function patchTelegram(config: OpenClawConfig): void {
   // Telegram configuration
   // Merge with existing config to preserve user-added fields (e.g., custom allowFrom lists)
   // Only overwrite fields that come from environment variables
@@ -261,14 +261,14 @@ function patchTelegram(config: OpenClawConfig): void {
     // Only override allowFrom if explicitly set via env var
     if (process.env.TELEGRAM_DM_ALLOW_FROM) {
       config.channels!.telegram.allowFrom =
-        process.env.TELEGRAM_DM_ALLOW_FROM.split(",");
+        process.env.TELEGRAM_DM_ALLOW_FROM.replace(/\s/g, "").split(",");
     } else if (dmPolicy === "open" && !existing.allowFrom) {
       config.channels!.telegram.allowFrom = ["*"];
     }
   }
 }
 
-function patchDiscord(config: OpenClawConfig): void {
+export function patchDiscord(config: OpenClawConfig): void {
   // Discord configuration
   // Merge with existing config to preserve user-added fields
   if (process.env.DISCORD_BOT_TOKEN) {
@@ -294,10 +294,24 @@ function patchDiscord(config: OpenClawConfig): void {
   }
 }
 
-function patchSlack(config: OpenClawConfig): void {
+export function patchSlack(config: OpenClawConfig): void {
   // Slack configuration
+  
+  // Handle missing token warnings
+  if (process.env.SLACK_BOT_TOKEN && !process.env.SLACK_APP_TOKEN) {
+    console.warn("Failed to configure Slack: SLACK_APP_TOKEN is missing.");
+    return;
+  }
+  
+  if (!process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+    console.warn("Failed to configure Slack: SLACK_BOT_TOKEN is missing.");
+    return;
+  }
+
   // Merge with existing config to preserve user-added fields
   if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+    // Note: If you run into strict null check errors on `config.channels!`, 
+    // you might want to initialize it first with `config.channels = config.channels || {};`
     const existing = config.channels!.slack || {};
     config.channels!.slack = {
       ...existing, // Preserve user settings
@@ -308,10 +322,11 @@ function patchSlack(config: OpenClawConfig): void {
   }
 }
 
-function patchConfig(): void {
-  console.log("Patching config at:", CONFIG_PATH);
+export function patchConfig(file_path?: string): void {
+  const file_location = file_path !== undefined ? file_path : CONFIG_PATH;
+  console.log("Patching config at:", file_location);
 
-  const config = loadConfig();
+  const config = loadConfig(file_location);
 
   config.gateway = config.gateway || {};
   config.channels = config.channels || {};
@@ -326,4 +341,6 @@ function patchConfig(): void {
 }
 
 // Run when executed directly
-patchConfig();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  patchConfig();
+}

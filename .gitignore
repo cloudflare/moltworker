@@ -1,4 +1,5 @@
 *.json
+!moltlazy/test/*.json
 !moltlazy/package.json
 !moltlazy/tsconfig.json
 *.bak

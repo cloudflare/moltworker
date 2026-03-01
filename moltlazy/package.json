@@ -9,9 +9,12 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/node": "^22.0.0",
     "typescript": "^5.5.0"
   }

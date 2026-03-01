@@ -43,6 +43,13 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
 # DISCORD_BOT_TOKEN=optional
+# SLACK_BOT_TOKEN=optional
+# SLACK_APP_TOKEN=optional
+
+# OpenClaw container version (default: latest)
+# Matches ARG/ENV OPENCLAW_VERSION in the Dockerfile.
+# Pin to a specific release for reproducible builds, e.g. OPENCLAW_VERSION=1.2.3
+# OPENCLAW_VERSION=latest
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth

@@ -20,8 +20,10 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && npm --version
 
 # Install OpenClaw (formerly clawdbot/moltbot)
-# Pin to specific version for reproducible builds
-RUN npm install -g openclaw@latest \
+# Pin to specific version for reproducible builds; override with --build-arg OPENCLAW_VERSION=x.y.z
+ARG OPENCLAW_VERSION=latest
+ENV OPENCLAW_VERSION=${OPENCLAW_VERSION}
+RUN npm install -g openclaw@${OPENCLAW_VERSION} \
     && openclaw --version
 
 # Create OpenClaw directories
@@ -31,9 +33,10 @@ RUN mkdir -p /root/.openclaw \
     && mkdir -p /root/clawd/skills
 
 # Copy and build moltlazy module (config patching utilities)
+# Uses Bun for faster installs; the compiled output runs on Node 22
 COPY moltlazy/ /app/moltlazy/
 WORKDIR /app/moltlazy
-RUN npm install && npm run build
+RUN npm install -g bun && bun install && bun run build
 
 # Copy startup script
 # Build cache bust: 2026-02-28-v33-moltlazy-extract

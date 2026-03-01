@@ -56,6 +56,7 @@ moltlazy/             # Paso4 proprietary configuration utilities
 ### CLI Commands
 
 When calling the OpenClaw CLI from the worker, always include `--url ws://localhost:18789`:
+
 ```typescript
 sandbox.startProcess('openclaw devices list --json --url ws://localhost:18789')
 ```
@@ -65,6 +66,7 @@ CLI commands take 10-15 seconds due to WebSocket connection overhead. Use `waitF
 ### Success Detection
 
 The CLI outputs "Approved" (capital A). Use case-insensitive checks:
+
 ```typescript
 stdout.toLowerCase().includes('approved')
 ```
@@ -72,13 +74,13 @@ stdout.toLowerCase().includes('approved')
 ## Commands
 
 ```bash
-npm test              # Run tests (vitest)
-npm run test:watch    # Run tests in watch mode
-npm run build         # Build worker + client
-npm run deploy        # Build and deploy to Cloudflare
-npm run dev           # Vite dev server
-npm run start         # wrangler dev (local worker)
-npm run typecheck     # TypeScript check
+bun run test          # Run tests (vitest)
+bun run test:watch    # Run tests in watch mode
+bun run build         # Build worker + client
+bun run deploy        # Build and deploy to Cloudflare
+bun run dev           # Vite dev server
+bun run start         # wrangler dev (local worker)
+bun run typecheck     # TypeScript check
 ```
 
 ## Testing
@@ -139,12 +141,12 @@ Browser
 
 ### Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Worker that manages sandbox lifecycle and proxies requests |
-| `Dockerfile` | Container image based on `cloudflare/sandbox` with Node 22 + OpenClaw |
-| `start-openclaw.sh` | Startup script: R2 restore → onboard → config patch → launch gateway |
-| `wrangler.jsonc` | Cloudflare Worker + Container configuration |
+| File                | Purpose                                                               |
+| ------------------- | --------------------------------------------------------------------- |
+| `src/index.ts`      | Worker that manages sandbox lifecycle and proxies requests            |
+| `Dockerfile`        | Container image based on `cloudflare/sandbox` with Node 22 + OpenClaw |
+| `start-openclaw.sh` | Startup script: R2 restore → onboard → config patch → launch gateway  |
+| `wrangler.jsonc`    | Cloudflare Worker + Container configuration                           |
 
 ## Local Development
 
@@ -199,19 +201,19 @@ The startup script selects the auth choice based on which env vars are set:
 
 These are the env vars passed TO the container (internal names):
 
-| Variable | Config Path | Notes |
-|----------|-------------|-------|
-| `ANTHROPIC_API_KEY` | (env var) | OpenClaw reads directly from env |
-| `OPENAI_API_KEY` | (env var) | OpenClaw reads directly from env |
-| `CLOUDFLARE_AI_GATEWAY_API_KEY` | (env var) | Native AI Gateway key |
-| `CF_AI_GATEWAY_ACCOUNT_ID` | (env var) | Account ID for AI Gateway |
-| `CF_AI_GATEWAY_GATEWAY_ID` | (env var) | Gateway ID for AI Gateway |
-| `OPENCLAW_GATEWAY_TOKEN` | `--token` flag | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
-| `OPENCLAW_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
-| `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
-| `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
-| `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
-| `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
+| Variable                        | Config Path                   | Notes                               |
+| ------------------------------- | ----------------------------- | ----------------------------------- |
+| `ANTHROPIC_API_KEY`             | (env var)                     | OpenClaw reads directly from env    |
+| `OPENAI_API_KEY`                | (env var)                     | OpenClaw reads directly from env    |
+| `CLOUDFLARE_AI_GATEWAY_API_KEY` | (env var)                     | Native AI Gateway key               |
+| `CF_AI_GATEWAY_ACCOUNT_ID`      | (env var)                     | Account ID for AI Gateway           |
+| `CF_AI_GATEWAY_GATEWAY_ID`      | (env var)                     | Gateway ID for AI Gateway           |
+| `OPENCLAW_GATEWAY_TOKEN`        | `--token` flag                | Mapped from `MOLTBOT_GATEWAY_TOKEN` |
+| `OPENCLAW_DEV_MODE`             | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE`              |
+| `TELEGRAM_BOT_TOKEN`            | `channels.telegram.botToken`  |                                     |
+| `DISCORD_BOT_TOKEN`             | `channels.discord.token`      |                                     |
+| `SLACK_BOT_TOKEN`               | `channels.slack.botToken`     |                                     |
+| `SLACK_APP_TOKEN`               | `channels.slack.appToken`     |                                     |
 
 ## OpenClaw Config Schema
 

@@ -5,6 +5,7 @@ import type { Context } from 'hono';
 import type { AppEnv } from '../types';
 import { createMockEnv } from '../test-utils';
 
+
 describe('isDevMode', () => {
   it('returns true when DEV_MODE is "true"', () => {
     const env = createMockEnv({ DEV_MODE: 'true' });
