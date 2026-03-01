@@ -248,14 +248,14 @@ Enable debug routes with `DEBUG_ROUTES=true` and check `/debug/processes`.
 
 ## R2 Storage Notes
 
-R2 is mounted via s3fs at `/data/moltbot`. Important gotchas:
+R2 persistence uses rclone (S3 API, not FUSE). No s3fs, no rsync, no `/data/moltbot`.
 
-- **rsync compatibility**: Use `rsync -r --no-times` instead of `rsync -a`. s3fs doesn't support setting timestamps, which causes rsync to fail with "Input/output error".
+- **Boot**: `rclone copy` restores from R2 (additive). Handles `openclaw/` and legacy `clawdbot/` prefixes.
 
-- **Mount checking**: Don't rely on `sandbox.mountBucket()` error messages to detect "already mounted" state. Instead, check `mount | grep s3fs` to verify the mount status.
+- **Background sync**: Every 30s, `rclone sync` pushes changed files to R2 (with deletions). Excludes `*.lock`, `*.log`, `*.tmp`, `.git/**`.
 
-- **Never delete R2 data**: The mount directory `/data/moltbot` IS the R2 bucket. Running `rm -rf /data/moltbot/*` will DELETE your backup data. Always check mount status before any destructive operations.
+- **Manual sync**: Via `sandbox.exec()` in `src/gateway/sync.ts`.
 
 - **Process status**: The sandbox API's `proc.status` may not update immediately after a process completes. Instead of checking `proc.status === 'completed'`, verify success by checking for expected output (e.g., timestamp file exists after sync).
 
-- **R2 prefix migration**: Backups are now stored under `openclaw/` prefix in R2 (was `clawdbot/`). The startup script handles restoring from both old and new prefixes with automatic migration.
+- **Sync delay**: Data written between syncs (every 30s) is lost on container death.
