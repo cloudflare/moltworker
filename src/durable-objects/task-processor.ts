@@ -1072,7 +1072,17 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
     if (url.pathname === '/status' && request.method === 'GET') {
       const task = await this.doState.storage.get<TaskState>('task');
-      return new Response(JSON.stringify(task || { status: 'not_found' }), {
+      if (!task) {
+        return new Response(JSON.stringify({ status: 'not_found' }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      // Strip secrets from status response — these are stored for alarm recovery
+      // but must never be exposed via the status API
+      const { telegramToken, openrouterKey, githubToken, braveSearchKey,
+              cloudflareApiToken, dashscopeKey, moonshotKey, deepseekKey,
+              ...safeTask } = task;
+      return new Response(JSON.stringify(safeTask), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -2319,6 +2329,35 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
 
         // Phase transition: work → review when tools were used and model produced content
         // Skip review if content is empty — nothing to review, adding more prompts won't help
+        //
+        // Guard: For multi-step tasks (especially orchestra), don't transition to review
+        // too early if the model's content indicates incomplete/failed work. Push it back
+        // to continue working instead.
+        const workIterations = task.iterations - (task.phaseStartIteration || 0);
+        const contentText = choice.message.content || '';
+        const systemMsg0 = request.messages.find(m => m.role === 'system');
+        const sysText = typeof systemMsg0?.content === 'string' ? systemMsg0.content : '';
+        const isOrchestraRun = sysText.includes('Orchestra RUN Mode') || sysText.includes('Orchestra INIT Mode') || sysText.includes('Orchestra REDO Mode');
+        const looksIncomplete = /\b(unable to|could not|couldn't|not found|no .*(roadmap|file|task)|I (need|should) to .*(check|try|search|look|examine)|let me (try|check|search)|calling tools)\b/i.test(contentText);
+
+        // For orchestra tasks, require at least 3 work-phase iterations or non-failure content
+        // before transitioning to review. This prevents premature review when the model
+        // only tried one file path out of many.
+        if (hasContent && task.phase === 'work' && task.toolsUsed.length > 0
+            && isOrchestraRun && workIterations < 3 && looksIncomplete) {
+          console.log(`[TaskProcessor] Deferring work→review: orchestra task with only ${workIterations} work iterations and incomplete content — pushing model to continue`);
+          conversationMessages.push({
+            role: 'assistant',
+            content: contentText,
+          });
+          conversationMessages.push({
+            role: 'user',
+            content: '[CONTINUE] Your work appears incomplete. You have more iterations available — please continue with the remaining steps before providing a final answer. Check all the file paths listed in your instructions.',
+          });
+          await this.doState.storage.put('task', task);
+          continue;
+        }
+
         if (hasContent && task.phase === 'work' && task.toolsUsed.length > 0) {
           // 7A.1: CoVe verification — check tool results for unacknowledged failures
           // before transitioning to review. One retry allowed if failures detected.

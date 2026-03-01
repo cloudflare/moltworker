@@ -57,6 +57,24 @@ interface TaskStatus {
 
 // ---- Helpers ----
 
+/** Strip any secret/key fields that may leak from the DO status response. */
+function sanitizeStatus(raw: Record<string, unknown>): TaskStatus {
+  const SAFE_FIELDS = new Set([
+    'status', 'result', 'error', 'toolsUsed', 'iterations',
+    'startTime', 'lastUpdate', 'modelAlias', 'phase',
+    'taskId', 'chatId', 'userId', 'messages',
+    'workPhaseContent', 'toolSignatures', 'phaseStartIteration',
+    'autoResume', 'reasoningLevel', 'structuredPlan', 'reviewerAlias',
+  ]);
+  const clean: Record<string, unknown> = {};
+  for (const key of Object.keys(raw)) {
+    if (SAFE_FIELDS.has(key)) {
+      clean[key] = raw[key];
+    }
+  }
+  return clean as unknown as TaskStatus;
+}
+
 /** Poll the DO /status endpoint until the task finishes or times out. */
 async function waitForCompletion(
   stub: { fetch: (request: Request | string) => Promise<Response> },
@@ -67,7 +85,8 @@ async function waitForCompletion(
 
   while (Date.now() < deadline) {
     const resp = await fetchDOWithRetry(stub, new Request('https://do/status', { method: 'GET' }));
-    lastStatus = await resp.json() as TaskStatus;
+    const raw = await resp.json() as Record<string, unknown>;
+    lastStatus = sanitizeStatus(raw);
 
     if (lastStatus.status === 'completed' || lastStatus.status === 'failed' || lastStatus.status === 'cancelled') {
       return lastStatus;
@@ -326,8 +345,8 @@ simulate.get('/status/:taskId', async (c) => {
 
   try {
     const resp = await fetchDOWithRetry(doStub, new Request('https://do/status', { method: 'GET' }));
-    const status = await resp.json() as TaskStatus;
-    return c.json(status);
+    const raw = await resp.json() as Record<string, unknown>;
+    return c.json(sanitizeStatus(raw));
   } catch (err) {
     return c.json({
       error: err instanceof Error ? err.message : String(err),
