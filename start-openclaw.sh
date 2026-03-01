@@ -99,6 +99,28 @@ else
 fi
 
 # ============================================================
+# SELF-UPDATE OPENCLAW (opt-in via OPENCLAW_AUTO_UPDATE=true)
+# ============================================================
+# When enabled, updates openclaw to the latest npm version on every cold start
+# so bug fixes and new features land without a full wrangler deploy.
+# The Dockerfile-pinned version serves as a fallback if npm is unreachable.
+if [ "$OPENCLAW_AUTO_UPDATE" = "true" ]; then
+    CURRENT_VER=$(openclaw --version 2>/dev/null || echo "unknown")
+    echo "Current openclaw version: $CURRENT_VER"
+    echo "Auto-update enabled, checking for updates..."
+    if npm install -g openclaw@latest --prefer-online 2>&1; then
+        NEW_VER=$(openclaw --version 2>/dev/null || echo "unknown")
+        if [ "$CURRENT_VER" != "$NEW_VER" ]; then
+            echo "Updated openclaw: $CURRENT_VER -> $NEW_VER"
+        else
+            echo "openclaw is already at latest ($CURRENT_VER)"
+        fi
+    else
+        echo "WARNING: openclaw update failed, continuing with $CURRENT_VER"
+    fi
+fi
+
+# ============================================================
 # ONBOARD (only if no config exists yet)
 # ============================================================
 if [ ! -f "$CONFIG_FILE" ]; then
