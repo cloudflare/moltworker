@@ -1,34 +1,16 @@
-#!/usr/bin/env node
-/**
- * OpenClaw Configuration Patcher
- *
- * This module patches the OpenClaw configuration file with settings derived
- * from environment variables. It merges with existing config to preserve
- * user settings.
- *
- * Handles:
- * - Gateway configuration (port, mode, trusted proxies, auth)
- * - AI Gateway model configuration
- * - Channel configuration (Telegram, Discord, Slack)
- */
-
 import * as fs from "fs";
-import { DmPolicy, OpenClawConfig, ModelApi, MoltLazyOpenClawConfig, ModelProviderConfig, AgentModelConfig } from "./types.js";
+import { DmPolicy, OpenClawConfig, ModelApi, MoltLazyOpenClawConfig, AgentModelConfig } from "./types.js";
 
-
-const CONFIG_PATH = "/root/.openclaw/openclaw.json";
+export const CONFIG_PATH = "/root/.openclaw/openclaw.json";
 
 // Map Cloudflare AI Gateway provider to OpenClaw ModelApi type
-// CF providers: https://developers.cloudflare.com/ai-gateway/usage/providers
-// OpenClaw API types: https://github.com/openclaw/openclaw/blob/main/src/config/types.models.ts
 const API_MAP: Record<string, string> = {
   anthropic: "anthropic-messages",
   "google-ai-studio": "google-generative-ai",
   bedrock: "bedrock-converse-stream",
-  // openai, groq, mistral, openrouter, etc. use openai-completions
 };
 
-function loadConfig(path: fs.PathOrFileDescriptor): MoltLazyOpenClawConfig {
+export function loadConfig(path: string): MoltLazyOpenClawConfig {
   try {
     return JSON.parse(fs.readFileSync(path, "utf8"));
   } catch {
@@ -37,9 +19,9 @@ function loadConfig(path: fs.PathOrFileDescriptor): MoltLazyOpenClawConfig {
   }
 }
 
-function saveConfig(config: MoltLazyOpenClawConfig): void {
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
-  console.log("Configuration patched successfully (merged with existing settings)");
+export function saveConfig(config: MoltLazyOpenClawConfig, path: string = CONFIG_PATH): void {
+  fs.writeFileSync(path, JSON.stringify(config, null, 2));
+  console.log(`Configuration saved successfully to ${path}`);
 }
 
 export function patchGateway(config: MoltLazyOpenClawConfig): void {
@@ -60,15 +42,13 @@ export function patchGateway(config: MoltLazyOpenClawConfig): void {
 }
 
 export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
-  // AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
-  // Adds a provider entry for any AI Gateway provider and sets it as default model.
-  // Examples:
-  //   workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
-  //   openai/gpt-4o
-  //   anthropic/claude-sonnet-4-5
   if (process.env.CF_AI_GATEWAY_MODEL) {
     const raw = process.env.CF_AI_GATEWAY_MODEL;
     const slashIdx = raw.indexOf("/");
+    if (slashIdx === -1) {
+        console.warn("CF_AI_GATEWAY_MODEL set but missing required config (format should be provider/model-id)");
+        return;
+    }
     const gwProvider = raw.substring(0, slashIdx);
     const modelId = raw.substring(slashIdx + 1);
 
@@ -98,15 +78,13 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
 
       let api = (API_MAP[gwProvider] || "openai-completions") as ModelApi;
 
-      // workers-ai: parse @cf/<vendor>/<model> to select API based on vendor
       if (gwProvider === "workers-ai") {
         const vendorMatch = modelId.match(/^@cf\/([^/]+)\//);
         if (vendorMatch) {
           const vendor = vendorMatch[1];
           if (vendor === "meta") {
-            api = "ollama"; // LLaMA models use ollama API
+            api = "ollama";
           }
-          // openai, mistral, etc. stay as openai-completions
         }
       }
 
@@ -114,7 +92,6 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
 
       config.models = config.models || {};
       config.models.providers = config.models.providers || {};
-      // Merge with existing provider config if any
       config.models.providers[providerName] = {
         ...config.models.providers[providerName],
         baseUrl: baseUrl,
@@ -141,8 +118,6 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
       );
     }
   } else {
-    // No AI Gateway model override - clean up any stale cf-ai-gw- providers
-    // restored from R2 backup and reset default model to built-in anthropic.
     if (config.models?.providers) {
       for (const key of Object.keys(config.models.providers)) {
         if (key.startsWith("cf-ai-gw-")) {
@@ -167,48 +142,44 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
 }
 
 export function patchTelegram(config: MoltLazyOpenClawConfig): void {
-  // Telegram configuration
-  // Merge with existing config to preserve user-added fields (e.g., custom allowFrom lists)
-  // Only overwrite fields that come from environment variables
   if (process.env.TELEGRAM_BOT_TOKEN) {
-    const existing = config.channels!.telegram || {};
+    config.channels = config.channels || {};
+    const existing = config.channels.telegram || {};
     const dmPolicy = (process.env.TELEGRAM_DM_POLICY || existing.dmPolicy || "pairing") as DmPolicy;
 
-    config.channels!.telegram = {
-      ...existing, // Preserve user settings
+    config.channels.telegram = {
+      ...existing,
       botToken: process.env.TELEGRAM_BOT_TOKEN,
       enabled: true,
       dmPolicy: dmPolicy,
     };
 
-    // Only override allowFrom if explicitly set via env var
     if (process.env.TELEGRAM_DM_ALLOW_FROM) {
-      config.channels!.telegram.allowFrom =
+      config.channels.telegram.allowFrom =
         process.env.TELEGRAM_DM_ALLOW_FROM.replace(/\s/g, "").split(",");
     } else if (dmPolicy === "open" && !existing.allowFrom) {
-      config.channels!.telegram.allowFrom = ["*"];
+      config.channels.telegram.allowFrom = ["*"];
     }
   }
 }
 
 export function patchDiscord(config: MoltLazyOpenClawConfig): void {
-  // Discord configuration
-  // Merge with existing config to preserve user-added fields
   if (process.env.DISCORD_BOT_TOKEN) {
-    const existing = config.channels!.discord || {};
+    config.channels = config.channels || {};
+    const existing = config.channels.discord || {};
     const existingDm = existing.dm || {};
     const dmPolicy = (process.env.DISCORD_DM_POLICY || existingDm.policy || "pairing") as DmPolicy;
 
     const dm: NonNullable<NonNullable<OpenClawConfig["channels"]>["discord"]>["dm"] = {
-      ...existingDm, // Preserve user settings like custom allowFrom
+      ...existingDm,
       policy: dmPolicy,
     };
     if (dmPolicy === "open" && !existingDm.allowFrom) {
       dm.allowFrom = ["*"];
     }
 
-    config.channels!.discord = {
-      ...existing, // Preserve user settings
+    config.channels.discord = {
+      ...existing,
       token: process.env.DISCORD_BOT_TOKEN,
       enabled: true,
       dm: dm,
@@ -217,9 +188,6 @@ export function patchDiscord(config: MoltLazyOpenClawConfig): void {
 }
 
 export function patchSlack(config: MoltLazyOpenClawConfig): void {
-  // Slack configuration
-  
-  // Handle missing token warnings
   if (process.env.SLACK_BOT_TOKEN && !process.env.SLACK_APP_TOKEN) {
     console.warn("Failed to configure Slack: SLACK_APP_TOKEN is missing.");
     return;
@@ -230,13 +198,11 @@ export function patchSlack(config: MoltLazyOpenClawConfig): void {
     return;
   }
 
-  // Merge with existing config to preserve user-added fields
   if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-    // Note: If you run into strict null check errors on `config.channels!`, 
-    // you might want to initialize it first with `config.channels = config.channels || {};`
-    const existing = config.channels!.slack || {};
-    config.channels!.slack = {
-      ...existing, // Preserve user settings
+    config.channels = config.channels || {};
+    const existing = config.channels.slack || {};
+    config.channels.slack = {
+      ...existing,
       botToken: process.env.SLACK_BOT_TOKEN,
       appToken: process.env.SLACK_APP_TOKEN,
       enabled: true,
@@ -244,11 +210,42 @@ export function patchSlack(config: MoltLazyOpenClawConfig): void {
   }
 }
 
-export function patchConfig(file_path?: string): void {
-  const file_location = file_path !== undefined ? file_path : CONFIG_PATH;
-  console.log("Patching config at:", file_location);
+export function validateConfig(filePath: string = CONFIG_PATH): boolean {
+  if (!fs.existsSync(filePath)) {
+    console.error(`Config file not found: ${filePath}`);
+    return false;
+  }
 
-  const config = loadConfig(file_location);
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const config = JSON.parse(content);
+
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      console.error("Config is not a valid JSON object");
+      return false;
+    }
+
+    if (config.gateway && typeof config.gateway !== "object") {
+      console.error("Config 'gateway' must be an object");
+      return false;
+    }
+
+    if (config.agents && typeof config.agents !== "object") {
+      console.error("Config 'agents' must be an object");
+      return false;
+    }
+
+    return true;
+  } catch (err) {
+    console.error(`Failed to validate config: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+export function patchConfig(filePath: string = CONFIG_PATH): void {
+  console.log("Patching config at:", filePath);
+
+  const config = loadConfig(filePath);
 
   config.gateway = config.gateway || {};
   config.channels = config.channels || {};
@@ -259,10 +256,5 @@ export function patchConfig(file_path?: string): void {
   patchDiscord(config);
   patchSlack(config);
 
-  saveConfig(config);
-}
-
-// Run when executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  patchConfig();
+  saveConfig(config, filePath);
 }

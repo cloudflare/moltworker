@@ -3,15 +3,15 @@
   "version": "1.0.0",
   "description": "OpenClaw configuration utilities for container startup",
   "type": "module",
-  "main": "dist/patchConfig.js",
+  "main": "dist/index.js",
   "bin": {
-    "patch-config": "./dist/patchConfig.js"
+    "moltlazy": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test": "vitest test",
+    "test:watch": "vitest test --watch"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -6,7 +6,7 @@ export default defineConfig({
     environment: 'node',
 
     include: ['src/**/*.test.ts', 'moltlazy/**/*.test.ts'],
-    exclude: ['src/client/**'],
+    exclude: ['src/client/**', '**/node_modules/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
