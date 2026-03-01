@@ -45,10 +45,60 @@ export type AgentModelConfig = string | {
   fallbacks?: string[];
 };
 
+/**
+ * Identity configuration for an agent.
+ * Maps to OpenClaw's IdentityConfig.
+ */
+export type AgentIdentityConfig = {
+  name?: string;
+  prompt?: string;
+};
+
+/**
+ * Thinking level for an agent run.
+ */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+/**
+ * Subset of OpenClaw's AgentDefaultsConfig that MoltLazy manages.
+ */
+export type MoltLazyAgentDefaultsConfig = {
+  model?: AgentModelConfig;
+  imageModel?: AgentModelConfig;
+  workspace?: string;
+  skipBootstrap?: boolean;
+  thinkingDefault?: ThinkingLevel;
+  timeoutSeconds?: number;
+  identity?: AgentIdentityConfig;
+};
+
+/**
+ * Single pre-made or user-defined agent configuration entry.
+ * Maps to a subset of OpenClaw's AgentConfig.
+ */
+export type AgentConfig = {
+  id: string;
+  name?: string;
+  model?: AgentModelConfig;
+  workspace?: string;
+  identity?: AgentIdentityConfig;
+  skills?: string[];
+  params?: Record<string, unknown>;
+};
+
+/**
+ * The agents section of the OpenClaw config as managed by MoltLazy.
+ */
+export type AgentsConfig = {
+  defaults?: MoltLazyAgentDefaultsConfig;
+  list?: AgentConfig[];
+};
+
 export interface MoltLazyOpenClawConfig extends OpenClawConfig {
   models?: {
     providers?: Record<string, ModelProviderConfig>;
   };
+  agents?: AgentsConfig;
 }
 
 export type { 

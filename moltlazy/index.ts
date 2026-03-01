@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import { DmPolicy, OpenClawConfig, ModelApi, MoltLazyOpenClawConfig, AgentModelConfig } from "./types.js";
 import { CF_AI_GATEWAY_PROVIDERS } from "./models/cfAiGateway.js";
+import { patchAgents } from "./agents/index.js";
 
 export const CONFIG_PATH = "/root/.openclaw/openclaw.json";
 
@@ -15,14 +16,14 @@ export function loadConfig(path: string): MoltLazyOpenClawConfig {
   try {
     return JSON.parse(fs.readFileSync(path, "utf8"));
   } catch {
-    console.log("Starting with empty config");
+    console.log("[Start-Openclaw.sh] Starting with empty config");
     return {};
   }
 }
 
 export function saveConfig(config: MoltLazyOpenClawConfig, path: string = CONFIG_PATH): void {
   fs.writeFileSync(path, JSON.stringify(config, null, 2));
-  console.log(`Configuration saved successfully to ${path}`);
+  console.log(`[Start-Openclaw.sh] Configuration saved successfully to ${path}`);
 }
 
 export function patchGateway(config: MoltLazyOpenClawConfig): void {
@@ -121,12 +122,12 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
     }
   } else {
     if (config.models?.providers) {
-      // for (const key of Object.keys(config.models.providers)) {
-      //   if (key.startsWith("cf-ai-gw-")) {
-      //     // delete config.models.providers[key];
-      //     // console.log("Removed stale AI Gateway provider: " + key);
-      //   }
-      // }
+      for (const key of Object.keys(config.models.providers)) {
+        if (key.startsWith("cf-ai-gw-")) {
+          delete config.models.providers[key];
+          console.log("[Start-Openclaw.sh] Removed stale AI Gateway provider: " + key);
+        }
+      }
     }
     if (config.agents?.defaults?.model) {
       const modelCfg = config.agents.defaults.model as AgentModelConfig;
@@ -134,7 +135,7 @@ export function patchAiGatewayModel(config: MoltLazyOpenClawConfig): void {
       if (primary.startsWith("cf-ai-gw-")) {
         delete config.agents.defaults.model;
         console.log(
-          "Reset default model (was using removed AI Gateway provider: " +
+          "[Start-Openclaw.sh] Reset default model (was using removed AI Gateway provider: " +
             primary +
             ")"
         );
@@ -258,7 +259,7 @@ export function populateCloudflareAiGateway(config: MoltLazyOpenClawConfig): voi
     };
 
     console.log(
-      "CF AI Gateway provider registered: " + providerName + " -> " + baseUrl
+      "[Start-Openclaw.sh] CF AI Gateway provider registered: " + providerName + " -> " + baseUrl
     );
   }
 }
@@ -296,7 +297,7 @@ export function validateConfig(filePath: string = CONFIG_PATH): boolean {
 }
 
 export function patchConfig(filePath: string = CONFIG_PATH): void {
-  console.log("Patching config at:", filePath);
+  console.debug("Patching config at:", filePath);
 
   const config = loadConfig(filePath);
 
@@ -306,10 +307,13 @@ export function patchConfig(filePath: string = CONFIG_PATH): void {
   patchGateway(config);
   populateCloudflareAiGateway(config);
   patchAiGatewayModel(config);
+  patchAgents(config);
   patchTelegram(config);
   patchDiscord(config);
   patchSlack(config);
 
   saveConfig(config, filePath);
-  console.log(`Final config: ${JSON.stringify(config)}`);
+  if (process.env.OPENCLAW_DEV_MODE === "true") {
+    console.debug(`Final config: ${JSON.stringify(config)}`);
+  }
 }
