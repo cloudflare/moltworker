@@ -391,7 +391,7 @@ describe('repo health check in buildRunPrompt', () => {
 describe('repo health check in buildInitPrompt', () => {
   it('includes large file flagging step', () => {
     const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
-    expect(prompt).toContain('FLAG LARGE FILES');
+    expect(prompt).toContain('Large source files MUST be split');
   });
 
   it('references the line threshold', () => {

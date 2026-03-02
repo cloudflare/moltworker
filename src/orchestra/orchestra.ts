@@ -85,19 +85,17 @@ You are creating a structured project roadmap. Follow this workflow precisely.
 
 ## Workflow
 
-### Step 1: UNDERSTAND THE REPO
-- Use \`github_list_files\` and \`github_read_file\` to understand:
-  - Existing code structure, language, framework
-  - Existing docs (README, CONTRIBUTING, etc.)
-  - Any existing roadmap or TODO files: ${ROADMAP_FILE_CANDIDATES.join(', ')}
-  - Test patterns, CI configuration
-  - Package dependencies
-
-### Step 1.5: FLAG LARGE FILES
-- While exploring the repo, note any SOURCE files that exceed ~${LARGE_FILE_THRESHOLD_LINES} lines or ~${LARGE_FILE_THRESHOLD_KB}KB
-- Only check source code files (.ts, .tsx, .js, .jsx, .py, .vue, .svelte, etc.) — skip config, generated, and lock files
-- If any large files are found, they MUST be split into smaller modules before other tasks modify them
-- Record which files are large and what they contain (e.g., "src/App.tsx — 800 lines, contains routing + all page components")
+### Step 1: UNDERSTAND THE REPO (max 5-8 file reads)
+**Be efficient — read only what you need, then move to Step 3 quickly.**
+- Use \`github_list_files\` to scan the root and main source directory
+- Use \`github_read_file\` to read ONLY these key files:
+  - README.md (project overview)
+  - package.json or equivalent (dependencies, scripts)
+  - Any existing roadmap: ${ROADMAP_FILE_CANDIDATES.join(', ')}
+  - 1-2 main source files (entry point, main component)
+- Do NOT read every file — the listing gives you enough structure info
+- Note file sizes from the listing to flag large files (>${LARGE_FILE_THRESHOLD_LINES} lines or ~${LARGE_FILE_THRESHOLD_KB}KB)
+- Large source files MUST be split into modules — add a refactoring task in the roadmap
 
 ### Step 2: ANALYZE THE PROJECT REQUEST
 - Read the user's project description carefully
@@ -183,6 +181,7 @@ The \`pr:\` field MUST be a real GitHub URL. If PR creation failed, set \`pr: FA
 
 ## Rules
 - **DO NOT ask for user confirmation or permission** — execute ALL steps immediately and autonomously
+- **Be FAST** — read only essential files (5-8 max), then create the PR. Do not exhaustively read every file.
 - Always create a PR — never just describe what should be done
 - If an existing roadmap exists, incorporate its content (don't discard previous work)
 - Keep phases realistic — avoid overplanning

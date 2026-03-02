@@ -2406,8 +2406,13 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         const isOrchestraRun = sysText.includes('Orchestra RUN Mode') || sysText.includes('Orchestra INIT Mode') || sysText.includes('Orchestra REDO Mode');
         const looksIncomplete = /\b(unable to|could not|couldn't|not found|no .*(roadmap|file|task)|I (need|should) to .*(check|try|search|look|examine)|let me (try|check|search)|calling tools|please confirm|would you like|shall I|do you want me to|if you'?d like|awaiting.*confirm|let me know if|ready to (start|proceed|begin))\b/i.test(contentText);
         // For orchestra tasks, also check if the required ORCHESTRA_RESULT: block is missing.
-        // If it's not there, the model hasn't completed the workflow regardless of text content.
-        const orchestraResultMissing = isOrchestraRun && !contentText.includes('ORCHESTRA_RESULT:');
+        // Only apply this early-exit guard when the model hasn't done much work yet
+        // (< 8 tool calls). After 8+ tool calls the model has done substantial work
+        // and should be allowed to transition naturally. This prevents the guard from
+        // re-triggering after every auto-resume (which resets workIterations to 0).
+        const orchestraResultMissing = isOrchestraRun
+          && !contentText.includes('ORCHESTRA_RESULT:')
+          && task.toolsUsed.length < 8;
 
         // For orchestra tasks, require at least 3 work-phase iterations or non-failure content
         // before transitioning to review. This prevents premature review when the model
