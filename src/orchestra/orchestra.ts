@@ -180,10 +180,12 @@ summary: {1-2 sentence summary}
 The \`pr:\` field MUST be a real GitHub URL. If PR creation failed, set \`pr: FAILED\` and explain in the summary.
 
 ## Rules
+- **DO NOT ask for user confirmation or permission** — execute ALL steps immediately and autonomously
 - Always create a PR — never just describe what should be done
 - If an existing roadmap exists, incorporate its content (don't discard previous work)
 - Keep phases realistic — avoid overplanning
-- Task descriptions should be actionable by a coding AI model in a single session`;
+- Task descriptions should be actionable by a coding AI model in a single session
+- You MUST produce an ORCHESTRA_RESULT: block with a real PR URL — the task is NOT complete without it`;
 }
 
 // ============================================================
@@ -270,9 +272,11 @@ summary: {1-2 sentence summary}
 \`\`\`
 
 ## Rules
+- **DO NOT ask for user confirmation or permission** — execute ALL steps immediately and autonomously
 - Always create a PR. One task per run. Update ROADMAP.md + WORK_LOG.md in same PR.
 - Never regenerate entire files. Never delete work log entries or roadmap tasks.
 - Use "${modelAlias}" in branch names and commit messages.
+- You MUST produce an ORCHESTRA_RESULT: block with a real PR URL — the task is NOT complete without it
 ${historyContext}`;
 }
 

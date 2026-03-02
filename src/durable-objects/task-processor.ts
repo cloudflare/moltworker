@@ -2404,13 +2404,16 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
         const systemMsg0 = request.messages.find(m => m.role === 'system');
         const sysText = typeof systemMsg0?.content === 'string' ? systemMsg0.content : '';
         const isOrchestraRun = sysText.includes('Orchestra RUN Mode') || sysText.includes('Orchestra INIT Mode') || sysText.includes('Orchestra REDO Mode');
-        const looksIncomplete = /\b(unable to|could not|couldn't|not found|no .*(roadmap|file|task)|I (need|should) to .*(check|try|search|look|examine)|let me (try|check|search)|calling tools)\b/i.test(contentText);
+        const looksIncomplete = /\b(unable to|could not|couldn't|not found|no .*(roadmap|file|task)|I (need|should) to .*(check|try|search|look|examine)|let me (try|check|search)|calling tools|please confirm|would you like|shall I|do you want me to|if you'?d like|awaiting.*confirm|let me know if|ready to (start|proceed|begin))\b/i.test(contentText);
+        // For orchestra tasks, also check if the required ORCHESTRA_RESULT: block is missing.
+        // If it's not there, the model hasn't completed the workflow regardless of text content.
+        const orchestraResultMissing = isOrchestraRun && !contentText.includes('ORCHESTRA_RESULT:');
 
         // For orchestra tasks, require at least 3 work-phase iterations or non-failure content
         // before transitioning to review. This prevents premature review when the model
         // only tried one file path out of many.
         if (hasContent && task.phase === 'work' && task.toolsUsed.length > 0
-            && isOrchestraRun && workIterations < 3 && looksIncomplete) {
+            && isOrchestraRun && workIterations < 3 && (looksIncomplete || orchestraResultMissing)) {
           console.log(`[TaskProcessor] Deferring work→review: orchestra task with only ${workIterations} work iterations and incomplete content — pushing model to continue`);
           conversationMessages.push({
             role: 'assistant',
@@ -2418,7 +2421,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           });
           conversationMessages.push({
             role: 'user',
-            content: '[CONTINUE] Your work appears incomplete. You have more iterations available — please continue with the remaining steps before providing a final answer. Check all the file paths listed in your instructions.',
+            content: '[CONTINUE] Your work is NOT complete — you MUST execute ALL steps before finishing. Do NOT ask for confirmation or permission — proceed immediately with the next step. Use your tools (github_read_file, github_create_pr, etc.) to complete the task. For orchestra tasks, you MUST produce an ORCHESTRA_RESULT: block with a real PR URL.',
           });
           await this.doState.storage.put('task', task);
           continue;

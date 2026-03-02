@@ -1014,15 +1014,15 @@ const VALUE_TIER_LABELS: Record<ValueTier, string> = {
   outdated: '⚠️',
 };
 
-/** Format a single model line with features and value tier */
+/** Format a single model line — compact single-line for Telegram 4096 char limit */
 function formatModelLine(m: ModelInfo): string {
   const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
   const tier = getValueTier(m);
   const tierIcon = VALUE_TIER_LABELS[tier];
   if (m.isFree) {
-    return `  /${m.alias} — ${m.name} ${features}\n    ${m.score || m.specialty}`;
+    return `  /${m.alias} ${features} — ${m.name}`;
   }
-  return `  ${tierIcon} /${m.alias} — ${m.name} ${features}\n    ${m.cost} | ${m.score || m.specialty}`;
+  return `  ${tierIcon} /${m.alias} ${features} ${m.cost}`;
 }
 
 /**
@@ -1091,7 +1091,7 @@ export function formatModelsList(): string {
   if (imageGen.length > 0) {
     lines.push('🎨 IMAGE GEN:');
     for (const m of imageGen) {
-      lines.push(`  /${m.alias} — ${m.name}\n    ${m.cost} | ${m.specialty}`);
+      lines.push(`  /${m.alias} ${m.cost}`);
     }
     lines.push('');
   }
@@ -1101,28 +1101,17 @@ export function formatModelsList(): string {
   for (const m of freeCurated) lines.push(formatModelLine(m));
 
   if (freeSynced.length > 0) {
-    lines.push('\n🔄 FREE (synced via /syncmodels):');
+    lines.push('\n🔄 FREE (synced):');
     for (const m of freeSynced) {
       const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
-      lines.push(`  /${m.alias} — ${m.name} ${features}`);
+      lines.push(`  /${m.alias} ${features}`);
     }
   }
 
-  // Auto-synced models — show notable highlights + summary count
+  // Auto-synced models — just show count
   const autoSyncedCount = getAutoSyncedModelCount();
   if (autoSyncedCount > 0) {
-    const notable = getNotableAutoSynced();
-    if (notable.length > 0) {
-      lines.push('\n🌐 AUTO-SYNCED HIGHLIGHTS:');
-      for (const m of notable) {
-        const features = [m.supportsVision && '👁️', m.supportsTools && '🔧'].filter(Boolean).join('');
-        lines.push(`  /${m.alias} — ${m.name} ${features}\n    ${m.cost}`);
-      }
-    }
-    const remaining = autoSyncedCount - notable.length;
-    if (remaining > 0) {
-      lines.push(`\n  +${remaining} more auto-synced — /use <alias> to switch`);
-    }
+    lines.push(`\n🌐 +${autoSyncedCount} auto-synced — /use <alias>`);
   }
 
   // --- Orchestra-capable models ---
