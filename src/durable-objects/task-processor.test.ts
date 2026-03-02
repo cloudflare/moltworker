@@ -2068,3 +2068,384 @@ describe('P2 guardrails: tool result validation', () => {
     expect(result).toContain('Confidence: High');
   });
 });
+
+// --- Invalid JSON args bailout ---
+
+type MockApiResponse = {
+  content?: string;
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>;
+};
+
+describe('invalid JSON args bailout', () => {
+  let TaskProcessorClass: typeof import('./task-processor').TaskProcessor;
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const mod = await import('./task-processor');
+    TaskProcessorClass = mod.TaskProcessor;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should bail out after MAX_INVALID_ARGS_BAIL consecutive all-invalid iterations', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    // Make executeTool return invalid-JSON error for every call
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => ({
+      role: 'tool' as const,
+      tool_call_id: toolCall.id,
+      content: `Error: Invalid JSON arguments: ${toolCall.function.arguments}`,
+    }));
+
+    // Build 9 responses that each emit a single tool call with bad args,
+    // then a final text response (which won't be reached if bail works).
+    const responses: MockApiResponse[] = [];
+    for (let i = 0; i < 9; i++) {
+      responses.push({
+        tool_calls: [{
+          id: `call_bad_${i}`,
+          type: 'function' as const,
+          function: { name: 'github_read_file', arguments: "{'owner': 'test'}" },
+        }],
+      });
+    }
+    responses.push({ content: 'Should not reach this' });
+
+    vi.stubGlobal('fetch', buildApiResponses(responses));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || (task.status !== 'failed' && task.status !== 'completed')) {
+        throw new Error('not done yet');
+      }
+    }, { timeout: 15000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    expect(task.status).toBe('failed');
+    expect(task.error).toContain('cannot format tool call arguments');
+    expect(task.result).toContain('invalid JSON arguments');
+  });
+
+  it('should inject nudge message after MAX_INVALID_ARGS_NUDGE iterations', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+    const capturedBodies: Array<Record<string, unknown>> = [];
+
+    // Return invalid-JSON error for first 5 calls, then valid result, then final text
+    let callCount = 0;
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      callCount++;
+      if (callCount <= 5) {
+        return {
+          role: 'tool' as const,
+          tool_call_id: toolCall.id,
+          content: `Error: Invalid JSON arguments: ${toolCall.function.arguments}`,
+        };
+      }
+      return {
+        role: 'tool' as const,
+        tool_call_id: toolCall.id,
+        content: 'File content here',
+      };
+    });
+
+    // 6 tool call responses + 1 final text
+    const responses: MockApiResponse[] = [];
+    for (let i = 0; i < 6; i++) {
+      responses.push({
+        tool_calls: [{
+          id: `call_nudge_${i}`,
+          type: 'function' as const,
+          function: { name: 'github_read_file', arguments: "{'owner': 'test'}" },
+        }],
+      });
+    }
+    responses.push({ content: 'Got it, here is the answer.' });
+
+    vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : url.url;
+      if (urlStr.includes('api.telegram.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+          text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+        });
+      }
+
+      if (init?.body) {
+        try {
+          const parsed = JSON.parse(init.body as string);
+          if (parsed.messages) capturedBodies.push(parsed);
+        } catch { /* ignore */ }
+      }
+
+      // Use the same sequential response logic as buildApiResponses
+      let apiIdx = 0;
+      // Actually use a closure-scoped index
+      return Promise.resolve(buildSSEResponse(responses[Math.min((capturedBodies.length > 0 ? capturedBodies.length - 1 : 0), responses.length - 1)]));
+    }));
+
+    // Actually, the above approach won't work well with the index tracking.
+    // Let me use a simpler approach: buildApiResponses with body capture.
+    let apiCallIndex = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : url.url;
+      if (urlStr.includes('api.telegram.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+          text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+        });
+      }
+
+      if (init?.body) {
+        try {
+          const parsed = JSON.parse(init.body as string);
+          if (parsed.messages) capturedBodies.push(parsed);
+        } catch { /* ignore */ }
+      }
+
+      const r = responses[Math.min(apiCallIndex, responses.length - 1)];
+      apiCallIndex++;
+      return Promise.resolve(buildSSEResponse(r));
+    }));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || (task.status !== 'completed' && task.status !== 'failed')) {
+        throw new Error('not done yet');
+      }
+    }, { timeout: 15000, interval: 50 });
+
+    // The nudge message should have been injected after 4 consecutive invalid iterations
+    const nudgeCall = capturedBodies.find(b => {
+      const msgs = b.messages as Array<Record<string, unknown>>;
+      return msgs.some(m => typeof m.content === 'string' && m.content.includes('MUST format arguments as valid JSON'));
+    });
+    expect(nudgeCall).toBeDefined();
+  });
+
+  it('should reset invalid-args counter when a tool call succeeds', async () => {
+    const mockState = createMockState();
+    const { executeTool } = await import('../openrouter/tools');
+
+    // First 3 calls return invalid JSON, then 1 succeeds, then 3 more invalid, then succeed, then final text
+    let callCount = 0;
+    vi.mocked(executeTool).mockImplementation(async (toolCall) => {
+      callCount++;
+      // Calls 1-3 fail, call 4 succeeds, calls 5-7 fail, call 8 succeeds
+      if (callCount <= 3 || (callCount >= 5 && callCount <= 7)) {
+        return {
+          role: 'tool' as const,
+          tool_call_id: toolCall.id,
+          content: `Error: Invalid JSON arguments: bad`,
+        };
+      }
+      return {
+        role: 'tool' as const,
+        tool_call_id: toolCall.id,
+        content: 'Success result',
+      };
+    });
+
+    // 8 tool call responses + final text
+    const responses: MockApiResponse[] = [];
+    for (let i = 0; i < 8; i++) {
+      responses.push({
+        tool_calls: [{
+          id: `call_reset_${i}`,
+          type: 'function' as const,
+          function: { name: 'github_read_file', arguments: '{"owner":"test","repo":"test","path":"f.ts"}' },
+        }],
+      });
+    }
+    responses.push({ content: 'Task completed.' });
+
+    vi.stubGlobal('fetch', buildApiResponses(responses));
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || (task.status !== 'completed' && task.status !== 'failed')) {
+        throw new Error('not done yet');
+      }
+    }, { timeout: 15000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    // Should NOT have bailed out — the counter resets when a tool succeeds
+    expect(task.status).toBe('completed');
+    expect(task.result).toContain('Task completed');
+  });
+});
+
+// --- 400 input-validation context compression ---
+
+describe('400 input-validation context compression', () => {
+  let TaskProcessorClass: typeof import('./task-processor').TaskProcessor;
+
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const mod = await import('./task-processor');
+    TaskProcessorClass = mod.TaskProcessor;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should compress context and retry on 400 input-validation error', async () => {
+    const mockState = createMockState();
+    const capturedBodies: Array<Record<string, unknown>> = [];
+    const { getModel } = await import('../openrouter/models');
+
+    // Override getModel to return a small maxContext so the compressor's budget
+    // is low enough to evict messages. Budget = max(16000, floor(maxContext * 0.75)).
+    // With maxContext=22000, budget = 16500 tokens — our ~30K conversation will compress.
+    vi.mocked(getModel).mockReturnValue({
+      id: 'deepseek-chat', alias: 'deep', isFree: false, supportsTools: true,
+      name: 'DeepSeek', specialty: '', score: '', cost: '$0.25',
+      maxContext: 22000,
+    } as ReturnType<typeof getModel>);
+
+    let apiCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string | Request, init?: RequestInit) => {
+      const urlStr = typeof url === 'string' ? url : url.url;
+      if (urlStr.includes('api.telegram.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+          text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+        });
+      }
+
+      if (init?.body) {
+        try {
+          const parsed = JSON.parse(init.body as string);
+          if (parsed.messages) capturedBodies.push(parsed);
+        } catch { /* ignore */ }
+      }
+
+      apiCallCount++;
+      if (apiCallCount === 1) {
+        // First call: 400 input validation error
+        return Promise.resolve(new Response(
+          JSON.stringify({ error: { message: '400 Input validation error: too many tokens in the input' } }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        ));
+      }
+      // Second call (after compression attempt): success
+      return Promise.resolve(buildSSEResponse({ content: 'Answer after compression.' }));
+    }));
+
+    // Build a very large conversation that exceeds the 16K token minimum budget.
+    // Each message ~5K chars ≈ ~1.5K tokens. With 15+ messages we exceed the budget.
+    const longMessages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: 'You are a code analysis assistant. ' + 'System context padding. '.repeat(200) },
+      { role: 'user', content: 'Analyze the repository structure' },
+    ];
+    // Add many assistant/user turn pairs with large content
+    for (let i = 0; i < 12; i++) {
+      longMessages.push({
+        role: 'assistant',
+        content: `Analysis of component ${i}: ` + `This component handles the ${i}th feature. It integrates with the database layer and provides REST API endpoints. The implementation follows the repository pattern with dependency injection. `.repeat(80),
+      });
+      longMessages.push({
+        role: 'user',
+        content: `What about component ${i + 1}?`,
+      });
+    }
+    // Final user message
+    longMessages.push({ role: 'user', content: 'Now summarize everything' });
+
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest({ messages: longMessages })),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || (task.status === 'pending' || task.status === 'processing')) {
+        throw new Error('not done yet');
+      }
+    }, { timeout: 15000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    // Should have retried after compression and succeeded
+    expect(task.status).toBe('completed');
+    expect(task.result).toContain('Answer after compression');
+
+    // Should have made at least 2 API calls (one 400, one success)
+    expect(apiCallCount).toBeGreaterThanOrEqual(2);
+
+    // The second request should have fewer messages than the first (compressed)
+    if (capturedBodies.length >= 2) {
+      const firstMsgCount = (capturedBodies[0].messages as unknown[]).length;
+      const secondMsgCount = (capturedBodies[1].messages as unknown[]).length;
+      expect(secondMsgCount).toBeLessThan(firstMsgCount);
+    }
+  });
+
+  it('should fail fast when context is already minimal and cannot compress', async () => {
+    const mockState = createMockState();
+
+    let apiCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn((url: string | Request) => {
+      const urlStr = typeof url === 'string' ? url : url.url;
+      if (urlStr.includes('api.telegram.org')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, result: { message_id: 999 } }),
+          text: () => Promise.resolve(JSON.stringify({ ok: true, result: { message_id: 999 } })),
+        });
+      }
+
+      apiCallCount++;
+      // Always return 400 input validation
+      return Promise.resolve(new Response(
+        JSON.stringify({ error: { message: '400 Input validation error: too many tokens' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      ));
+    }));
+
+    // Minimal messages — can't be compressed further
+    const processor = new TaskProcessorClass(mockState as never, {} as never);
+    await processor.fetch(new Request('https://do/process', {
+      method: 'POST',
+      body: JSON.stringify(createTaskRequest()),
+    }));
+
+    await vi.waitFor(() => {
+      const task = mockState.storage._store.get('task') as Record<string, unknown> | undefined;
+      if (!task || (task.status === 'pending' || task.status === 'processing')) {
+        throw new Error('not done yet');
+      }
+    }, { timeout: 15000, interval: 50 });
+
+    const task = mockState.storage._store.get('task') as Record<string, unknown>;
+    // Should have failed (context minimal, can't compress, and 400 persists)
+    expect(task.status).toBe('failed');
+    // Should not have retried many times — fail fast when compression is impossible
+    expect(apiCallCount).toBeLessThanOrEqual(4); // MAX_API_RETRIES + 1 at most
+  });
+});

@@ -4238,3 +4238,167 @@ describe('sandbox_exec tool', () => {
     expect(result.content).toContain('warning: some deprecation');
   });
 });
+
+// --- repairJsonArgs (tested via executeTool since it's private) ---
+
+describe('JSON argument repair via executeTool', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // Mock fetch for tool calls that reach the actual tool after repair
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve('fetched content'),
+      json: () => Promise.resolve([{ name: 'README.md', type: 'file', size: 100 }]),
+    }));
+  });
+
+  it('should repair single-quoted args without URLs', async () => {
+    // Single-quoted keys/values that don't contain // are repaired correctly
+    const result = await executeTool({
+      id: 'repair_1',
+      type: 'function',
+      function: {
+        name: 'github_list_files',
+        arguments: "{'owner': 'PetrAnto', 'repo': 'wagmi', 'path': ''}",
+      },
+    });
+
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should repair trailing commas in otherwise-valid double-quoted JSON', async () => {
+    const result = await executeTool({
+      id: 'repair_2',
+      type: 'function',
+      function: {
+        name: 'github_list_files',
+        arguments: '{"owner": "PetrAnto", "repo": "wagmi",}',
+      },
+    });
+
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should repair unquoted keys with double-quoted values', async () => {
+    const result = await executeTool({
+      id: 'repair_3',
+      type: 'function',
+      function: {
+        name: 'github_list_files',
+        arguments: '{owner: "PetrAnto", repo: "wagmi"}',
+      },
+    });
+
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should repair block comments in JSON', async () => {
+    const result = await executeTool({
+      id: 'repair_4',
+      type: 'function',
+      function: {
+        name: 'github_list_files',
+        arguments: '{"owner": "PetrAnto" /* the owner */, "repo": "wagmi"}',
+      },
+    });
+
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should repair combined: single quotes + trailing comma + unquoted keys (no URLs)', async () => {
+    const result = await executeTool({
+      id: 'repair_5',
+      type: 'function',
+      function: {
+        name: 'github_list_files',
+        arguments: "{owner: 'PetrAnto', repo: 'wagmi',}",
+      },
+    });
+
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should repair DeepSeek-style multi-key single-quoted args', async () => {
+    // Real-world pattern from DeepSeek V3.2 orchestra failures
+    const result = await executeTool({
+      id: 'repair_6',
+      type: 'function',
+      function: {
+        name: 'github_read_file',
+        arguments: "{'owner': 'PetrAnto', 'repo': 'wagmi', 'path': 'ROADMAP.md'}",
+      },
+    });
+
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should fail on single-quoted args containing URLs (known limitation: // is stripped as comment)', async () => {
+    // The comment-stripping regex strips everything after // in unquoted context,
+    // which breaks URLs in single-quoted strings (quotes haven't been fixed yet).
+    // This is a known edge case documented in the PR review.
+    const result = await executeTool({
+      id: 'repair_7',
+      type: 'function',
+      function: {
+        name: 'fetch_url',
+        arguments: "{'url': 'https://example.com'}",
+      },
+    });
+
+    // This FAILS to repair because // in the URL gets stripped before quote fixing
+    expect(result.content).toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should still fail on truly unrepairable JSON', async () => {
+    const result = await executeTool({
+      id: 'repair_8',
+      type: 'function',
+      function: {
+        name: 'fetch_url',
+        arguments: 'not json at all {{{}',
+      },
+    });
+
+    expect(result.content).toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should still fail on empty arguments', async () => {
+    const result = await executeTool({
+      id: 'repair_9',
+      type: 'function',
+      function: {
+        name: 'fetch_url',
+        arguments: '',
+      },
+    });
+
+    expect(result.content).toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should still fail on array arguments (not an object)', async () => {
+    const result = await executeTool({
+      id: 'repair_10',
+      type: 'function',
+      function: {
+        name: 'fetch_url',
+        arguments: "['value1', 'value2']",
+      },
+    });
+
+    expect(result.content).toContain('Error: Invalid JSON arguments');
+  });
+
+  it('should pass through valid JSON without repair', async () => {
+    const result = await executeTool({
+      id: 'repair_11',
+      type: 'function',
+      function: {
+        name: 'github_list_files',
+        arguments: '{"owner": "PetrAnto", "repo": "wagmi"}',
+      },
+    });
+
+    // Valid JSON goes through the normal JSON.parse path, no repair needed
+    expect(result.content).not.toContain('Error: Invalid JSON arguments');
+  });
+});
