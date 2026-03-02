@@ -1769,10 +1769,21 @@ export class TelegramHandler {
     const history = await loadOrchestraHistory(this.r2Bucket, userId);
     const previousTasks = history?.tasks.filter(t => t.repo === repo) || [];
 
+    // Determine branch name — append short timestamp suffix to prevent branch collisions
+    const branchSuffix = Date.now().toString(36).slice(-4); // 4-char unique suffix
+    const taskSlug = mode === 'init'
+      ? 'roadmap-init'
+      : mode === 'redo'
+      ? `redo-${generateTaskSlug(prompt)}`
+      : generateTaskSlug(prompt || 'next-task');
+    const branchName = `bot/${taskSlug}-${modelAlias}-${branchSuffix}`;
+
     // Build mode-specific system prompt
     let orchestraSystemPrompt: string;
+    // Strip bot/ prefix to get the slug the model should use in tool calls
+    const branchSlug = branchName.replace(/^bot\//, '');
     if (mode === 'init') {
-      orchestraSystemPrompt = buildInitPrompt({ repo, modelAlias });
+      orchestraSystemPrompt = buildInitPrompt({ repo, modelAlias, branchSlug });
     } else if (mode === 'redo') {
       orchestraSystemPrompt = buildRedoPrompt({
         repo,
@@ -1786,6 +1797,7 @@ export class TelegramHandler {
         modelAlias,
         previousTasks,
         specificTask: prompt || undefined,
+        branchSlug,
       });
     }
 
@@ -1812,14 +1824,6 @@ export class TelegramHandler {
       },
       { role: 'user', content: userMessage },
     ];
-
-    // Determine branch name
-    const taskSlug = mode === 'init'
-      ? 'roadmap-init'
-      : mode === 'redo'
-      ? `redo-${generateTaskSlug(prompt)}`
-      : generateTaskSlug(prompt || 'next-task');
-    const branchName = `bot/${taskSlug}-${modelAlias}`;
 
     // Store the orchestra task entry as "started"
     // OrchestraTask.mode only supports 'init' | 'run', treat redo as run
