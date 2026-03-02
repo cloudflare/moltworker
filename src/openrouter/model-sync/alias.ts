@@ -13,8 +13,16 @@
  */
 
 /**
+ * Sanitize an alias to be Telegram bot-command compatible.
+ * Telegram commands only support /[a-z0-9_]+, so strip everything else.
+ */
+function sanitizeAlias(alias: string): string {
+  return alias.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
  * Generate a stable alias for a model ID.
- * If the model already has an alias in the map, return it.
+ * If the model already has an alias in the map, return it (after sanitization).
  * Otherwise generate a new one and add to the map.
  */
 export function generateAlias(
@@ -23,13 +31,20 @@ export function generateAlias(
   aliasMap: Record<string, string>,
 ): string {
   // Return existing stable alias if we've seen this model before
-  if (aliasMap[modelId] && !existingAliases.has(aliasMap[modelId])) {
-    existingAliases.add(aliasMap[modelId]);
-    return aliasMap[modelId];
-  }
   if (aliasMap[modelId]) {
+    // Sanitize cached alias (old R2 maps may contain hyphens/dots)
+    const raw = aliasMap[modelId];
+    const alias = sanitizeAlias(raw);
+    if (alias !== raw) {
+      aliasMap[modelId] = alias; // Self-heal: update map for next R2 persist
+    }
+
+    if (!existingAliases.has(alias)) {
+      existingAliases.add(alias);
+      return alias;
+    }
     // Alias exists but conflicts — return it anyway (it was assigned first)
-    return aliasMap[modelId];
+    return alias;
   }
 
   const alias = createNewAlias(modelId, existingAliases);

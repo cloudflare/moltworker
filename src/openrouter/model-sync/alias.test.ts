@@ -44,11 +44,28 @@ describe('generateAlias', () => {
     expect(alias).not.toContain('-');
   });
 
-  it('returns stable alias from map', () => {
+  it('sanitizes cached alias from map (strips hyphens)', () => {
     const existing = new Set<string>();
     const aliasMap: Record<string, string> = { 'openai/gpt-5': 'my-gpt5' };
     const alias = generateAlias('openai/gpt-5', existing, aliasMap);
-    expect(alias).toBe('my-gpt5');
+    expect(alias).toBe('mygpt5');
+    expect(aliasMap['openai/gpt-5']).toBe('mygpt5'); // Map updated in-place
+  });
+
+  it('returns clean cached alias unchanged', () => {
+    const existing = new Set<string>();
+    const aliasMap: Record<string, string> = { 'openai/gpt-5': 'mygpt5' };
+    const alias = generateAlias('openai/gpt-5', existing, aliasMap);
+    expect(alias).toBe('mygpt5');
+    expect(aliasMap['openai/gpt-5']).toBe('mygpt5');
+  });
+
+  it('handles sanitized alias that collides with existing', () => {
+    const existing = new Set<string>(['mygpt5']);
+    const aliasMap: Record<string, string> = { 'openai/gpt-5': 'my-gpt5' };
+    const alias = generateAlias('openai/gpt-5', existing, aliasMap);
+    expect(alias).toBe('mygpt5'); // Assigned first wins
+    expect(aliasMap['openai/gpt-5']).toBe('mygpt5');
   });
 
   it('adds generated alias to map for stability', () => {

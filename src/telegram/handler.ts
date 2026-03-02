@@ -31,7 +31,7 @@ import { fetchDOWithRetry } from '../utils/do-retry';
 import { runSmokeTests, formatTestResults, getTestNames } from './smoke-tests';
 import { classifyTaskComplexity } from '../utils/task-classifier';
 import { routeByComplexity } from '../openrouter/model-router';
-import { markdownToTelegramHtml } from '../utils/telegram-format';
+import { markdownToTelegramHtml, escapeHtml } from '../utils/telegram-format';
 import {
   MODELS,
   getModel,
@@ -3619,7 +3619,7 @@ export class TelegramHandler {
         if (result.topModels && result.topModels.length > 0) {
           const currentModel = await this.storage.getUserModel(userId);
           const { text, buttons } = this.buildTopModelsMessage(result.topModels, currentModel);
-          await this.bot.sendMessageWithButtons(chatId, text, buttons);
+          await this.bot.sendMessageWithButtons(chatId, text, buttons, { parseMode: 'HTML' });
         }
       } else {
         await this.bot.sendMessage(chatId, `❌ Sync failed: ${result.error}`);
@@ -3643,9 +3643,8 @@ export class TelegramHandler {
       general: '🌐 General',
     };
 
-    let text = '🏆 Top 20 Recommended Models\n';
-    text += 'Ranked by capabilities, context, cost & provider.\n';
-    text += 'Tap to switch your active model.\n';
+    let text = '<b>Top 20 Recommended Models</b>\n';
+    text += 'Tap an alias or button to switch.\n';
 
     // Group by category
     const byCategory = new Map<string, typeof topModels>();
@@ -3660,32 +3659,33 @@ export class TelegramHandler {
       const models = byCategory.get(cat);
       if (!models || models.length === 0) continue;
 
-      text += `\n━━━ ${categoryLabels[cat] || cat} ━━━\n`;
+      text += `\n<b>${categoryLabels[cat] || cat}</b>\n`;
       for (const m of models) {
         const badges = [
           m.tools ? '🔧' : '',
-          m.vision ? '👁️' : '',
+          m.vision ? '👁' : '',
           m.reasoning ? '💭' : '',
         ].filter(Boolean).join('');
         const badgeStr = badges ? ` ${badges}` : '';
-        const active = m.alias === currentModel ? ' ◀️' : '';
+        const active = m.alias === currentModel ? ' ◀' : '';
         const freeTag = m.isFree ? ' FREE' : ` ${m.cost}`;
-        text += `/${m.alias} — ${m.name}${badgeStr}${active}\n`;
-        text += `   ${m.contextK}K ctx |${freeTag}\n`;
+        const safeName = escapeHtml(m.name);
+        text += `/${m.alias} <b>${safeName}</b>${badgeStr} ${m.contextK}K${freeTag}${active}\n`;
       }
     }
 
-    // Build buttons: 2 per row
+    // Build buttons: 2 per row, include short model name
     const buttons: InlineKeyboardButton[][] = [];
     for (let i = 0; i < topModels.length; i += 2) {
       const row: InlineKeyboardButton[] = [];
       for (let j = i; j < Math.min(i + 2, topModels.length); j++) {
         const m = topModels[j];
-        const badges = [m.tools ? '🔧' : '', m.vision ? '👁️' : ''].filter(Boolean).join('');
+        const badges = [m.tools ? '🔧' : '', m.vision ? '👁' : ''].filter(Boolean).join('');
         const suffix = badges ? ` ${badges}` : '';
-        const active = m.alias === currentModel ? ' ◀️' : '';
+        const active = m.alias === currentModel ? ' ◀' : '';
+        const shortName = m.name.length > 14 ? m.name.slice(0, 13) + '…' : m.name;
         row.push({
-          text: `${m.alias}${suffix}${active}`,
+          text: `${m.alias} ${shortName}${suffix}${active}`,
           callback_data: `sa:${m.alias}`,
         });
       }

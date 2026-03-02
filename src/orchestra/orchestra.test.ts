@@ -21,6 +21,7 @@ import {
   resetRoadmapTasks,
   LARGE_FILE_THRESHOLD_LINES,
   LARGE_FILE_THRESHOLD_KB,
+  LARGE_FILE_WARNING_LINES,
   type OrchestraTask,
   type OrchestraHistory,
 } from './orchestra';
@@ -345,6 +346,11 @@ describe('LARGE_FILE_THRESHOLD constants', () => {
   it('exports KB threshold', () => {
     expect(LARGE_FILE_THRESHOLD_KB).toBe(30);
   });
+
+  it('exports warning threshold below line threshold', () => {
+    expect(LARGE_FILE_WARNING_LINES).toBe(400);
+    expect(LARGE_FILE_WARNING_LINES).toBeLessThan(LARGE_FILE_THRESHOLD_LINES);
+  });
 });
 
 // --- Repo health check in prompts ---
@@ -355,22 +361,21 @@ describe('repo health check in buildRunPrompt', () => {
     expect(prompt).toContain('split it into modules');
   });
 
-  it('references the line threshold', () => {
+  it('references the warning threshold (not the hard limit)', () => {
     const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
-    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_LINES} lines`);
-  });
-
-  it('references the KB threshold', () => {
-    // KB threshold condensed out of run prompt (still in init/redo)
-    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
-    // The condensed prompt mentions line threshold only
-    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_LINES}`);
+    expect(prompt).toContain(`${LARGE_FILE_WARNING_LINES} lines`);
   });
 
   it('instructs to split large files', () => {
     const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
     expect(prompt).toContain('split it into modules');
     expect(prompt).toContain('refactor PR');
+  });
+
+  it('instructs to use sandbox_exec for splitting (not github_create_pr)', () => {
+    const prompt = buildRunPrompt({ repo: 'o/r', modelAlias: 'deep', previousTasks: [] });
+    expect(prompt).toContain('sandbox_exec');
+    expect(prompt).toContain('identifier check blocks');
   });
 
   it('instructs to defer original task when splitting', () => {
@@ -391,7 +396,7 @@ describe('repo health check in buildRunPrompt', () => {
 describe('repo health check in buildInitPrompt', () => {
   it('includes large file flagging step', () => {
     const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
-    expect(prompt).toContain('Large source files MUST be split');
+    expect(prompt).toContain('FLAG LARGE FILES');
   });
 
   it('references the line threshold', () => {
@@ -404,6 +409,18 @@ describe('repo health check in buildInitPrompt', () => {
     expect(prompt).toContain('Split');
     expect(prompt).toContain('Refactor');
     expect(prompt).toContain('MUST depend on the split task');
+  });
+
+  it('includes warning zone guidance', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('WARNING ZONE');
+    expect(prompt).toContain(`${LARGE_FILE_WARNING_LINES}`);
+  });
+
+  it('instructs to use sandbox_exec for splitting', () => {
+    const prompt = buildInitPrompt({ repo: 'o/r', modelAlias: 'deep' });
+    expect(prompt).toContain('sandbox_exec');
+    expect(prompt).toContain('identifier check');
   });
 
   it('large file step comes before analysis step', () => {
@@ -425,14 +442,24 @@ describe('repo health check in buildRedoPrompt', () => {
     expect(prompt).toContain('REPO HEALTH CHECK');
   });
 
-  it('references the line threshold', () => {
+  it('references the warning threshold', () => {
     const prompt = buildRedoPrompt({
       repo: 'o/r',
       modelAlias: 'deep',
       previousTasks: [],
       taskToRedo: 'fix auth',
     });
-    expect(prompt).toContain(`${LARGE_FILE_THRESHOLD_LINES} lines`);
+    expect(prompt).toContain(`${LARGE_FILE_WARNING_LINES} lines`);
+  });
+
+  it('instructs to use sandbox_exec for splitting', () => {
+    const prompt = buildRedoPrompt({
+      repo: 'o/r',
+      modelAlias: 'deep',
+      previousTasks: [],
+      taskToRedo: 'fix auth',
+    });
+    expect(prompt).toContain('sandbox_exec');
   });
 
   it('health check comes between Step 2 and Step 3', () => {
