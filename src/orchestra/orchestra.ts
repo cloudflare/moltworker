@@ -43,6 +43,9 @@ const MAX_HISTORY_TASKS = 30;
 // before the bot attempts modifications
 export const LARGE_FILE_THRESHOLD_LINES = 500;
 export const LARGE_FILE_THRESHOLD_KB = 30;
+// Warning zone: files approaching the threshold get flagged in the roadmap
+// so splitting is planned before they become blockers
+export const LARGE_FILE_WARNING_LINES = 400;
 
 // Common file names the model should look for as existing roadmaps
 const ROADMAP_FILE_CANDIDATES = [
@@ -93,8 +96,9 @@ You are creating a structured project roadmap. Follow this workflow precisely.
 
 ### Step 1.5: FLAG LARGE FILES
 - While exploring the repo, note any SOURCE files that exceed ~${LARGE_FILE_THRESHOLD_LINES} lines or ~${LARGE_FILE_THRESHOLD_KB}KB
+- Also flag files in the WARNING ZONE: ${LARGE_FILE_WARNING_LINES}-${LARGE_FILE_THRESHOLD_LINES} lines. These will cross the threshold once new features are added.
 - Only check source code files (.ts, .tsx, .js, .jsx, .py, .vue, .svelte, etc.) — skip config, generated, and lock files
-- If any large files are found, they MUST be split into smaller modules before other tasks modify them
+- If any large or warning-zone files are found, they MUST be split into smaller modules before other tasks modify them
 - Record which files are large and what they contain (e.g., "src/App.tsx — 800 lines, contains routing + all page components")
 
 ### Step 2: ANALYZE THE PROJECT REQUEST
@@ -138,8 +142,9 @@ Key rules for the roadmap:
 - Include file hints so the next run knows where to work
 - Include dependency info so tasks execute in order
 - 3-6 phases is typical, each with 2-5 tasks
-- **CRITICAL — Large file splitting:** If Step 1.5 found any large files (>${LARGE_FILE_THRESHOLD_LINES} lines), add a "Refactor: Split {filename} into modules" task EARLY in the roadmap (Phase 1 or as the first task in the phase that would modify the file). All tasks that modify that file MUST depend on the split task. Example:
-  \`- [ ] **Refactor**: Split src/App.tsx into route-level modules (~800 lines → ~6 files)\`
+- **CRITICAL — Large file splitting:** If Step 1.5 found any large files (>${LARGE_FILE_THRESHOLD_LINES} lines) OR warning-zone files (>${LARGE_FILE_WARNING_LINES} lines), add a "Refactor: Split {filename} into modules" task EARLY in the roadmap (Phase 1 or as the first task in the phase that would modify the file). All tasks that modify that file MUST depend on the split task. Files in the warning zone WILL cross the threshold once features are added — split them proactively. Example:
+  \`- [ ] **Refactor**: Split src/App.tsx into route-level modules (~464 lines, approaching limit → ~6 files)\`
+  **Use \`sandbox_exec\` for splitting** — \`github_create_pr\` cannot split files because its identifier check blocks updates where >60% of identifiers move to new files.
 
 ### Step 4: CREATE WORK_LOG.md
 Write a \`WORK_LOG.md\` file:
@@ -240,7 +245,7 @@ ${taskSelection}
 
 ## Step 3: UNDERSTAND CODEBASE
 Use \`github_list_files\` and \`github_read_file\` to read files related to the task.
-If any source file exceeds ~${LARGE_FILE_THRESHOLD_LINES} lines, split it into modules first (refactor PR) and defer the original task.
+If any source file exceeds ~${LARGE_FILE_WARNING_LINES} lines, split it into modules first (refactor PR using \`sandbox_exec\`) and defer the original task. Do NOT use \`github_create_pr\` for splitting — its identifier check blocks updates where most identifiers move to new files.
 
 ## Step 4: IMPLEMENT
 Use \`github_create_pr\` (simple changes) or \`sandbox_exec\` (complex: clone, build, test, push).
@@ -923,8 +928,9 @@ You are RE-DOING a task that was previously attempted but needs correction.
   - Test failures if any
 
 ## Step 2.5: REPO HEALTH CHECK
-Before re-implementing, check if the target file(s) are too large (>${LARGE_FILE_THRESHOLD_LINES} lines / ~${LARGE_FILE_THRESHOLD_KB}KB of source code).
-If so, split the large file into smaller modules FIRST (pure refactor, no behavior change), then proceed with the redo on the now-smaller files.
+Before re-implementing, check if the target file(s) are too large (>${LARGE_FILE_WARNING_LINES} lines / ~${LARGE_FILE_THRESHOLD_KB}KB of source code).
+If so, split the large file into smaller modules FIRST using \`sandbox_exec\` (pure refactor, no behavior change), then proceed with the redo on the now-smaller files.
+Do NOT use \`github_create_pr\` for splitting — its identifier check blocks updates where most identifiers move to new files.
 Update the roadmap to reflect the split as a completed prerequisite task.
 
 ## Step 3: RE-IMPLEMENT
