@@ -4,9 +4,6 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],
-    "triggers": {
-    "crons": ["*/5 * * * *"]
-  },
   "observability": {
     "enabled": true,
   },
@@ -73,6 +70,7 @@
   // Secrets to configure via `wrangler secret put`:
   //
   // AI Provider (at least one set required):
+  // - OPENROUTER_API_KEY: OpenRouter key — defaults to minimax/minimax-m2.5 (preferred)
   // - ANTHROPIC_API_KEY: Direct Anthropic API key
   // - OPENAI_API_KEY: Direct OpenAI API key
   // - Cloudflare AI Gateway (alternative to direct keys):

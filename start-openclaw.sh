@@ -112,6 +112,10 @@ if [ ! -f "$CONFIG_FILE" ]; then
             --cloudflare-ai-gateway-api-key $CLOUDFLARE_AI_GATEWAY_API_KEY"
     elif [ -n "$ANTHROPIC_API_KEY" ]; then
         AUTH_ARGS="--auth-choice apiKey --anthropic-api-key $ANTHROPIC_API_KEY"
+    elif [ -n "$OPENROUTER_API_KEY" ]; then
+        # OpenRouter is OpenAI-compatible; bootstrap with openai-api-key.
+        # The config patch below overwrites the provider entry with the real OpenRouter settings.
+        AUTH_ARGS="--auth-choice openai-api-key --openai-api-key $OPENROUTER_API_KEY"
     elif [ -n "$OPENAI_API_KEY" ]; then
         AUTH_ARGS="--auth-choice openai-api-key --openai-api-key $OPENAI_API_KEY"
     fi
@@ -217,6 +221,27 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     } else {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
     }
+}
+
+// OpenRouter provider (OpenAI-compatible, https://openrouter.ai/api/v1)
+// Default model: minimax/minimax-m2.5
+// Only sets the default model when CF_AI_GATEWAY_MODEL is not also set (CF gateway takes priority).
+if (process.env.OPENROUTER_API_KEY) {
+    const modelId = 'minimax/minimax-m2.5';
+    config.models = config.models || {};
+    config.models.providers = config.models.providers || {};
+    config.models.providers['openrouter'] = {
+        baseUrl: 'https://openrouter.ai/api/v1',
+        apiKey: process.env.OPENROUTER_API_KEY,
+        api: 'openai-completions',
+        models: [{ id: modelId, name: modelId, contextWindow: 1000192, maxTokens: 8192 }],
+    };
+    if (!process.env.CF_AI_GATEWAY_MODEL) {
+        config.agents = config.agents || {};
+        config.agents.defaults = config.agents.defaults || {};
+        config.agents.defaults.model = { primary: 'openrouter/' + modelId };
+    }
+    console.log('OpenRouter configured: model=' + modelId);
 }
 
 // Telegram configuration
