@@ -80,6 +80,7 @@
   // - Legacy AI Gateway (still supported):
   //   - AI_GATEWAY_API_KEY: API key
   //   - AI_GATEWAY_BASE_URL: Gateway endpoint URL
+  //   - CF_AIG_TOKEN: AI Gateway authentication token (enables Authenticated Gateway + BYOK)
   //
   // Authentication:
   // - MOLTBOT_GATEWAY_TOKEN: Token to protect gateway access

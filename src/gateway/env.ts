@@ -1,6 +1,19 @@
 import type { MoltbotEnv } from '../types';
 
 /**
+ * Validation: Environment variables passed to the container should be
+ * validated for control characters that could cause injection or parsing
+ * issues. Use validateEnvValue() for any new sensitive token additions.
+ */
+function validateEnvValue(value: string): string {
+  // eslint-disable-next-line no-control-regex -- intentionally matching control characters
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) {
+    throw new Error('Environment variable contains invalid control characters');
+  }
+  return value;
+}
+
+/**
  * Build environment variables to pass to the OpenClaw container process
  *
  * @param env - Worker environment bindings
@@ -46,6 +59,7 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.SLACK_BOT_TOKEN) envVars.SLACK_BOT_TOKEN = env.SLACK_BOT_TOKEN;
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
   if (env.CF_AI_GATEWAY_MODEL) envVars.CF_AI_GATEWAY_MODEL = env.CF_AI_GATEWAY_MODEL;
+  if (env.CF_AIG_TOKEN) envVars.CF_AIG_TOKEN = validateEnvValue(env.CF_AIG_TOKEN);
   if (env.CF_ACCOUNT_ID) envVars.CF_ACCOUNT_ID = env.CF_ACCOUNT_ID;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;

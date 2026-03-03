@@ -47,6 +47,7 @@ endpoint = https://${CF_ACCOUNT_ID}.r2.cloudflarestorage.com
 acl = private
 no_check_bucket = true
 EOF
+    chmod 600 "$RCLONE_CONF"
     touch /tmp/.rclone-configured
     echo "Rclone configured for bucket: $R2_BUCKET"
 }
@@ -159,10 +160,7 @@ config.gateway.port = 18789;
 config.gateway.mode = 'local';
 config.gateway.trustedProxies = ['10.1.0.0'];
 
-if (process.env.OPENCLAW_GATEWAY_TOKEN) {
-    config.gateway.auth = config.gateway.auth || {};
-    config.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
-}
+// Gateway token is passed via --token CLI flag (line 325), not written to config file.
 
 if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi = config.gateway.controlUi || {};
@@ -261,6 +259,7 @@ if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
 }
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+fs.chmodSync(configPath, 0o600);
 console.log('Configuration patched successfully');
 EOFPATCH
 
@@ -307,6 +306,31 @@ if r2_configured; then
         done
     ) &
     echo "Background sync loop started (PID: $!)"
+fi
+
+# ============================================================
+# AI GATEWAY AUTHENTICATION HOOK
+# ============================================================
+# OpenClaw's config schema does not support custom headers on providers.
+# To send the cf-aig-authorization header required by AI Gateway
+# Authenticated Gateway / BYOK, we install a Node.js --require hook
+# that patches globalThis.fetch for requests to gateway.ai.cloudflare.com.
+if [ -n "$CF_AIG_TOKEN" ]; then
+    cat > /tmp/aig-auth-hook.cjs << 'EOFHOOK'
+const _fetch = globalThis.fetch;
+globalThis.fetch = function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (process.env.CF_AIG_TOKEN && url.includes('gateway.ai.cloudflare.com')) {
+        init = Object.assign({}, init);
+        const h = new Headers(init.headers);
+        h.set('cf-aig-authorization', 'Bearer ' + process.env.CF_AIG_TOKEN);
+        init.headers = h;
+    }
+    return _fetch.call(this, input, init);
+};
+EOFHOOK
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--require /tmp/aig-auth-hook.cjs"
+    echo "AI Gateway authentication hook installed"
 fi
 
 # ============================================================

@@ -10,6 +10,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # CF_AI_GATEWAY_ACCOUNT_ID=your-account-id
 # CF_AI_GATEWAY_GATEWAY_ID=your-gateway-id
 # CF_AI_GATEWAY_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
+# CF_AIG_TOKEN=your-ai-gateway-auth-token
 
 # Legacy AI Gateway (still supported)
 # AI_GATEWAY_API_KEY=your-key
