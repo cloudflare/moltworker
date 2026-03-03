@@ -197,6 +197,11 @@ app.use('*', async (c, next) => {
 
 // Middleware: Cloudflare Access authentication for protected routes
 app.use('*', async (c, next) => {
+  // Allow bypassing Cloudflare Access if configured as 'UNCONFIGURED' (for testing without setup)
+  if (c.env.CF_ACCESS_TEAM_DOMAIN === 'UNCONFIGURED') {
+    return next();
+  }
+
   // Determine response type based on Accept header
   const acceptsHtml = c.req.header('Accept')?.includes('text/html');
   const middleware = createAccessMiddleware({
