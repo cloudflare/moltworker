@@ -5,7 +5,7 @@ const API_BASE = '/api/admin';
 
 export interface PendingDevice {
   requestId: string;
-  deviceId: string;
+  deviceId?: string;
   displayName?: string;
   platform?: string;
   clientId?: string;
@@ -15,10 +15,14 @@ export interface PendingDevice {
   scopes?: string[];
   remoteIp?: string;
   ts: number;
+  // Channel pairing fields (Telegram, Discord, Slack)
+  _type?: 'device' | 'channel';
+  channel?: string;
+  code?: string;
 }
 
 export interface PairedDevice {
-  deviceId: string;
+  deviceId?: string;
   displayName?: string;
   platform?: string;
   clientId?: string;
@@ -28,6 +32,10 @@ export interface PairedDevice {
   scopes?: string[];
   createdAtMs: number;
   approvedAtMs: number;
+  // Channel pairing fields
+  _type?: 'device' | 'channel';
+  channel?: string;
+  code?: string;
 }
 
 export interface DeviceListResponse {
@@ -134,6 +142,52 @@ export interface SyncResponse {
 
 export async function triggerSync(): Promise<SyncResponse> {
   return apiRequest<SyncResponse>('/storage/sync', {
+    method: 'POST',
+  });
+}
+
+
+export interface TradingStatusResponse {
+  mode?: string;
+  paused?: boolean;
+  killSwitchActive?: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface TradingActionResponse {
+  success?: boolean;
+  message?: string;
+  error?: string;
+}
+
+export interface TradingSignalRequest {
+  symbol: string;
+  action: 'buy' | 'sell';
+  strategy?: string;
+  notional?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getTradingStatus(): Promise<TradingStatusResponse> {
+  return apiRequest<TradingStatusResponse>('/trading/status');
+}
+
+export async function sendTradingSignal(payload: TradingSignalRequest): Promise<TradingActionResponse> {
+  return apiRequest<TradingActionResponse>('/trading/signal', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function pauseTrading(): Promise<TradingActionResponse> {
+  return apiRequest<TradingActionResponse>('/trading/pause', {
+    method: 'POST',
+  });
+}
+
+export async function triggerKillSwitch(): Promise<TradingActionResponse> {
+  return apiRequest<TradingActionResponse>('/trading/kill-switch', {
     method: 'POST',
   });
 }

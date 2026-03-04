@@ -1,7 +1,7 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 import type { MoltbotEnv } from '../types';
 import { getR2BucketName } from '../config';
-import { ensureRcloneConfig } from './r2';
+import { ensureRcloneConfig, isBucketNameConfigured } from './r2';
 
 export interface SyncResult {
   success: boolean;
@@ -38,6 +38,14 @@ async function detectConfigDir(sandbox: Sandbox): Promise<string | null> {
 export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncResult> {
   if (!(await ensureRcloneConfig(sandbox, env))) {
     return { success: false, error: 'R2 storage is not configured' };
+  }
+
+  if (!isBucketNameConfigured(env)) {
+    return {
+      success: false,
+      error: 'Backup cannot proceed: R2 bucket name is not configured',
+      details: 'Add R2_BUCKET_NAME environment variable to your configuration to enable backups.',
+    };
   }
 
   const configDir = await detectConfigDir(sandbox);

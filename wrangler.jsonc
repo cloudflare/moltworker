@@ -3,9 +3,14 @@
   "name": "moltbot-sandbox",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "observability": {
-    "enabled": true,
+    "logs": {
+      "enabled": false,
+      "invocation_logs": true
+    }
   },
   // Static assets for admin UI (built by vite)
   "assets": {
@@ -13,24 +18,28 @@
     "not_found_handling": "single-page-application",
     "html_handling": "auto-trailing-slash",
     "binding": "ASSETS",
-    "run_worker_first": true,
+    "run_worker_first": true
   },
   // Allow importing HTML files as text modules and PNG files as binary
   "rules": [
     {
       "type": "Text",
-      "globs": ["**/*.html"],
-      "fallthrough": false,
+      "globs": [
+        "**/*.html"
+      ],
+      "fallthrough": false
     },
     {
       "type": "Data",
-      "globs": ["**/*.png"],
-      "fallthrough": false,
+      "globs": [
+        "**/*.png"
+      ],
+      "fallthrough": false
     },
   ],
   // Build command for vite
   "build": {
-    "command": "npm run build",
+    "command": "npm run build"
   },
   // Container configuration for the Moltbot sandbox
   "containers": [
@@ -38,34 +47,35 @@
       "class_name": "Sandbox",
       "image": "./Dockerfile",
       "instance_type": "standard-1",
-      "max_instances": 1,
+      "max_instances": 1
     },
   ],
   "durable_objects": {
     "bindings": [
       {
         "class_name": "Sandbox",
-        "name": "Sandbox",
+        "name": "Sandbox"
       },
-    ],
+    ]
   },
   "migrations": [
     {
-      "new_sqlite_classes": ["Sandbox"],
-      "tag": "v1",
+      "new_sqlite_classes": [
+        "Sandbox"
+      ],
+      "tag": "v1"
     },
   ],
   // R2 bucket for persistent storage (moltbot data, conversations, etc.)
   "r2_buckets": [
     {
       "binding": "MOLTBOT_BUCKET",
-      "bucket_name": "moltbot-data",
+      "bucket_name": "moltbot"
     },
   ],
-
   // Browser Rendering binding for CDP shim
   "browser": {
-    "binding": "BROWSER",
+    "binding": "BROWSER"
   },
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:

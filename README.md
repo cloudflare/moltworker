@@ -181,6 +181,8 @@ https://your-worker.workers.dev/?token=YOUR_TOKEN
 wss://your-worker.workers.dev/ws?token=YOUR_TOKEN
 ```
 
+
+
 **Note:** Even with a valid token, new devices still require approval via the admin UI at `/_admin/` (see Device Pairing above).
 
 For local development only, set `DEV_MODE=true` in `.dev.vars` to skip Cloudflare Access authentication and enable `allowInsecureAuth` (bypasses device pairing entirely).
@@ -438,6 +440,55 @@ The previous `AI_GATEWAY_API_KEY` + `AI_GATEWAY_BASE_URL` approach is still supp
 | `SLACK_APP_TOKEN` | No | Slack app token |
 | `CDP_SECRET` | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
 | `WORKER_URL` | No | Public URL of the worker (required for CDP) |
+| `TRADING_ENABLED` | No | Set to `true` to enable admin trading controls that call trade-bridge |
+| `TRADE_BRIDGE_URL` | No | Base URL for the trade-bridge service (e.g. private tunnel URL) |
+| `TRADE_BRIDGE_HMAC_SECRET` | No | Shared HMAC secret used to sign outbound requests to trade-bridge |
+
+
+## Trade Bridge Integration
+
+`moltworker` never talks to exchange APIs directly. Instead, the admin routes call an external `trade-bridge` service that is responsible for risk checks and Freqtrade execution.
+
+### Connection Flow
+
+1. Operator calls a protected admin endpoint in this worker (Cloudflare Access auth already enforced for `/api/admin/*`).
+2. Worker checks feature/config gates:
+   - `TRADING_ENABLED` must be `true`
+   - `TRADE_BRIDGE_URL` and `TRADE_BRIDGE_HMAC_SECRET` must be set
+3. Worker signs the outbound request with HMAC-SHA256 using the canonical string:
+   - `{timestamp}.{nonce}.{method}.{path}.{jsonBody}`
+4. Worker sends request to `TRADE_BRIDGE_URL` with these headers:
+   - `X-Molt-Timestamp`
+   - `X-Molt-Nonce`
+   - `X-Molt-Signature`
+   - `X-Molt-Skew-Ms`
+5. `trade-bridge` validates signature + timestamp + nonce replay protection before executing anything.
+
+### Admin API -> Trade Bridge API Mapping
+
+| Moltworker endpoint | Bridge endpoint | Purpose |
+|---|---|---|
+| `POST /api/admin/trading/signal` | `POST /signals` | Submit a signed trading signal payload (for example `TON/USDT`). |
+| `GET /api/admin/trading/status` | `GET /status` | Read bridge/trading mode and health status. |
+| `POST /api/admin/trading/pause` | `POST /pause` | Pause new trade execution. |
+| `POST /api/admin/trading/kill-switch` | `POST /kill-switch` | Trigger global emergency stop. |
+
+### Example Signal Request
+
+```json
+{
+  "symbol": "TON/USDT",
+  "action": "buy",
+  "strategy": "manual-test",
+  "notional": 25
+}
+```
+
+### Deployment Notes
+
+- Keep `TRADE_BRIDGE_URL` private (Cloudflare Tunnel / WireGuard / private network).
+- Keep `TRADE_BRIDGE_HMAC_SECRET` unique per environment (`local`, `staging`, `prod`).
+- Leave `TRADING_ENABLED` unset or `false` by default; enable only where intended.
 
 ## Security Considerations
 

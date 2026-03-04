@@ -6,13 +6,19 @@ import {
   restartGateway,
   getStorageStatus,
   triggerSync,
+  getTradingStatus,
+  sendTradingSignal,
+  pauseTrading,
+  triggerKillSwitch,
   AuthError,
   type PendingDevice,
   type PairedDevice,
   type DeviceListResponse,
   type StorageStatusResponse,
-} from '../api';
-import './AdminPage.css';
+  type TradingStatusResponse,
+}
+ from '../api'
+import './AdminPage.css'
 
 // Small inline spinner for buttons
 function ButtonSpinner() {
@@ -46,14 +52,16 @@ function formatTimeAgo(ts: number) {
 }
 
 export default function AdminPage() {
-  const [pending, setPending] = useState<PendingDevice[]>([]);
-  const [paired, setPaired] = useState<PairedDevice[]>([]);
-  const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
-  const [restartInProgress, setRestartInProgress] = useState(false);
-  const [syncInProgress, setSyncInProgress] = useState(false);
+  const [pending, setPending] = useState<PendingDevice[]>([])
+  const [paired, setPaired] = useState<PairedDevice[]>([])
+  const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
+  const [restartInProgress, setRestartInProgress] = useState(false)
+  const [syncInProgress, setSyncInProgress] = useState(false)
+  const [tradingStatus, setTradingStatus] = useState<TradingStatusResponse | null>(null)
+  const [tradingActionInProgress, setTradingActionInProgress] = useState<string | null>(null)
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -88,10 +96,21 @@ export default function AdminPage() {
     }
   }, []);
 
+  const fetchTradingStatus = useCallback(async () => {
+    try {
+      const status = await getTradingStatus()
+      setTradingStatus(status)
+    } catch (err) {
+      console.error('Failed to fetch trading status:', err)
+    }
+  }, [])
+
+
   useEffect(() => {
-    fetchDevices();
-    fetchStorageStatus();
-  }, [fetchDevices, fetchStorageStatus]);
+    fetchDevices()
+    fetchStorageStatus()
+    fetchTradingStatus()
+  }, [fetchDevices, fetchStorageStatus, fetchTradingStatus])
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId);
@@ -168,7 +187,77 @@ export default function AdminPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync');
     } finally {
-      setSyncInProgress(false);
+      setSyncInProgress(false)
+    }
+  }
+
+  const handleSendTestSignal = async () => {
+    setTradingActionInProgress('signal')
+    try {
+      const result = await sendTradingSignal({
+        symbol: 'TON/USDT',
+        action: 'buy',
+        strategy: 'manual-test',
+      })
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setError(null)
+        await fetchTradingStatus()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to send signal')
+    } finally {
+      setTradingActionInProgress(null)
+    }
+  }
+
+  const handlePauseTrading = async () => {
+    setTradingActionInProgress('pause')
+    try {
+      const result = await pauseTrading()
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setError(null)
+        await fetchTradingStatus()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to pause trading')
+    } finally {
+      setTradingActionInProgress(null)
+    }
+  }
+
+  const handleKillSwitch = async () => {
+    if (!confirm('Trigger kill switch? This should stop all new trading actions immediately.')) {
+      return
+    }
+
+    setTradingActionInProgress('kill')
+    try {
+      const result = await triggerKillSwitch()
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setError(null)
+        await fetchTradingStatus()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger kill switch')
+    } finally {
+      setTradingActionInProgress(null)
+    }
+  }
+
+
+  const formatSyncTime = (isoString: string | null) => {
+    if (!isoString) return 'Never'
+    try {
+      const date = new Date(isoString)
+      return date.toLocaleString()
+    } catch {
+      return isoString
     }
   };
 
@@ -202,6 +291,19 @@ export default function AdminPage() {
             {storageStatus.missing && (
               <p className="missing-secrets">Missing: {storageStatus.missing.join(', ')}</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {storageStatus?.configured === false && storageStatus?.missing?.includes('R2_BUCKET_NAME') && (
+        <div className="warning-banner">
+          <div className="warning-content">
+            <strong>Backup Disabled: Bucket Name Not Set</strong>
+            <p>
+              The 'Backup Now' button won't work until you add the <code>R2_BUCKET_NAME</code> environment
+              variable to your configuration. Update your <code>.dev.vars</code> or environment with the
+              desired R2 bucket name (e.g., <code>R2_BUCKET_NAME=my-bucket</code>).
+            </p>
           </div>
         </div>
       )}
@@ -247,6 +349,39 @@ export default function AdminPage() {
         </p>
       </section>
 
+      <section className="devices-section gateway-section">
+        <div className="section-header">
+          <h2>Trading Controls</h2>
+          <button className="btn btn-secondary" onClick={fetchTradingStatus}>
+            Refresh Status
+          </button>
+        </div>
+        <p className="hint">
+          Bridge status: <strong>{tradingStatus?.mode || 'unknown'}</strong>
+          {typeof tradingStatus?.paused === 'boolean' && (
+            <span> · Paused: <strong>{tradingStatus.paused ? 'yes' : 'no'}</strong></span>
+          )}
+          {typeof tradingStatus?.killSwitchActive === 'boolean' && (
+            <span> · Kill switch: <strong>{tradingStatus.killSwitchActive ? 'active' : 'inactive'}</strong></span>
+          )}
+        </p>
+        <div className="header-actions">
+          <button className="btn btn-primary" onClick={handleSendTestSignal} disabled={tradingActionInProgress !== null}>
+            {tradingActionInProgress === 'signal' && <ButtonSpinner />}
+            Send TON Test Signal
+          </button>
+          <button className="btn btn-secondary" onClick={handlePauseTrading} disabled={tradingActionInProgress !== null}>
+            {tradingActionInProgress === 'pause' && <ButtonSpinner />}
+            Pause Trading
+          </button>
+          <button className="btn btn-danger" onClick={handleKillSwitch} disabled={tradingActionInProgress !== null}>
+            {tradingActionInProgress === 'kill' && <ButtonSpinner />}
+            Kill Switch
+          </button>
+        </div>
+      </section>
+
+
       {loading ? (
         <div className="loading">
           <div className="spinner"></div>
@@ -286,43 +421,64 @@ export default function AdminPage() {
             ) : (
               <div className="devices-grid">
                 {pending.map((device) => (
-                  <div key={device.requestId} className="device-card pending">
+                  <div key={device.requestId} className={`device-card pending ${device._type === 'channel' ? 'channel-pairing' : ''}`}>
                     <div className="device-header">
                       <span className="device-name">
-                        {device.displayName || device.deviceId || 'Unknown Device'}
+                        {device._type === 'channel' 
+                          ? `${device.channel || device.requestId} Channel`
+                          : device.displayName || device.deviceId || 'Unknown Device'}
                       </span>
-                      <span className="device-badge pending">Pending</span>
+                      <span className="device-badge pending">{device._type === 'channel' ? 'Channel' : 'Pending'}</span>
                     </div>
                     <div className="device-details">
-                      {device.platform && (
-                        <div className="detail-row">
-                          <span className="label">Platform:</span>
-                          <span className="value">{device.platform}</span>
-                        </div>
-                      )}
-                      {device.clientId && (
-                        <div className="detail-row">
-                          <span className="label">Client:</span>
-                          <span className="value">{device.clientId}</span>
-                        </div>
-                      )}
-                      {device.clientMode && (
-                        <div className="detail-row">
-                          <span className="label">Mode:</span>
-                          <span className="value">{device.clientMode}</span>
-                        </div>
-                      )}
-                      {device.role && (
-                        <div className="detail-row">
-                          <span className="label">Role:</span>
-                          <span className="value">{device.role}</span>
-                        </div>
-                      )}
-                      {device.remoteIp && (
-                        <div className="detail-row">
-                          <span className="label">IP:</span>
-                          <span className="value">{device.remoteIp}</span>
-                        </div>
+                      {device._type === 'channel' ? (
+                        <>
+                          {device.channel && (
+                            <div className="detail-row">
+                              <span className="label">Channel:</span>
+                              <span className="value">{device.channel}</span>
+                            </div>
+                          )}
+                          {device.code && (
+                            <div className="detail-row">
+                              <span className="label">Code:</span>
+                              <span className="value" style={{fontFamily: 'monospace', fontSize: '0.9em'}}>{device.code}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {device.platform && (
+                            <div className="detail-row">
+                              <span className="label">Platform:</span>
+                              <span className="value">{device.platform}</span>
+                            </div>
+                          )}
+                          {device.clientId && (
+                            <div className="detail-row">
+                              <span className="label">Client:</span>
+                              <span className="value">{device.clientId}</span>
+                            </div>
+                          )}
+                          {device.clientMode && (
+                            <div className="detail-row">
+                              <span className="label">Mode:</span>
+                              <span className="value">{device.clientMode}</span>
+                            </div>
+                          )}
+                          {device.role && (
+                            <div className="detail-row">
+                              <span className="label">Role:</span>
+                              <span className="value">{device.role}</span>
+                            </div>
+                          )}
+                          {device.remoteIp && (
+                            <div className="detail-row">
+                              <span className="label">IP:</span>
+                              <span className="value">{device.remoteIp}</span>
+                            </div>
+                          )}
+                        </>
                       )}
                       <div className="detail-row">
                         <span className="label">Requested:</span>

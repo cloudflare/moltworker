@@ -40,3 +40,8 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth
 # WORKER_URL=https://your-worker.example.com
+
+# Trading bridge (optional)
+# TRADING_ENABLED=true
+# TRADE_BRIDGE_URL=https://trade-bridge.internal
+# TRADE_BRIDGE_HMAC_SECRET=replace-with-shared-secret
