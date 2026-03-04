@@ -85,6 +85,14 @@
   opacity: 0.8;
 }
 
+.warning-banner code {
+  background-color: rgba(0, 0, 0, 0.2);
+  padding: 0.2em 0.4em;
+  border-radius: 0.25rem;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
 /* Success banner (R2 configured) */
 .success-banner {
   background-color: rgba(74, 222, 128, 0.15);

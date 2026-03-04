@@ -5,7 +5,7 @@ const API_BASE = '/api/admin';
 
 export interface PendingDevice {
   requestId: string;
-  deviceId: string;
+  deviceId?: string;
   displayName?: string;
   platform?: string;
   clientId?: string;
@@ -15,10 +15,14 @@ export interface PendingDevice {
   scopes?: string[];
   remoteIp?: string;
   ts: number;
+  // Channel pairing fields (Telegram, Discord, Slack)
+  _type?: 'device' | 'channel';
+  channel?: string;
+  code?: string;
 }
 
 export interface PairedDevice {
-  deviceId: string;
+  deviceId?: string;
   displayName?: string;
   platform?: string;
   clientId?: string;
@@ -28,6 +32,10 @@ export interface PairedDevice {
   scopes?: string[];
   createdAtMs: number;
   approvedAtMs: number;
+  // Channel pairing fields
+  _type?: 'device' | 'channel';
+  channel?: string;
+  code?: string;
 }
 
 export interface DeviceListResponse {

@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
-import { ensureMoltbotGateway, findExistingMoltbotProcess, mountR2Storage, syncToR2, waitForProcess } from '../gateway';
-import { R2_MOUNT_PATH } from '../config';
+import { ensureMoltbotGateway, findExistingMoltbotProcess, syncToR2, waitForProcess } from '../gateway';
 import { callTradeBridge } from '../trading/bridge';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
@@ -32,51 +31,85 @@ adminApi.get('/devices', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run OpenClaw CLI to list devices
-    // Must specify --url and --token (OpenClaw v2026.2.3 requires explicit credentials with --url)
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
     const tokenArg = token ? ` --token ${token}` : '';
-    const proc = await sandbox.startProcess(
+    
+    // Fetch both device list and pairing list
+    let deviceList = { pending: [], paired: [] };
+    let pairingList = { pending: [], paired: [] };
+    
+    // 1. Fetch devices list
+    let proc = await sandbox.startProcess(
       `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
     );
     await waitForProcess(proc, CLI_TIMEOUT_MS);
-
-    const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
-    const stderr = logs.stderr || '';
-
-    // Try to parse JSON output
+    
+    let logs = await proc.getLogs();
+    let stdout = logs.stdout || '';
+    const deviceStderr = logs.stderr || '';
+    
     try {
-      // Find JSON in output (may have other log lines)
       const jsonMatch = stdout.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const data = JSON.parse(jsonMatch[0]);
-        return c.json(data);
+        deviceList = JSON.parse(jsonMatch[0]);
       }
-
-      // If no JSON found, return raw output for debugging
-      return c.json({
-        pending: [],
-        paired: [],
-        raw: stdout,
-        stderr,
-      });
     } catch {
-      return c.json({
-        pending: [],
-        paired: [],
-        raw: stdout,
-        stderr,
-        parseError: 'Failed to parse CLI output',
-      });
+      // Device list parsing failed, will use empty list
     }
+    
+    // 2. Fetch pairing list (for Telegram, Discord, Slack, etc.)
+    proc = await sandbox.startProcess(
+      `openclaw pairing list --json --url ws://localhost:18789${tokenArg}`,
+    );
+    await waitForProcess(proc, CLI_TIMEOUT_MS);
+    
+    logs = await proc.getLogs();
+    stdout = logs.stdout || '';
+    const pairingStderr = logs.stderr || '';
+    
+    try {
+      const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        pairingList = JSON.parse(jsonMatch[0]);
+      }
+    } catch {
+      // Pairing list parsing failed, will use empty list
+    }
+    
+    // 3. Merge results: combine device and channel pairings
+    const allPending = [
+      ...(deviceList.pending || []),
+      ...(pairingList.pending || []).map((p: any) => ({
+        ...p,
+        _type: 'channel', // Mark as channel pairing for UI
+        requestId: p.requestId || `${p.channel}:${p.code}`,
+      })),
+    ];
+    
+    const allPaired = [
+      ...(deviceList.paired || []),
+      ...(pairingList.paired || []).map((p: any) => ({
+        ...p,
+        _type: 'channel', // Mark as channel pairing for UI
+        deviceId: p.deviceId || `${p.channel}:${p.code}`,
+      })),
+    ];
+    
+    return c.json({
+      pending: allPending,
+      paired: allPaired,
+      raw: {
+        devices: deviceList,
+        pairings: pairingList,
+      },
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: errorMessage }, 500);
   }
 });
 
-// POST /api/admin/devices/:requestId/approve - Approve a pending device
+// POST /api/admin/devices/:requestId/approve - Approve a pending device or channel pairing
 adminApi.post('/devices/:requestId/approve', async (c) => {
   const sandbox = c.get('sandbox');
   const requestId = c.req.param('requestId');
@@ -89,17 +122,56 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     // Ensure moltbot is running first
     await ensureMoltbotGateway(sandbox, c.env);
 
-    // Run OpenClaw CLI to approve the device
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
     const tokenArg = token ? ` --token ${token}` : '';
-    const proc = await sandbox.startProcess(
-      `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
-    );
+    
+    // Detect if this is a channel pairing (format: "channel:code" or "channel code")
+    const isChannelPairing = requestId.includes(':') || /^[a-z]+ \d+$/.test(requestId);
+    
+    let proc;
+    let commandUsed = 'devices';
+    
+    if (isChannelPairing) {
+      // For channel pairings, use pairing approve
+      // Format: "telegram:123456789" or "telegram 123456789"
+      const approveArg = requestId.replace(':', ' ');
+      proc = await sandbox.startProcess(
+        `openclaw pairing approve ${approveArg} --url ws://localhost:18789${tokenArg}`,
+      );
+      commandUsed = 'pairing';
+    } else {
+      // For device pairings, use devices approve
+      proc = await sandbox.startProcess(
+        `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
+      );
+      commandUsed = 'devices';
+    }
+    
     await waitForProcess(proc, CLI_TIMEOUT_MS);
 
     const logs = await proc.getLogs();
-    const stdout = logs.stdout || '';
+    let stdout = logs.stdout || '';
     const stderr = logs.stderr || '';
+
+    // If first attempt failed, try the other command
+    if (!stdout.toLowerCase().includes('approved') && proc.exitCode !== 0) {
+      const fallbackCommand = commandUsed === 'devices' ? 'pairing' : 'devices';
+      
+      if (fallbackCommand === 'pairing') {
+        const approveArg = requestId.replace(':', ' ');
+        proc = await sandbox.startProcess(
+          `openclaw pairing approve ${approveArg} --url ws://localhost:18789${tokenArg}`,
+        );
+      } else {
+        proc = await sandbox.startProcess(
+          `openclaw devices approve ${requestId} --url ws://localhost:18789${tokenArg}`,
+        );
+      }
+      
+      await waitForProcess(proc, CLI_TIMEOUT_MS);
+      const fallbackLogs = await proc.getLogs();
+      stdout = fallbackLogs.stdout || '';
+    }
 
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
     const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
@@ -107,7 +179,8 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     return c.json({
       success,
       requestId,
-      message: success ? 'Device approved' : 'Approval may have failed',
+      command: commandUsed,
+      message: success ? 'Device/pairing approved' : 'Approval may have failed',
       stdout,
       stderr,
     });
@@ -199,11 +272,13 @@ adminApi.get('/storage', async (c) => {
     c.env.R2_SECRET_ACCESS_KEY &&
     c.env.CF_ACCOUNT_ID
   );
+  const hasBucketName = !!c.env.R2_BUCKET_NAME;
 
   const missing: string[] = [];
   if (!c.env.R2_ACCESS_KEY_ID) missing.push('R2_ACCESS_KEY_ID');
   if (!c.env.R2_SECRET_ACCESS_KEY) missing.push('R2_SECRET_ACCESS_KEY');
   if (!c.env.CF_ACCOUNT_ID) missing.push('CF_ACCOUNT_ID');
+  if (!hasBucketName) missing.push('R2_BUCKET_NAME');
 
   let lastSync: string | null = null;
 
@@ -220,12 +295,12 @@ adminApi.get('/storage', async (c) => {
   }
 
   return c.json({
-    configured: hasCredentials,
+    configured: hasCredentials && hasBucketName,
     missing: missing.length > 0 ? missing : undefined,
     lastSync,
-    message: hasCredentials
+    message: hasCredentials && hasBucketName
       ? 'R2 storage is configured. Your data will persist across container restarts.'
-      : 'R2 storage is not configured. Paired devices and conversations will be lost when the container restarts.',
+      : 'R2 storage is not fully configured. Paired devices and conversations will be lost when the container restarts.',
   });
 });
 

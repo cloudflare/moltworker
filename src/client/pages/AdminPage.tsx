@@ -295,6 +295,19 @@ export default function AdminPage() {
         </div>
       )}
 
+      {storageStatus?.configured === false && storageStatus?.missing?.includes('R2_BUCKET_NAME') && (
+        <div className="warning-banner">
+          <div className="warning-content">
+            <strong>Backup Disabled: Bucket Name Not Set</strong>
+            <p>
+              The 'Backup Now' button won't work until you add the <code>R2_BUCKET_NAME</code> environment
+              variable to your configuration. Update your <code>.dev.vars</code> or environment with the
+              desired R2 bucket name (e.g., <code>R2_BUCKET_NAME=my-bucket</code>).
+            </p>
+          </div>
+        </div>
+      )}
+
       {storageStatus?.configured && (
         <div className="success-banner">
           <div className="storage-status">
@@ -408,43 +421,64 @@ export default function AdminPage() {
             ) : (
               <div className="devices-grid">
                 {pending.map((device) => (
-                  <div key={device.requestId} className="device-card pending">
+                  <div key={device.requestId} className={`device-card pending ${device._type === 'channel' ? 'channel-pairing' : ''}`}>
                     <div className="device-header">
                       <span className="device-name">
-                        {device.displayName || device.deviceId || 'Unknown Device'}
+                        {device._type === 'channel' 
+                          ? `${device.channel || device.requestId} Channel`
+                          : device.displayName || device.deviceId || 'Unknown Device'}
                       </span>
-                      <span className="device-badge pending">Pending</span>
+                      <span className="device-badge pending">{device._type === 'channel' ? 'Channel' : 'Pending'}</span>
                     </div>
                     <div className="device-details">
-                      {device.platform && (
-                        <div className="detail-row">
-                          <span className="label">Platform:</span>
-                          <span className="value">{device.platform}</span>
-                        </div>
-                      )}
-                      {device.clientId && (
-                        <div className="detail-row">
-                          <span className="label">Client:</span>
-                          <span className="value">{device.clientId}</span>
-                        </div>
-                      )}
-                      {device.clientMode && (
-                        <div className="detail-row">
-                          <span className="label">Mode:</span>
-                          <span className="value">{device.clientMode}</span>
-                        </div>
-                      )}
-                      {device.role && (
-                        <div className="detail-row">
-                          <span className="label">Role:</span>
-                          <span className="value">{device.role}</span>
-                        </div>
-                      )}
-                      {device.remoteIp && (
-                        <div className="detail-row">
-                          <span className="label">IP:</span>
-                          <span className="value">{device.remoteIp}</span>
-                        </div>
+                      {device._type === 'channel' ? (
+                        <>
+                          {device.channel && (
+                            <div className="detail-row">
+                              <span className="label">Channel:</span>
+                              <span className="value">{device.channel}</span>
+                            </div>
+                          )}
+                          {device.code && (
+                            <div className="detail-row">
+                              <span className="label">Code:</span>
+                              <span className="value" style={{fontFamily: 'monospace', fontSize: '0.9em'}}>{device.code}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {device.platform && (
+                            <div className="detail-row">
+                              <span className="label">Platform:</span>
+                              <span className="value">{device.platform}</span>
+                            </div>
+                          )}
+                          {device.clientId && (
+                            <div className="detail-row">
+                              <span className="label">Client:</span>
+                              <span className="value">{device.clientId}</span>
+                            </div>
+                          )}
+                          {device.clientMode && (
+                            <div className="detail-row">
+                              <span className="label">Mode:</span>
+                              <span className="value">{device.clientMode}</span>
+                            </div>
+                          )}
+                          {device.role && (
+                            <div className="detail-row">
+                              <span className="label">Role:</span>
+                              <span className="value">{device.role}</span>
+                            </div>
+                          )}
+                          {device.remoteIp && (
+                            <div className="detail-row">
+                              <span className="label">IP:</span>
+                              <span className="value">{device.remoteIp}</span>
+                            </div>
+                          )}
+                        </>
                       )}
                       <div className="detail-row">
                         <span className="label">Requested:</span>

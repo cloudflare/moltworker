@@ -19,6 +19,7 @@ export function createMockEnvWithR2(overrides: Partial<MoltbotEnv> = {}): Moltbo
     R2_ACCESS_KEY_ID: 'test-key-id',
     R2_SECRET_ACCESS_KEY: 'test-secret-key',
     CF_ACCOUNT_ID: 'test-account-id',
+    R2_BUCKET_NAME: 'moltbot-data',
     ...overrides,
   });
 }

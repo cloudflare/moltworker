@@ -23,6 +23,17 @@ describe('syncToR2', () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe('R2 storage is not configured');
     });
+
+    it('returns error when bucket name is not configured', async () => {
+      const { sandbox, execMock } = createMockSandbox();
+      execMock.mockResolvedValueOnce(createMockExecResult('yes')); // rclone configured
+
+      const env = createMockEnvWithR2({ R2_BUCKET_NAME: undefined });
+      const result = await syncToR2(sandbox, env);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('bucket name is not configured');
+    });
   });
 
   describe('config detection', () => {

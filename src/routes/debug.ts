@@ -386,4 +386,137 @@ debug.get('/container-config', async (c) => {
   }
 });
 
+// GET /debug/r2-test - Test R2 configuration and connectivity
+debug.get('/r2-test', async (c) => {
+  const sandbox = c.get('sandbox');
+  const env = c.env;
+
+  const result: Record<string, unknown> = {
+    credentials: {
+      has_access_key: !!env.R2_ACCESS_KEY_ID,
+      has_secret_key: !!env.R2_SECRET_ACCESS_KEY,
+      has_account_id: !!env.CF_ACCOUNT_ID,
+      has_bucket_name: !!env.R2_BUCKET_NAME,
+      bucket_name: env.R2_BUCKET_NAME || 'moltbot-data (default)',
+    },
+    rclone_config: null as unknown,
+    rclone_version: null as unknown,
+    r2_list_test: null as unknown,
+  };
+
+  try {
+    // Check rclone config
+    const configCheck = await sandbox.exec('cat /root/.config/rclone/rclone.conf 2>/dev/null || echo "NOT_FOUND"');
+    if (configCheck.stdout && configCheck.stdout !== 'NOT_FOUND') {
+      result.rclone_config = configCheck.stdout;
+    } else {
+      result.rclone_config = 'File not found - rclone not configured';
+    }
+
+    // Check rclone version
+    const versionCheck = await sandbox.exec('rclone --version 2>&1 | head -1');
+    result.rclone_version = versionCheck.stdout?.trim();
+
+    // Test rclone ls (basic connectivity)
+    if (env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.CF_ACCOUNT_ID) {
+      const bucket = env.R2_BUCKET_NAME || 'moltbot-data';
+      const listTest = await sandbox.exec(
+        `rclone ls "r2:${bucket}/" --max-depth=1 2>&1 | head -20`,
+        { timeout: 10000 },
+      );
+      result.r2_list_test = {
+        success: listTest.success,
+        stdout: listTest.stdout || '(empty)',
+        stderr: listTest.stderr ? listTest.stderr.slice(-200) : '(none)',
+      };
+    } else {
+      result.r2_list_test = { error: 'Missing R2 credentials' };
+    }
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : 'Unknown error';
+  }
+
+  return c.json(result);
+});
+
+// GET /debug/devices - Raw device list for troubleshooting pending pairing
+debug.get('/devices', async (c) => {
+  const sandbox = c.get('sandbox');
+  const env = c.env;
+
+  // Check if debug routes are enabled
+  if (env.DEBUG_ROUTES !== 'true') {
+    return c.json({
+      error: 'Debug routes are disabled',
+      hint: 'Set DEBUG_ROUTES=true in .dev.vars or wrangler secrets',
+    }, 404);
+  }
+
+  try {
+    // Ensure gateway is running
+    const gatewayProcess = await findExistingMoltbotProcess(sandbox);
+    if (!gatewayProcess || gatewayProcess.status !== 'running') {
+      return c.json({
+        error: 'Gateway is not running',
+        status: gatewayProcess?.status || 'not found',
+      }, 503);
+    }
+
+    const token = env.MOLTBOT_GATEWAY_TOKEN;
+    const tokenArg = token ? ` --token ${token}` : '';
+    
+    // 1. Fetch devices list
+    let proc = await sandbox.startProcess(
+      `openclaw devices list --json --url ws://localhost:18789${tokenArg}`,
+    );
+    await waitForProcess(proc, 20000);
+    let logs = await proc.getLogs();
+    const devicesOutput = logs.stdout || '';
+    const devicesStderr = logs.stderr || '';
+
+    // 2. Fetch pairing list
+    proc = await sandbox.startProcess(
+      `openclaw pairing list --json --url ws://localhost:18789${tokenArg}`,
+    );
+    await waitForProcess(proc, 20000);
+    logs = await proc.getLogs();
+    const pairingOutput = logs.stdout || '';
+    const pairingStderr = logs.stderr || '';
+
+    return c.json({
+      gateway_token_set: !!token,
+      devices: {
+        exit_code: proc.exitCode,
+        stdout: devicesOutput.slice(0, 3000),
+        stderr: devicesStderr.slice(0, 1000),
+        parsed: (() => {
+          try {
+            const match = devicesOutput.match(/\{[\s\S]*\}/);
+            return match ? JSON.parse(match[0]) : null;
+          } catch {
+            return null;
+          }
+        })(),
+      },
+      pairing: {
+        exit_code: proc.exitCode,
+        stdout: pairingOutput.slice(0, 3000),
+        stderr: pairingStderr.slice(0, 1000),
+        parsed: (() => {
+          try {
+            const match = pairingOutput.match(/\{[\s\S]*\}/);
+            return match ? JSON.parse(match[0]) : null;
+          } catch {
+            return null;
+          }
+        })(),
+      },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json({ error: errorMessage }, 500);
+  }
+});
+
 export { debug };
+
