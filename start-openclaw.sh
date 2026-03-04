@@ -35,6 +35,7 @@ r2_configured() {
 
 R2_BUCKET="${R2_BUCKET_NAME:-moltbot-data}"
 
+
 setup_rclone() {
     mkdir -p "$(dirname "$RCLONE_CONF")"
     cat > "$RCLONE_CONF" << EOF
