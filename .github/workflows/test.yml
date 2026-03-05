@@ -56,6 +56,11 @@ jobs:
             env:
               DISCORD_BOT_TOKEN: "fake-discord-bot-token-for-e2e"
               DISCORD_DM_POLICY: "pairing"
+          - name: slack
+            env:
+              SLACK_BOT_TOKEN: "fake-slack-bot-token-for-e2e"
+              SLACK_APP_TOKEN: "fake-slack-app-token-for-e2e"
+              SLACK_DM_POLICY: "pairing"
           - name: workers-ai
             env:
               CF_AI_GATEWAY_MODEL: "workers-ai/@cf/openai/gpt-oss-120b"
@@ -120,6 +125,9 @@ jobs:
           TELEGRAM_DM_POLICY: ${{ matrix.config.env.TELEGRAM_DM_POLICY }}
           DISCORD_BOT_TOKEN: ${{ matrix.config.env.DISCORD_BOT_TOKEN }}
           DISCORD_DM_POLICY: ${{ matrix.config.env.DISCORD_DM_POLICY }}
+          SLACK_BOT_TOKEN: ${{ matrix.config.env.SLACK_BOT_TOKEN }}
+          SLACK_APP_TOKEN: ${{ matrix.config.env.SLACK_APP_TOKEN }}
+          SLACK_DM_POLICY: ${{ matrix.config.env.SLACK_DM_POLICY }}
           CF_AI_GATEWAY_MODEL: ${{ matrix.config.env.CF_AI_GATEWAY_MODEL }}
         run: cctr -vv test/e2e
 
