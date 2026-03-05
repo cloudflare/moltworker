@@ -52,8 +52,9 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
   const remote = (prefix: string) => rcloneRemote(env, prefix);
 
   // Sync config (rclone sync propagates deletions)
+  // Exclude workspace/ and skills/ subdirs so they aren't deleted by the config sync
   const configResult = await sandbox.exec(
-    `rclone sync ${configDir}/ ${remote('openclaw/')} ${RCLONE_FLAGS} --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git/**'`,
+    `rclone sync ${configDir}/ ${remote('openclaw/')} ${RCLONE_FLAGS} --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' --exclude='.git/**' --exclude='workspace/**' --exclude='skills/**'`,
     { timeout: 120000 },
   );
   if (!configResult.success) {
@@ -64,15 +65,15 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
-  // Sync workspace (non-fatal, rclone sync propagates deletions)
+  // Sync workspace under openclaw/ prefix (non-fatal, rclone sync propagates deletions)
   await sandbox.exec(
-    `test -d /root/clawd && rclone sync /root/clawd/ ${remote('workspace/')} ${RCLONE_FLAGS} --exclude='skills/**' --exclude='.git/**' || true`,
+    `test -d /root/clawd && rclone sync /root/clawd/ ${remote('openclaw/workspace/')} ${RCLONE_FLAGS} --exclude='skills/**' --exclude='.git/**' || true`,
     { timeout: 120000 },
   );
 
-  // Sync skills (non-fatal)
+  // Sync skills under openclaw/ prefix (non-fatal)
   await sandbox.exec(
-    `test -d /root/clawd/skills && rclone sync /root/clawd/skills/ ${remote('skills/')} ${RCLONE_FLAGS} || true`,
+    `test -d /root/clawd/skills && rclone sync /root/clawd/skills/ ${remote('openclaw/skills/')} ${RCLONE_FLAGS} || true`,
     { timeout: 120000 },
   );
 
