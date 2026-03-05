@@ -49,6 +49,53 @@ export function buildEnvVars(env: MoltbotEnv): Record<string, string> {
   if (env.CF_ACCOUNT_ID) envVars.CF_ACCOUNT_ID = env.CF_ACCOUNT_ID;
   if (env.CDP_SECRET) envVars.CDP_SECRET = env.CDP_SECRET;
   if (env.WORKER_URL) envVars.WORKER_URL = env.WORKER_URL;
+  if (env.BRAVE_API_KEY) envVars.BRAVE_API_KEY = env.BRAVE_API_KEY;
+  if (env.SERPER_API_KEY) envVars.SERPER_API_KEY = env.SERPER_API_KEY;
+
+  // Claude Max OAuth token - map to both CLAUDE_ACCESS_TOKEN and ANTHROPIC_API_KEY
+  if (env.CLAUDE_ACCESS_TOKEN) {
+    envVars.CLAUDE_ACCESS_TOKEN = env.CLAUDE_ACCESS_TOKEN;
+    // Also set as ANTHROPIC_API_KEY so OpenClaw can use it
+    if (!envVars.ANTHROPIC_API_KEY) {
+      envVars.ANTHROPIC_API_KEY = env.CLAUDE_ACCESS_TOKEN;
+    }
+  }
+  if (env.CLAUDE_REFRESH_TOKEN) envVars.CLAUDE_REFRESH_TOKEN = env.CLAUDE_REFRESH_TOKEN;
+
+  // GitHub repo auto-clone on startup
+  if (env.GITHUB_REPO_URL) envVars.GITHUB_REPO_URL = env.GITHUB_REPO_URL;
+  if (env.GITHUB_TOKEN) envVars.GITHUB_TOKEN = env.GITHUB_TOKEN;
+  if (env.GITHUB_PAT) envVars.GITHUB_PAT = env.GITHUB_PAT;
+  if (env.GITHUB_REPO_SUBDIR) envVars.GITHUB_REPO_SUBDIR = env.GITHUB_REPO_SUBDIR;
+
+  // Telegram owner auto-allowlist on startup
+  if (env.TELEGRAM_OWNER_ID) envVars.TELEGRAM_OWNER_ID = env.TELEGRAM_OWNER_ID;
+
+  // Google Calendar OAuth 2.0 credentials
+  if (env.GOOGLE_CLIENT_ID) envVars.GOOGLE_CLIENT_ID = env.GOOGLE_CLIENT_ID;
+  if (env.GOOGLE_CLIENT_SECRET) envVars.GOOGLE_CLIENT_SECRET = env.GOOGLE_CLIENT_SECRET;
+  if (env.GOOGLE_REFRESH_TOKEN) envVars.GOOGLE_REFRESH_TOKEN = env.GOOGLE_REFRESH_TOKEN;
+  if (env.GOOGLE_CALENDAR_ID) envVars.GOOGLE_CALENDAR_ID = env.GOOGLE_CALENDAR_ID;
+
+  // Node host device identity for pre-seeded pairing (workaround for openclaw#4833)
+  if (env.NODE_DEVICE_ID) envVars.NODE_DEVICE_ID = env.NODE_DEVICE_ID;
+  if (env.NODE_DEVICE_PUBLIC_KEY) envVars.NODE_DEVICE_PUBLIC_KEY = env.NODE_DEVICE_PUBLIC_KEY;
+  if (env.NODE_DEVICE_DISPLAY_NAME) envVars.NODE_DEVICE_DISPLAY_NAME = env.NODE_DEVICE_DISPLAY_NAME;
+
+  // GitHub Copilot token for OpenClaw model auth
+  if (env.GITHUB_COPILOT_TOKEN) envVars.GITHUB_COPILOT_TOKEN = env.GITHUB_COPILOT_TOKEN;
+
+  // Notion API key
+  if (env.NOTION_API_KEY) envVars.NOTION_API_KEY = env.NOTION_API_KEY;
+
+  // Google AI API key for embeddings (memory_search)
+  if (env.GOOGLE_AI_API_KEY) envVars.GOOGLE_AI_API_KEY = env.GOOGLE_AI_API_KEY;
+
+  // Gmail read-only credentials (separate OAuth client from Calendar)
+  if (env.GOOGLE_GMAIL_CLIENT_ID) envVars.GOOGLE_GMAIL_CLIENT_ID = env.GOOGLE_GMAIL_CLIENT_ID;
+  if (env.GOOGLE_GMAIL_CLIENT_SECRET) envVars.GOOGLE_GMAIL_CLIENT_SECRET = env.GOOGLE_GMAIL_CLIENT_SECRET;
+  if (env.GOOGLE_GMAIL_REFRESH_TOKEN) envVars.GOOGLE_GMAIL_REFRESH_TOKEN = env.GOOGLE_GMAIL_REFRESH_TOKEN;
+  if (env.GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN) envVars.GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN = env.GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN;
 
   // R2 persistence credentials (used by rclone in start-openclaw.sh)
   if (env.R2_ACCESS_KEY_ID) envVars.R2_ACCESS_KEY_ID = env.R2_ACCESS_KEY_ID;

@@ -14,13 +14,30 @@
  */
 
 const WebSocket = require('ws');
+const { readFileSync } = require('fs');
+
+// Load CDP credentials from env file (agent exec doesn't inherit env vars)
+function loadCdpEnv() {
+  try {
+    const content = readFileSync('/root/.cdp-browser.env', 'utf-8');
+    for (const line of content.split('\n')) {
+      const idx = line.indexOf('=');
+      if (idx > 0) {
+        const key = line.slice(0, idx).trim();
+        const val = line.slice(idx + 1).trim();
+        if (val && !process.env[key]) process.env[key] = val;
+      }
+    }
+  } catch {}
+}
 
 function createClient(options = {}) {
+  loadCdpEnv();
   const CDP_SECRET = options.secret || process.env.CDP_SECRET;
   if (!CDP_SECRET) {
-    throw new Error('CDP_SECRET environment variable not set');
+    throw new Error('CDP_SECRET not set. Check /root/.cdp-browser.env or CDP_SECRET env var.');
   }
-  
+
   const workerUrl = (options.workerUrl || process.env.WORKER_URL).replace(/^https?:\/\//, '');
   const wsUrl = `wss://${workerUrl}/cdp?secret=${encodeURIComponent(CDP_SECRET)}`;
   const timeout = options.timeout || 60000;

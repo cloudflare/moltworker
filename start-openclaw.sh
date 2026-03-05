@@ -1,13 +1,18 @@
 #!/bin/bash
-# Startup script for OpenClaw in Cloudflare Sandbox
-# This script:
-# 1. Restores config/workspace/skills from R2 via rclone (if configured)
-# 2. Runs openclaw onboard --non-interactive to configure from env vars
-# 3. Patches config for features onboard doesn't cover (channels, gateway auth)
-# 4. Starts a background sync loop (rclone, watches for file changes)
-# 5. Starts the gateway
+# OpenClaw Startup Script - merged upstream rclone + custom crons/auth
+# Based on upstream start-openclaw.sh with custom additions:
+# - GitHub repo clone (clawd-memory) with PAT auth
+# - GitHub Copilot model auth (GITHUB_TOKEN from GITHUB_COPILOT_TOKEN)
+# - Google AI embeddings (GEMINI_API_KEY from GOOGLE_AI_API_KEY)
+# - Git credential helper for workspace push
+# - Cron restoration (restore-crons.js + auto-study/brain-memory/self-reflect)
+# - Device pairing auto-approve loop
+# - Gateway restart loop (crash recovery)
+# - Calendar instructions injection
+# - Telegram owner allowlist
 
 set -e
+trap 'echo "[ERROR] Script failed at line $LINENO: $BASH_COMMAND" >&2' ERR
 
 if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
     echo "OpenClaw gateway is already running, exiting."
@@ -21,12 +26,27 @@ SKILLS_DIR="/root/clawd/skills"
 RCLONE_CONF="/root/.config/rclone/rclone.conf"
 LAST_SYNC_FILE="/tmp/.last-sync"
 
-echo "Config directory: $CONFIG_DIR"
+# Port check using Node.js (nc/netcat not installed)
+port_open() {
+  node -e "require('net').createConnection({port:$2,host:'$1',timeout:2000}).on('connect',function(){process.exit(0)}).on('error',function(){process.exit(1)})" 2>/dev/null
+}
+
+echo "============================================"
+echo "Starting OpenClaw (rclone + custom crons)"
+echo "============================================"
+
+# Export OPENCLAW_GATEWAY_TOKEN from legacy env var
+if [ -n "${CLAWDBOT_GATEWAY_TOKEN:-}" ]; then
+  export OPENCLAW_GATEWAY_TOKEN="$CLAWDBOT_GATEWAY_TOKEN"
+fi
 
 mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
+
+echo "OpenClaw version: $(openclaw --version 2>/dev/null || echo 'unknown')"
 
 # ============================================================
-# RCLONE SETUP
+# RCLONE SETUP (from upstream)
 # ============================================================
 
 r2_configured() {
@@ -61,7 +81,6 @@ if r2_configured; then
     setup_rclone
 
     echo "Checking R2 for existing backup..."
-    # Check if R2 has an openclaw config backup
     if rclone ls "r2:${R2_BUCKET}/openclaw/openclaw.json" $RCLONE_FLAGS 2>/dev/null | grep -q openclaw.json; then
         echo "Restoring config from R2..."
         rclone copy "r2:${R2_BUCKET}/openclaw/" "$CONFIG_DIR/" $RCLONE_FLAGS -v 2>&1 || echo "WARNING: config restore failed with exit code $?"
@@ -96,6 +115,267 @@ if r2_configured; then
     fi
 else
     echo "R2 not configured, starting fresh"
+fi
+
+# Overlay Docker-built skills on top of R2-restored ones
+# R2 may have old versions; pristine copy from Docker image is authoritative
+if [ -d "/root/clawd/.skills-pristine" ]; then
+  cp -rf /root/clawd/.skills-pristine/* "$SKILLS_DIR/"
+  echo "Skills overlay: Docker-built scripts restored over R2 backup"
+fi
+
+# ============================================================
+# GITHUB REPO CLONE (custom: clone clawd-memory repo)
+# ============================================================
+
+CLONE_DIR=""
+if [ -n "$GITHUB_REPO_URL" ]; then
+  REPO_NAME=$(basename "$GITHUB_REPO_URL" .git)
+  CLONE_DIR="/root/clawd/$REPO_NAME"
+
+  # Support private repos via GITHUB_PAT (GITHUB_TOKEN will be overwritten by Copilot token later)
+  EFFECTIVE_GITHUB_TOKEN=""
+  if [ -n "${GITHUB_PAT:-}" ]; then
+    EFFECTIVE_GITHUB_TOKEN="$GITHUB_PAT"
+  elif [ -n "${GITHUB_TOKEN:-}" ]; then
+    EFFECTIVE_GITHUB_TOKEN="$GITHUB_TOKEN"
+  fi
+
+  if [ -n "$EFFECTIVE_GITHUB_TOKEN" ]; then
+    CLONE_URL=$(echo "$GITHUB_REPO_URL" | sed "s|https://github.com/|https://${EFFECTIVE_GITHUB_TOKEN}@github.com/|")
+  else
+    echo "[WARN] Neither GITHUB_PAT nor GITHUB_TOKEN is set. Private repos will fail to clone."
+    CLONE_URL="$GITHUB_REPO_URL"
+  fi
+
+  if [ -d "$CLONE_DIR/.git" ]; then
+    echo "Repository already exists at $CLONE_DIR, updating remote and pulling latest..."
+    git -C "$CLONE_DIR" remote set-url origin "$CLONE_URL"
+    git -C "$CLONE_DIR" pull --ff-only || echo "[WARN] git pull failed, continuing with existing version"
+  else
+    # R2 restore may have created this directory without .git — remove it so clone succeeds
+    if [ -d "$CLONE_DIR" ]; then
+      echo "Removing stale $CLONE_DIR (no .git, likely from R2 restore)..."
+      rm -rf "$CLONE_DIR"
+    fi
+    echo "Cloning $GITHUB_REPO_URL into $CLONE_DIR..."
+    git clone "$CLONE_URL" "$CLONE_DIR" || echo "[WARN] git clone failed, continuing without repo"
+  fi
+  echo "GitHub repo clone completed"
+fi
+
+# Symlink repo contents into workspace
+# Use GITHUB_REPO_SUBDIR (e.g. "moltworker") to scope memory to a subdirectory
+REPO_LINK_DIR="$CLONE_DIR"
+if [ -n "${GITHUB_REPO_SUBDIR:-}" ] && [ -d "$CLONE_DIR/$GITHUB_REPO_SUBDIR" ]; then
+  REPO_LINK_DIR="$CLONE_DIR/$GITHUB_REPO_SUBDIR"
+  echo "Using repo subdirectory: $GITHUB_REPO_SUBDIR"
+
+  # Ensure key memory directories exist in repo subdirectory
+  for memdir in brain-memory warm-memory memory scripts; do
+    mkdir -p "$REPO_LINK_DIR/$memdir"
+  done
+
+  # Merge R2-restored workspace content INTO repo subdirectory, then symlink back.
+  # This ensures agent writes go to the git repo (via symlinks) and R2 data is preserved.
+  for memdir in brain-memory warm-memory memory; do
+    WS_DIR="/root/clawd/$memdir"
+    REPO_DIR="$REPO_LINK_DIR/$memdir"
+    if [ -d "$WS_DIR" ] && [ ! -L "$WS_DIR" ]; then
+      # Real directory from R2 restore — merge contents into repo dir
+      cp -rn "$WS_DIR"/* "$REPO_DIR/" 2>/dev/null || true
+      rm -rf "$WS_DIR"
+      ln -sfn "$REPO_DIR" "$WS_DIR"
+      echo "Merged $memdir into repo and symlinked back"
+    elif [ ! -e "$WS_DIR" ]; then
+      ln -sfn "$REPO_DIR" "$WS_DIR"
+      echo "Symlinked $memdir -> repo"
+    fi
+  done
+fi
+if [ -n "$REPO_LINK_DIR" ] && [ -d "$REPO_LINK_DIR" ]; then
+  for item in "$REPO_LINK_DIR"/*; do
+    name=$(basename "$item")
+    [ "$name" = ".git" ] && continue
+    [ "$name" = "README.md" ] && continue
+    # Skip dirs already handled by merge logic above
+    case "$name" in brain-memory|warm-memory|memory) continue ;; esac
+    WS_TARGET="/root/clawd/$name"
+    if [ -d "$item" ]; then
+      if [ -d "$WS_TARGET" ] && [ ! -L "$WS_TARGET" ]; then
+        cp -rn "$WS_TARGET"/* "$item/" 2>/dev/null || true
+        rm -rf "$WS_TARGET"
+      fi
+      ln -sfn "$item" "$WS_TARGET"
+    else
+      ln -sf "$item" "$WS_TARGET"
+    fi
+    echo "Symlinked $name -> $item"
+  done
+  echo "All repo contents symlinked to workspace"
+fi
+
+# Symlink skills-level bootstrap files into workspace root
+for bootstrap in HOT-MEMORY.md CLAUDE.md; do
+  if [ -f "/root/clawd/skills/$bootstrap" ] && [ ! -f "/root/clawd/$bootstrap" ]; then
+    ln -sf "/root/clawd/skills/$bootstrap" "/root/clawd/$bootstrap"
+    echo "Symlinked $bootstrap -> skills/$bootstrap"
+  fi
+done
+
+# Symlink TOOLS.md from moltworker to workspace root (for agent communication instructions)
+if [ -f "/root/clawd/moltworker/TOOLS.md" ] && [ ! -f "/root/clawd/TOOLS.md" ]; then
+  ln -sf "/root/clawd/moltworker/TOOLS.md" "/root/clawd/TOOLS.md"
+  echo "Symlinked TOOLS.md -> moltworker/TOOLS.md"
+fi
+
+# Write Notion API key to a file so any process can access it
+if [ -n "${NOTION_API_KEY:-}" ]; then
+  cat > /root/.notion.env << EOF
+NOTION_API_KEY=$NOTION_API_KEY
+EOF
+  chmod 600 /root/.notion.env
+  echo "Notion API key written to /root/.notion.env"
+fi
+
+# Write Google Calendar credentials to a file so any process can access them
+# (sandbox.startProcess doesn't inherit env vars from parent)
+if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
+  cat > /root/.google-calendar.env << EOF
+GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+GOOGLE_REFRESH_TOKEN=$GOOGLE_REFRESH_TOKEN
+GOOGLE_CALENDAR_ID=${GOOGLE_CALENDAR_ID:-primary}
+EOF
+  chmod 600 /root/.google-calendar.env
+  echo "Google Calendar credentials written to /root/.google-calendar.env"
+fi
+
+# Write Gmail credentials to a file so any process can access them
+# Gmail uses a separate OAuth client (Web application type) from Calendar
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ]; then
+  cat > /root/.google-gmail.env << EOF
+GOOGLE_GMAIL_CLIENT_ID=$GOOGLE_GMAIL_CLIENT_ID
+GOOGLE_GMAIL_CLIENT_SECRET=$GOOGLE_GMAIL_CLIENT_SECRET
+GOOGLE_GMAIL_REFRESH_TOKEN=$GOOGLE_GMAIL_REFRESH_TOKEN
+EOF
+  chmod 600 /root/.google-gmail.env
+  echo "Gmail credentials written to /root/.google-gmail.env"
+fi
+
+# Write Gmail personal credentials (gkswlghks118@gmail.com) to a file
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; then
+  cat > /root/.google-gmail-personal.env << EOF
+GOOGLE_GMAIL_CLIENT_ID=$GOOGLE_GMAIL_CLIENT_ID
+GOOGLE_GMAIL_CLIENT_SECRET=$GOOGLE_GMAIL_CLIENT_SECRET
+GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN=$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN
+EOF
+  chmod 600 /root/.google-gmail-personal.env
+  echo "Gmail personal credentials written to /root/.google-gmail-personal.env"
+fi
+
+# Write CDP/browser credentials for Cloudflare Browser Rendering
+if [ -n "$CDP_SECRET" ] && [ -n "$WORKER_URL" ]; then
+  cat > /root/.cdp-browser.env << EOF
+CDP_SECRET=$CDP_SECRET
+WORKER_URL=$WORKER_URL
+EOF
+  chmod 600 /root/.cdp-browser.env
+  echo "CDP browser credentials written to /root/.cdp-browser.env"
+fi
+
+# Inject Google Calendar instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'CALEOF'
+
+## Google Calendar (구글 캘린더)
+- 일정 확인할 때: `read` tool로 `/root/clawd/warm-memory/calendar.md` 파일을 읽어라. 이 파일은 자동 동기화됨.
+- 일정 생성: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js create --title "제목" --start "YYYY-MM-DDTHH:MM" --end "YYYY-MM-DDTHH:MM" --attendees "email1,email2"` 실행
+- 다른 사람 일정 확인: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js freebusy --start "YYYY-MM-DDTHH:MM" --end "YYYY-MM-DDTHH:MM" --emails "email1,email2"` 실행
+- 미팅 잡기: 먼저 freebusy로 참석자 가능 시간 확인 → 빈 시간에 create로 미팅 생성 (--attendees 포함)
+- 일정 검색: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js search --query "검색어"` 실행
+- 일정 수정: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js update --id EVENT_ID` 실행
+- 일정 삭제: `exec` tool로 `node /root/clawd/skills/google-calendar/scripts/calendar.js delete --id EVENT_ID` 실행
+- 캘린더 관련 요청에 memory_search 사용하지 마라. 위 방법만 사용.
+CALEOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Calendar instructions appended to TOOLS.md"
+fi
+
+# Inject Gmail instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; }; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'GMAILEOF'
+
+## Gmail (이메일 - 읽기 전용, 2개 계정)
+- **중요**: 유저가 이메일 확인을 요청하면, 먼저 `exec` tool로 `node /root/clawd/skills/gmail/scripts/sync-inbox.js` 실행하여 최신 동기화 후 읽어라.
+### 회사 이메일 (astin@hashed.com)
+- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox.md` 파일을 읽어라.
+- 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID --account work` 실행
+- 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어" --account work` 실행
+- 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24 --account work` 실행
+### 개인 이메일 (gkswlghks118@gmail.com)
+- 이메일 확인: `read` tool로 `/root/clawd/warm-memory/inbox-personal.md` 파일을 읽어라.
+- 이메일 상세 읽기: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js read --id MSG_ID --account personal` 실행
+- 이메일 검색: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js search --query "검색어" --account personal` 실행
+- 최근 이메일 목록: `exec` tool로 `node /root/clawd/skills/gmail/scripts/gmail.js list --hours 24 --account personal` 실행
+### 공통
+- 주의: 이메일 전송 기능 없음. 읽기만 가능.
+- 이메일 관련 요청에 memory_search 사용하지 마라. 위 방법만 사용.
+GMAILEOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Gmail instructions appended to TOOLS.md"
+fi
+
+# Inject Browser instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ] && [ -n "$CDP_SECRET" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'BROWSEREOF'
+
+## Browser (Cloudflare Browser Rendering - 헤드리스 Chrome)
+- 웹페이지 읽기 (JS 렌더링 포함): `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/read-page.js "URL" --max-chars 5000` 실행
+- 스크린샷 찍기: `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js "URL" /tmp/screenshot.png` 실행
+- JS 렌더링이 필요한 SPA 사이트도 읽을 수 있음. 일반 curl로 안 될 때 사용.
+BROWSEREOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Browser instructions appended to TOOLS.md"
+fi
+
+# Inject Browser instructions into CLAUDE.md (agent instructions)
+CLAUDE_MD="/root/clawd/skills/CLAUDE.md"
+if [ -f "$CLAUDE_MD" ] && [ -n "$CDP_SECRET" ] && ! grep -q "read-page.js" "$CLAUDE_MD" 2>/dev/null; then
+  # Dereference symlink if needed
+  if [ -L "$CLAUDE_MD" ]; then
+    cp -L "$CLAUDE_MD" "${CLAUDE_MD}.tmp" && mv "${CLAUDE_MD}.tmp" "$CLAUDE_MD"
+  fi
+  sed -i '/## Self-Evolution/i\
+## Browser (IMPORTANT)\
+- 웹페이지 읽기 (JS 렌더링 포함): `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/read-page.js "URL" --max-chars 5000` 실행\
+- 스크린샷: `exec` tool로 `node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js "URL" /tmp/screenshot.png` 실행\
+- **내장 browser 툴 사용하지 마라.** 페어링 오류 발생함. 반드시 위 exec 스크립트만 사용.\
+' "$CLAUDE_MD"
+  # Also copy to workspace root (OpenClaw reads from workspace)
+  cp -f "$CLAUDE_MD" "/root/clawd/CLAUDE.md" 2>/dev/null || true
+  echo "Browser instructions injected into CLAUDE.md"
+fi
+
+# Inject Notion instructions into TOOLS.md
+if [ -f "/root/clawd/TOOLS.md" ] && [ -n "${NOTION_API_KEY:-}" ]; then
+  cp -L "/root/clawd/TOOLS.md" "/root/clawd/TOOLS.md.real"
+  cat >> "/root/clawd/TOOLS.md.real" << 'NOTIONEOF'
+
+## Notion API (노션)
+- API 키: `/root/.notion.env` 파일에서 읽기 (`source /root/.notion.env`)
+- 페이지 검색: `curl -s -X POST https://api.notion.com/v1/search -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{"query":"검색어"}'`
+- 페이지 읽기: `curl -s https://api.notion.com/v1/pages/PAGE_ID -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28"`
+- 블록 내용 읽기: `curl -s https://api.notion.com/v1/blocks/BLOCK_ID/children -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28"`
+- 데이터베이스 쿼리: `curl -s -X POST https://api.notion.com/v1/databases/DB_ID/query -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{}'`
+- 페이지 생성: `curl -s -X POST https://api.notion.com/v1/pages -H "Authorization: Bearer $NOTION_API_KEY" -H "Notion-Version: 2022-06-28" -H "Content-Type: application/json" -d '{"parent":{"database_id":"DB_ID"},"properties":{...}}'`
+- 반드시 `exec` tool로 실행. 스크립트에서는 `source /root/.notion.env`로 키 로드.
+NOTIONEOF
+  mv "/root/clawd/TOOLS.md.real" "/root/clawd/TOOLS.md"
+  echo "Notion instructions appended to TOOLS.md"
 fi
 
 # ============================================================
@@ -133,11 +413,6 @@ fi
 # ============================================================
 # PATCH CONFIG (channels, gateway auth, trusted proxies)
 # ============================================================
-# openclaw onboard handles provider/model config, but we need to patch in:
-# - Channel config (Telegram, Discord, Slack)
-# - Gateway token auth
-# - Trusted proxies for sandbox networking
-# - Base URL override for legacy AI Gateway path
 node << 'EOFPATCH'
 const fs = require('fs');
 
@@ -157,10 +432,11 @@ config.channels = config.channels || {};
 // Gateway configuration
 config.gateway.port = 18789;
 config.gateway.mode = 'local';
-config.gateway.trustedProxies = ['10.1.0.0'];
+config.gateway.trustedProxies = ['10.0.0.0/8'];
 
 if (process.env.OPENCLAW_GATEWAY_TOKEN) {
     config.gateway.auth = config.gateway.auth || {};
+    config.gateway.auth.mode = 'token';
     config.gateway.auth.token = process.env.OPENCLAW_GATEWAY_TOKEN;
 }
 
@@ -169,17 +445,44 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
     config.gateway.controlUi.allowInsecureAuth = true;
 }
 
-// Legacy AI Gateway base URL override:
-// ANTHROPIC_BASE_URL is picked up natively by the Anthropic SDK,
-// so we don't need to patch the provider config. Writing a provider
-// entry without a models array breaks OpenClaw's config validation.
+// Agent defaults
+config.agents = config.agents || {};
+config.agents.defaults = config.agents.defaults || {};
+config.agents.defaults.workspace = '/root/clawd';
+config.agents.defaults.contextPruning = { mode: 'cache-ttl', ttl: '1h' };
+config.agents.defaults.compaction = { mode: 'safeguard' };
+config.agents.defaults.heartbeat = { every: '30m' };
+config.agents.defaults.maxConcurrent = 4;
+config.agents.defaults.subagents = { maxConcurrent: 4 };
 
-// AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
-// Adds a provider entry for any AI Gateway provider and sets it as default model.
-// Examples:
-//   workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
-//   openai/gpt-4o
-//   anthropic/claude-sonnet-4-5
+// Disable built-in browser tool (requires gateway pairing which doesn't work in sandbox)
+// Agent uses CDP scripts via exec tool instead (read-page.js, screenshot.js)
+config.tools = config.tools || {};
+config.tools.deny = ['browser'];
+
+// Memory search: hybrid BM25+vector with temporal decay and MMR
+config.agents.defaults.memorySearch = {
+    provider: 'gemini',
+    model: 'gemini-embedding-001',
+    query: {
+        hybrid: {
+            enabled: true,
+            vectorWeight: 0.7,
+            textWeight: 0.3,
+            mmr: { enabled: true, lambda: 0.7 },
+            temporalDecay: { enabled: true, halfLifeDays: 30 }
+        }
+    },
+    extraPaths: ['/root/clawd/warm-memory', '/root/clawd/brain-memory']
+};
+
+// Node browser auto config
+if (process.env.NODE_DEVICE_ID) {
+    config.gateway.nodes = config.gateway.nodes || {};
+    config.gateway.nodes.browser = { mode: 'auto', node: process.env.NODE_DEVICE_ID };
+}
+
+// AI Gateway model override
 if (process.env.CF_AI_GATEWAY_MODEL) {
     const raw = process.env.CF_AI_GATEWAY_MODEL;
     const slashIdx = raw.indexOf('/');
@@ -210,20 +513,16 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
             api: api,
             models: [{ id: modelId, name: modelId, contextWindow: 131072, maxTokens: 8192 }],
         };
-        config.agents = config.agents || {};
-        config.agents.defaults = config.agents.defaults || {};
         config.agents.defaults.model = { primary: providerName + '/' + modelId };
         console.log('AI Gateway model override: provider=' + providerName + ' model=' + modelId + ' via ' + baseUrl);
     } else {
-        console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
+        console.warn('CF_AI_GATEWAY_MODEL set but missing required config');
     }
 }
 
 // Telegram configuration
-// Overwrite entire channel object to drop stale keys from old R2 backups
-// that would fail OpenClaw's strict config validation (see #47)
 if (process.env.TELEGRAM_BOT_TOKEN) {
-    const dmPolicy = process.env.TELEGRAM_DM_POLICY || 'pairing';
+    const dmPolicy = process.env.TELEGRAM_DM_POLICY || 'allowlist';
     config.channels.telegram = {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
         enabled: true,
@@ -237,7 +536,6 @@ if (process.env.TELEGRAM_BOT_TOKEN) {
 }
 
 // Discord configuration
-// Discord uses a nested dm object: dm.policy, dm.allowFrom (per DiscordDmConfig)
 if (process.env.DISCORD_BOT_TOKEN) {
     const dmPolicy = process.env.DISCORD_DM_POLICY || 'pairing';
     const dm = { policy: dmPolicy };
@@ -265,7 +563,148 @@ console.log('Configuration patched successfully');
 EOFPATCH
 
 # ============================================================
-# BACKGROUND SYNC LOOP
+# CUSTOM: Telegram owner allowlist
+# ============================================================
+if [ -n "$TELEGRAM_OWNER_ID" ]; then
+  mkdir -p "$CONFIG_DIR/credentials"
+  cat > "$CONFIG_DIR/credentials/telegram-allowFrom.json" << EOFALLOW
+{
+  "version": 1,
+  "allowFrom": [
+    "$TELEGRAM_OWNER_ID"
+  ]
+}
+EOFALLOW
+  echo "Telegram allowlist set for owner ID: $TELEGRAM_OWNER_ID"
+fi
+
+# ============================================================
+# SECURITY: exec-approvals.json (command execution allowlist)
+# ============================================================
+cat > "$CONFIG_DIR/exec-approvals.json" << 'EOFEXEC'
+{
+  "mode": "allowlist",
+  "askMode": "on-miss",
+  "allowlist": [
+    "git status", "git diff", "git log", "git pull", "git push",
+    "ls", "cat", "head", "tail", "wc",
+    "node", "npm", "npx",
+    "curl", "wget",
+    "date", "whoami", "pwd", "env",
+    "openclaw cron list", "openclaw cron add",
+    "openclaw models", "openclaw doctor"
+  ]
+}
+EOFEXEC
+chmod 600 "$CONFIG_DIR/exec-approvals.json"
+chmod 600 "$CONFIG_DIR/openclaw.json"
+echo "Security: exec-approvals.json created, file permissions set"
+
+# Protect critical bootstrap files from agent self-modification
+# Skills dir files take priority — rm symlinks first (cp follows symlinks)
+for f in SOUL.md USER.md HEARTBEAT.md; do
+  if [ -f "/root/clawd/skills/$f" ]; then
+    rm -f "/root/clawd/$f"
+    cp "/root/clawd/skills/$f" "/root/clawd/$f"
+    chmod 444 "/root/clawd/$f"
+    chmod 444 "/root/clawd/skills/$f"
+  fi
+done
+echo "Security: critical bootstrap files protected (chmod 444)"
+
+# ============================================================
+# CUSTOM: Pre-seed device pairing (workaround for openclaw#4833)
+# ============================================================
+if [ -n "${NODE_DEVICE_ID:-}" ] && [ -n "${NODE_DEVICE_PUBLIC_KEY:-}" ]; then
+  mkdir -p "$CONFIG_DIR/devices"
+  PAIRED_FILE="$CONFIG_DIR/devices/paired.json"
+  NOW_MS=$(date +%s)000
+
+  if [ -f "$PAIRED_FILE" ]; then
+    EXISTING=$(cat "$PAIRED_FILE")
+  else
+    EXISTING="{}"
+  fi
+
+  echo "$EXISTING" | node -e "
+    let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+      const paired=JSON.parse(d||'{}');
+      paired['${NODE_DEVICE_ID}']={
+        deviceId:'${NODE_DEVICE_ID}',
+        publicKey:'${NODE_DEVICE_PUBLIC_KEY}',
+        displayName:'${NODE_DEVICE_DISPLAY_NAME:-Node Host}',
+        platform:'darwin',
+        clientId:'node-host',
+        clientMode:'node',
+        role:'node',
+        roles:['node'],
+        scopes:[],
+        tokens:{node:{token:'${CLAWDBOT_GATEWAY_TOKEN:-}',role:'node',scopes:[],createdAtMs:${NOW_MS}}},
+        createdAtMs:${NOW_MS},
+        approvedAtMs:${NOW_MS}
+      };
+      process.stdout.write(JSON.stringify(paired,null,2));
+    });" > "${PAIRED_FILE}.tmp" && mv "${PAIRED_FILE}.tmp" "$PAIRED_FILE"
+  echo "[PAIRING] Pre-seeded device pairing for node: ${NODE_DEVICE_ID:0:16}..."
+else
+  echo "[PAIRING] NODE_DEVICE_ID or NODE_DEVICE_PUBLIC_KEY not set, skipping pre-seed"
+fi
+
+# ============================================================
+# CUSTOM: openclaw doctor --fix (auto-fix config drift)
+# ============================================================
+DOCTOR_DONE="$CONFIG_DIR/.doctor-done"
+if [ ! -f "$DOCTOR_DONE" ]; then
+  echo "Running openclaw doctor --fix..."
+  timeout 60 openclaw doctor --fix 2>/dev/null || true
+  touch "$DOCTOR_DONE"
+fi
+
+# ============================================================
+# CUSTOM: Model & auth configuration
+# ============================================================
+
+# Set model (after config is written)
+openclaw models set github-copilot/gpt-5-mini 2>/dev/null || true
+echo "Models set: github-copilot/gpt-5-mini"
+
+# GitHub Copilot auth: export GITHUB_TOKEN so OpenClaw's github-copilot provider can use it
+if [ -n "${GITHUB_COPILOT_TOKEN:-}" ]; then
+  export GITHUB_TOKEN="$GITHUB_COPILOT_TOKEN"
+  echo "GitHub Copilot auth: GITHUB_TOKEN exported from GITHUB_COPILOT_TOKEN"
+else
+  echo "WARNING: GITHUB_COPILOT_TOKEN not set, GitHub Copilot provider may not work"
+fi
+
+# Google AI API key for embeddings (memory_search semantic search)
+if [ -n "${GOOGLE_AI_API_KEY:-}" ]; then
+  export GEMINI_API_KEY="$GOOGLE_AI_API_KEY"
+  echo "Google AI auth: GEMINI_API_KEY exported for embeddings"
+fi
+
+# Git credential helper: use GITHUB_PAT for all github.com push/pull operations
+if [ -n "${GITHUB_PAT:-}" ]; then
+  cat > /usr/local/bin/git-credential-pat << CREDEOF
+#!/bin/sh
+echo "protocol=https"
+echo "host=github.com"
+echo "username=x-access-token"
+echo "password=${GITHUB_PAT}"
+CREDEOF
+  chmod +x /usr/local/bin/git-credential-pat
+  git config --global credential.helper "/usr/local/bin/git-credential-pat"
+  git config --global user.name "moltbot"
+  git config --global user.email "moltbot@astin-43b.workers.dev"
+  echo "Git credential helper configured (GITHUB_PAT for github.com)"
+fi
+
+# Clean up stale lock files
+find /root/.openclaw -name "*.lock" -delete 2>/dev/null || true
+rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
+rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
+
+# ============================================================
+# BACKGROUND SYNC LOOP (from upstream, rclone-based)
 # ============================================================
 if r2_configured; then
     echo "Starting background R2 sync loop..."
@@ -310,20 +749,316 @@ if r2_configured; then
 fi
 
 # ============================================================
-# START GATEWAY
+# CUSTOM: Cron restoration (background, after gateway is ready)
+# ============================================================
+(
+  CRON_SCRIPT="/root/clawd/clawd-memory/scripts/restore-crons.js"
+  STUDY_SCRIPT="/root/clawd/skills/web-researcher/scripts/study-session.js"
+  BRAIN_SCRIPT="/root/clawd/skills/brain-memory/scripts/brain-memory-system.js"
+  REFLECT_SCRIPT="/root/clawd/skills/self-modify/scripts/reflect.js"
+
+  # Helper: register a cron with retry (2 attempts)
+  register_cron() {
+    local label="$1"; shift
+    for attempt in 1 2; do
+      if openclaw cron add "$@" 2>&1; then
+        echo "[$label] Cron registered successfully"
+        return 0
+      fi
+      echo "[$label] Attempt $attempt failed, retrying in 5s..."
+      sleep 5
+    done
+    echo "[WARN] $label cron registration failed after 2 attempts"
+    return 1
+  }
+
+  # Wait for gateway to be ready
+  for i in $(seq 1 30); do
+    sleep 2
+    if port_open 127.0.0.1 18789; then
+      sleep 3
+      echo "[CRON] Gateway ready, starting cron restoration..."
+
+      TOKEN_FLAG=""
+      # Prefer OPENCLAW_GATEWAY_TOKEN (always valid in startup script's env)
+      # device-auth.json token goes stale after gateway restarts
+      if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+        TOKEN_FLAG="--token $OPENCLAW_GATEWAY_TOKEN"
+      elif [ -n "$CLAWDBOT_GATEWAY_TOKEN" ]; then
+        TOKEN_FLAG="--token $CLAWDBOT_GATEWAY_TOKEN"
+      else
+        OPERATOR_TOKEN=$(node -e "try{const d=JSON.parse(require('fs').readFileSync('/root/.openclaw/identity/device-auth.json','utf8'));console.log(d.tokens.operator.token)}catch(e){}" 2>/dev/null)
+        if [ -n "$OPERATOR_TOKEN" ]; then
+          TOKEN_FLAG="--token $OPERATOR_TOKEN"
+        fi
+      fi
+
+      ALLOWED_MODEL="github-copilot/gpt-5-mini"
+
+      # 1. Restore base crons from clawd-memory repo (if available)
+      if [ -f "$CRON_SCRIPT" ]; then
+        echo "[CRON] Running restore-crons.js..."
+        node "$CRON_SCRIPT" 2>&1 || echo "[WARN] Cron restore script failed"
+      fi
+
+      # 1b. Validate all cron models
+      echo "[CRON] Validating cron model IDs..."
+      CRON_JSON=$(openclaw cron list --json $TOKEN_FLAG 2>/dev/null || echo '{"jobs":[]}')
+      BAD_CRONS=$(echo "$CRON_JSON" | node -e "
+        let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+          try{
+            const allowed=['$ALLOWED_MODEL'];
+            const jobs=JSON.parse(d).jobs||[];
+            jobs.forEach(j=>{
+              const m=j.payload&&j.payload.model||'';
+              if(m&&!allowed.includes(m)){
+                console.log(j.id+'|'+j.name+'|'+m);
+              }
+            });
+          }catch(e){console.error(e.message);}
+        });" 2>/dev/null)
+
+      if [ -n "$BAD_CRONS" ]; then
+        echo "[CRON] Found crons with disallowed models, fixing..."
+        echo "$BAD_CRONS" | while IFS='|' read -r cid cname cmodel; do
+          echo "[CRON] Fixing $cname (was: $cmodel -> $ALLOWED_MODEL)"
+          openclaw cron remove "$cid" $TOKEN_FLAG 2>/dev/null || true
+        done
+      else
+        echo "[CRON] All cron models are valid"
+      fi
+
+      # 2. auto-study
+      if [ -n "$SERPER_API_KEY" ] && [ -f "$STUDY_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "auto-study "; then
+          register_cron "STUDY" \
+            --name "auto-study" \
+            --every "24h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/skills/web-researcher/scripts/study-session.js --compact — Summarize findings. Save notable items to warm memory via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/TOPIC.md --content SUMMARY --keywords KEYWORDS --reason auto-study. After saving, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: auto-study update' && git push"
+        fi
+      fi
+
+      # 3. brain-memory
+      if [ -f "$BRAIN_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "brain-memory "; then
+          register_cron "BRAIN" \
+            --name "brain-memory" \
+            --every "24h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/skills/brain-memory/scripts/brain-memory-system.js --compact — Analyze output. Save daily summary to /root/clawd/brain-memory/daily/YYYY-MM-DD.md (today's date, mkdir -p if needed). If owner prefs or active context changed, update HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason daily-update. After saving, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: brain-memory update' && git push"
+        fi
+      fi
+
+      # 4. self-reflect
+      if [ -f "$REFLECT_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "self-reflect "; then
+          register_cron "REFLECT" \
+            --name "self-reflect" \
+            --every "168h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/skills/self-modify/scripts/reflect.js — Analyze this reflection report. Do ALL of the following: 1) Find non-obvious patterns and insights across daily summaries. Save key insights to warm memory via modify.js. 2) Prune warm-memory topics not accessed in 14+ days (archive key facts, remove file, update memory-index.json). 3) If HOT-MEMORY.md > 450 tokens, compress it via modify.js. 4) If study topics produce low-value results, consider adjusting via modify-cron.js. 5) Save a brief reflection to /root/clawd/brain-memory/reflections/YYYY-MM-DD.md. After all changes, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: self-reflect update' && git push"
+        fi
+      fi
+
+      # 5. email-summary (daily inbox digest — both accounts)
+      GMAIL_SCRIPT="/root/clawd/skills/gmail/scripts/gmail.js"
+      if [ -f "$GMAIL_SCRIPT" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; }; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "email-summary "; then
+          register_cron "EMAIL" \
+            --name "email-summary" \
+            --every "24h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Read /root/clawd/warm-memory/inbox.md (work: astin@hashed.com) and /root/clawd/warm-memory/inbox-personal.md (personal: gkswlghks118@gmail.com). Summarize important emails from both accounts: key senders, action items, urgent matters. Save summary to /root/clawd/brain-memory/daily/email-YYYY-MM-DD.md (use today's date). If something urgent or actionable, note it in HOT-MEMORY.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file HOT-MEMORY.md --content NEW_CONTENT --reason email-summary. After saving, commit and push to GitHub: cd /root/clawd/clawd-memory && git add -A && git commit -m 'moltbot: email summary update' && git push"
+        fi
+      fi
+
+      # 6. portfolio-research (daily HVF portfolio company tracking)
+      PORTFOLIO_LIST="/root/clawd/portfolio-companies.md"
+      if [ -f "$PORTFOLIO_LIST" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "portfolio-research "; then
+          register_cron "PORTFOLIO" \
+            --name "portfolio-research" \
+            --every "24h" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            $TOKEN_FLAG \
+            --message "Read /root/clawd/portfolio-companies.md for the full HVF portfolio company list. Pick ~10 companies that haven't been researched recently (check warm-memory/portfolio/ for last-researched dates). Prioritize [최우선] and [긴급] companies. For each company, search the web for recent news, funding, product updates, partnerships, leadership changes, and plans. Save findings per-company to warm-memory/portfolio/COMPANY-SLUG.md via: node /root/clawd/skills/self-modify/scripts/modify.js --file warm-memory/portfolio/COMPANY-SLUG.md --content FINDINGS --keywords COMPANY,portfolio --reason portfolio-research. Include last-researched date at top of each file. After all files are written, commit and push to GitHub: cd /root/clawd/clawd-memory && git add moltworker/warm-memory/portfolio/ && git commit -m 'moltbot: portfolio research update' && git push"
+        fi
+      fi
+
+      # 7. kimchi-premium-monitor (every 5m, no-deliver, ±5% alert only)
+      KIMCHI_SCRIPT="/root/clawd/clawd-memory/scripts/kimchi-premium.js"
+      if [ -f "$KIMCHI_SCRIPT" ]; then
+        if ! openclaw cron list $TOKEN_FLAG 2>/dev/null | grep -qF "kimchi-premium-monitor "; then
+          register_cron "KIMCHI" \
+            --name "kimchi-premium-monitor" \
+            --every "5m" \
+            --session isolated \
+            --model "$ALLOWED_MODEL" \
+            --thinking off \
+            --no-deliver \
+            $TOKEN_FLAG \
+            --message "Run: node /root/clawd/clawd-memory/scripts/kimchi-premium.js — Check the output. If the kimchi premium exceeds ±5%, alert via Telegram. Otherwise, silently log the result. Do NOT send a message unless the threshold is breached."
+        fi
+      fi
+
+      echo "[CRON] Cron restoration complete"
+      break
+    fi
+  done
+) &
+echo "Cron restore scheduled in background"
+
+# ============================================================
+# CUSTOM: Auto-approve device pairing (background)
+# ============================================================
+(
+  for i in $(seq 1 60); do
+    sleep 3
+    if port_open 127.0.0.1 18789; then
+      echo "[PAIRING] Gateway ready, starting auto-approve loop"
+      break
+    fi
+  done
+
+  while true; do
+    devices_json=$(openclaw devices list --json --token "$CLAWDBOT_GATEWAY_TOKEN" --url ws://127.0.0.1:18789 --timeout 5000 2>/dev/null || true)
+
+    if [ -n "$devices_json" ]; then
+      pending_ids=$(echo "$devices_json" | node -e "
+        let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+          try{const j=JSON.parse(d);const p=j.pending||j.pendingRequests||j.requests||[];
+          if(Array.isArray(p)){p.forEach(r=>{const id=r.requestId||r.id||'';if(id)console.log(id);})}
+          }catch(e){}
+        });" 2>/dev/null)
+
+      if [ -n "$pending_ids" ]; then
+        echo "$pending_ids" | while IFS= read -r reqId; do
+          if [ -n "$reqId" ]; then
+            echo "[PAIRING] Auto-approving device pairing request: $reqId"
+            openclaw devices approve "$reqId" --token "$CLAWDBOT_GATEWAY_TOKEN" --url ws://127.0.0.1:18789 2>&1 || echo "[PAIRING] Approve failed for $reqId"
+          fi
+        done
+      fi
+    fi
+
+    sleep 10
+  done
+) &
+echo "[PAIRING] Auto-approve loop started in background"
+
+# ============================================================
+# CUSTOM: Agent message bus watcher (background, every 30s)
+# ============================================================
+MESSAGE_WATCHER="/root/clawd/moltworker/scripts/agent-comms/watch-messages.js"
+if [ -f "$MESSAGE_WATCHER" ]; then
+  (
+    for i in $(seq 1 60); do
+      sleep 3
+      if port_open 127.0.0.1 18789; then
+        echo "[AGENT-COMMS] Gateway ready, starting message watcher loop"
+        break
+      fi
+    done
+
+    while true; do
+      node "$MESSAGE_WATCHER" 2>&1 | head -20 || echo "[AGENT-COMMS] Watcher failed"
+      sleep 30
+    done
+  ) &
+  echo "[AGENT-COMMS] Message watcher started in background (every 30s)"
+fi
+
+# ============================================================
+# CUSTOM: Calendar sync (background, every 6h)
+# ============================================================
+if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_REFRESH_TOKEN" ]; then
+  (
+    while true; do
+      echo "[CALENDAR-SYNC] Syncing today's calendar events..."
+      node /root/clawd/skills/google-calendar/scripts/sync-today.js --days 1 2>&1 || echo "[CALENDAR-SYNC] sync failed"
+      sleep 21600  # 6 hours
+    done
+  ) &
+  echo "[CALENDAR-SYNC] Background sync started (every 6h)"
+fi
+
+# ============================================================
+# CUSTOM: Gmail inbox sync (background, every 6h — syncs all available accounts)
+# ============================================================
+if [ -n "$GOOGLE_GMAIL_CLIENT_ID" ] && { [ -n "$GOOGLE_GMAIL_REFRESH_TOKEN" ] || [ -n "$GOOGLE_GMAIL_PERSONAL_REFRESH_TOKEN" ]; }; then
+  (
+    while true; do
+      echo "[GMAIL-SYNC] Syncing all available inboxes..."
+      node /root/clawd/skills/gmail/scripts/sync-inbox.js --hours 24 2>&1 || echo "[GMAIL-SYNC] sync failed"
+      sleep 21600  # 6 hours
+    done
+  ) &
+  echo "[GMAIL-SYNC] Background sync started (every 6h)"
+fi
+
+# ============================================================
+# START GATEWAY (with restart loop for crash recovery)
 # ============================================================
 echo "Starting OpenClaw Gateway..."
-echo "Gateway will be available on port 18789"
 
-rm -f /tmp/openclaw-gateway.lock 2>/dev/null || true
-rm -f "$CONFIG_DIR/gateway.lock" 2>/dev/null || true
+set +e
 
-echo "Dev mode: ${OPENCLAW_DEV_MODE:-false}"
+MAX_RETRIES=10
+RETRY_COUNT=0
+BACKOFF=5
+MAX_BACKOFF=120
+SUCCESS_THRESHOLD=60
 
-if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
-    echo "Starting gateway with token auth..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan --token "$OPENCLAW_GATEWAY_TOKEN"
-else
-    echo "Starting gateway with device pairing (no token)..."
-    exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
-fi
+while true; do
+  GATEWAY_START=$(date +%s)
+  echo "[GATEWAY] Starting openclaw gateway (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+
+  if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
+    openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan --token "$OPENCLAW_GATEWAY_TOKEN"
+  else
+    openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+  fi
+  EXIT_CODE=$?
+
+  GATEWAY_END=$(date +%s)
+  RUNTIME=$((GATEWAY_END - GATEWAY_START))
+
+  echo "[GATEWAY] Gateway exited with code $EXIT_CODE after ${RUNTIME}s"
+
+  if [ "$RUNTIME" -ge "$SUCCESS_THRESHOLD" ]; then
+    echo "[GATEWAY] Ran ${RUNTIME}s (>= ${SUCCESS_THRESHOLD}s), resetting retry counter"
+    RETRY_COUNT=0
+    BACKOFF=5
+  else
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ "$RETRY_COUNT" -ge "$MAX_RETRIES" ]; then
+      echo "[GATEWAY] Max retries ($MAX_RETRIES) reached. Giving up."
+      break
+    fi
+  fi
+
+  echo "[GATEWAY] Restarting in ${BACKOFF}s... (retry $RETRY_COUNT/$MAX_RETRIES)"
+  sleep "$BACKOFF"
+
+  BACKOFF=$((BACKOFF * 2))
+  if [ "$BACKOFF" -gt "$MAX_BACKOFF" ]; then
+    BACKOFF=$MAX_BACKOFF
+  fi
+done
+
+echo "[GATEWAY] Gateway restart loop ended. Container will exit."
