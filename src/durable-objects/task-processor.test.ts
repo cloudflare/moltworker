@@ -54,6 +54,9 @@ vi.mock('../openrouter/models', () => ({
   getTemperature: vi.fn(() => 0.7),
   isAnthropicModel: vi.fn(() => false),
   modelSupportsTools: vi.fn(() => true),
+  registerDynamicModels: vi.fn(),
+  blockModels: vi.fn(),
+  getStallModelRecs: vi.fn(() => '/deep, /grok, or /sonnet'),
 }));
 
 vi.mock('../openrouter/prompt-cache', () => ({

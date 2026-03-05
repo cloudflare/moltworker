@@ -52,6 +52,9 @@ export interface ModelInfo {
   reasoning?: ReasoningCapability; // Reasoning control capability
   maxContext?: number;           // Context window in tokens
   fixedTemperature?: number;    // Model requires this exact temperature (e.g. Kimi K2.5 = 1)
+  // Verified benchmark data (0-100 scale, higher = better)
+  intelligenceIndex?: number;   // Overall intelligence rating (e.g. Artificial Analysis index)
+  codingScore?: number;         // Coding benchmark score (SWE-Bench, HumanEval composite)
 }
 
 /**
@@ -317,6 +320,8 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     parallelCalls: true,
     maxContext: 262144,
+    intelligenceIndex: 38,
+    codingScore: 62,
   },
   glm47: {
     id: 'z-ai/glm-4.7',
@@ -375,6 +380,8 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     reasoning: 'configurable',
     maxContext: 2000000,
+    intelligenceIndex: 46,
+    codingScore: 68,
   },
   grokcode: {
     id: 'x-ai/grok-code-fast-1',
@@ -410,6 +417,8 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     structuredOutput: true,
     maxContext: 262144,
+    intelligenceIndex: 35,
+    codingScore: 55,
   },
   deep: {
     id: 'deepseek/deepseek-v3.2',
@@ -423,6 +432,8 @@ export const MODELS: Record<string, ModelInfo> = {
     structuredOutput: true,
     reasoning: 'configurable',
     maxContext: 131072,
+    intelligenceIndex: 45,
+    codingScore: 72,
   },
   deepreason: {
     id: 'deepseek/deepseek-r1-0528',
@@ -444,6 +455,8 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     structuredOutput: true,
     maxContext: 131072,
+    intelligenceIndex: 36,
+    codingScore: 50,
   },
   kimi: {
     id: 'moonshotai/kimi-k2.5',
@@ -470,6 +483,8 @@ export const MODELS: Record<string, ModelInfo> = {
     structuredOutput: true,
     reasoning: 'configurable',
     maxContext: 1048576,
+    intelligenceIndex: 42,
+    codingScore: 65,
   },
   haiku: {
     id: 'anthropic/claude-haiku-4.5',
@@ -482,6 +497,8 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     parallelCalls: true,
     maxContext: 200000,
+    intelligenceIndex: 40,
+    codingScore: 73,
   },
   geminipro: {
     id: 'google/gemini-3-pro-preview',
@@ -496,6 +513,8 @@ export const MODELS: Record<string, ModelInfo> = {
     structuredOutput: true,
     reasoning: 'configurable',
     maxContext: 1048576,
+    intelligenceIndex: 48,
+    codingScore: 72,
   },
   gpt: {
     id: 'openai/gpt-4o',
@@ -521,6 +540,8 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     parallelCalls: true,
     maxContext: 200000,
+    intelligenceIndex: 48,
+    codingScore: 79,
   },
   opus45: {
     id: 'anthropic/claude-opus-4.5',
@@ -533,6 +554,8 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     parallelCalls: true,
     maxContext: 200000,
+    intelligenceIndex: 50,
+    codingScore: 81,
   },
   opus: {
     id: 'anthropic/claude-opus-4.6',
@@ -545,6 +568,8 @@ export const MODELS: Record<string, ModelInfo> = {
     supportsTools: true,
     parallelCalls: true,
     maxContext: 200000,
+    intelligenceIndex: 53,
+    codingScore: 82,
   },
 
   // === DIRECT API MODELS (bypass OpenRouter) ===
@@ -599,6 +624,8 @@ export const MODELS: Record<string, ModelInfo> = {
     parallelCalls: true,
     maxContext: 262144,
     fixedTemperature: 1,
+    intelligenceIndex: 42,
+    codingScore: 77,
   },
 };
 
@@ -1362,6 +1389,8 @@ export interface OrchestraModelRec {
   name: string;
   cost: string;
   why: string;
+  intelligenceIndex?: number;
+  codingScore?: number;
 }
 
 export function getOrchestraRecommendations(): {
@@ -1377,18 +1406,38 @@ export function getOrchestraRecommendations(): {
     let score = 0;
     const lower = (m.name + ' ' + m.specialty + ' ' + m.score).toLowerCase();
 
-    // Strong positive: agentic / multi-file / coding specialty
-    if (/agentic/i.test(lower)) score += 30;
-    if (/multi-?file/i.test(lower)) score += 25;
-    if (/coding/i.test(lower)) score += 15;
-    if (/swe-?bench/i.test(lower)) score += 10;
+    // Verified benchmark data gets strong weight (most reliable signal)
+    if (m.intelligenceIndex != null) {
+      // Scale: 0-53 range → up to 30 points for IQ >= 40
+      if (m.intelligenceIndex >= 45) score += 30;
+      else if (m.intelligenceIndex >= 40) score += 20;
+      else if (m.intelligenceIndex >= 35) score += 10;
+      // No bonus below 35
+    }
+    if (m.codingScore != null) {
+      // Scale: 0-82 range → up to 25 points for coding >= 70
+      if (m.codingScore >= 75) score += 25;
+      else if (m.codingScore >= 65) score += 15;
+      else if (m.codingScore >= 50) score += 5;
+      // No bonus below 50
+    }
+
+    // Unverified models (no benchmark data) get a penalty to avoid over-ranking
+    if (m.intelligenceIndex == null && m.codingScore == null) {
+      score -= 10;
+    }
+
+    // Keyword-based signals (secondary to benchmarks)
+    if (/agentic/i.test(lower)) score += 15;
+    if (/multi-?file/i.test(lower)) score += 10;
+    if (/coding/i.test(lower)) score += 8;
 
     // Positive: large context (orchestra tasks can be long)
-    if ((m.maxContext || 0) >= 200000) score += 10;
-    if ((m.maxContext || 0) >= 128000) score += 5;
+    if ((m.maxContext || 0) >= 200000) score += 5;
+    if ((m.maxContext || 0) >= 128000) score += 3;
 
     // Positive: dense models (all params active = better instruction following)
-    if (/dense/i.test(lower)) score += 15;
+    if (/dense/i.test(lower)) score += 10;
 
     // Negative: small active parameter models (weak instruction following)
     if (/\b(mini|small|flash|lite|nano)\b/i.test(m.name)) score -= 20;
@@ -1396,24 +1445,25 @@ export function getOrchestraRecommendations(): {
       const activeMatch = m.score.match(/(\d+)B active/i);
       if (activeMatch) {
         const activeB = parseInt(activeMatch[1], 10);
-        if (activeB < 20) score -= 15; // Very small active params
-        if (activeB >= 40) score += 10; // Large active params
+        if (activeB < 20) score -= 15;
+        if (activeB >= 40) score += 5;
       }
     }
 
-    // Positive: high SWE-Bench scores
-    const sweMatch = m.score.match(/(\d+(?:\.\d+)?)%\s*SWE/i);
-    if (sweMatch) {
-      const sweScore = parseFloat(sweMatch[1]);
-      if (sweScore >= 70) score += 15;
-      if (sweScore >= 60) score += 5;
-    }
-
     // Positive: direct API models (faster, more reliable, no OpenRouter overhead)
-    if (m.provider && m.provider !== 'openrouter') score += 10;
+    if (m.provider && m.provider !== 'openrouter') score += 5;
 
     // Positive: parallel tool calls (orchestra uses many tools)
-    if (m.parallelCalls) score += 5;
+    if (m.parallelCalls) score += 3;
+
+    // Tool-calling reliability: models from families with proven structured JSON tool output.
+    // Orchestra requires github_create_pr with complex JSON — models that struggle with
+    // structured tool arguments waste all their iterations on formatting errors.
+    const modelId = m.id.toLowerCase();
+    if (modelId.includes('anthropic') || modelId.includes('claude')) score += 12;
+    if (modelId.includes('openai') || modelId.includes('gpt')) score += 10;
+    if (modelId.includes('qwen') || modelId.includes('alibaba')) score += 8;
+    if (modelId.includes('deepseek')) score += 6;
 
     return { model: m, score };
   });
@@ -1428,12 +1478,14 @@ export function getOrchestraRecommendations(): {
     .map(s => s.model.alias);
 
   const formatRec = (s: { model: ModelInfo; score: number }): OrchestraModelRec => {
-    const specialty = s.model.specialty.replace(/^(Free|Paid)\s+/i, '');
+    const specialty = s.model.specialty.replace(/^(Free|Paid)\s+/i, '').replace(/^Direct \w+ API - /i, '');
     return {
       alias: s.model.alias,
       name: s.model.name,
       cost: s.model.cost,
       why: specialty,
+      intelligenceIndex: s.model.intelligenceIndex,
+      codingScore: s.model.codingScore,
     };
   };
 
@@ -1453,17 +1505,24 @@ export function formatOrchestraModelRecs(): string {
 
   const lines: string[] = ['━━━ Recommended Models ━━━'];
 
+  const benchmarkTag = (r: OrchestraModelRec) => {
+    if (r.intelligenceIndex != null && r.codingScore != null) {
+      return ` (IQ:${r.intelligenceIndex}, Code:${r.codingScore})`;
+    }
+    return '';
+  };
+
   if (recs.free.length > 0) {
     lines.push('Free:');
     for (const r of recs.free) {
-      lines.push(`  /${r.alias} — ${r.why}`);
+      lines.push(`  /${r.alias} — ${r.why}${benchmarkTag(r)}`);
     }
   }
 
   if (recs.paid.length > 0) {
     lines.push('Paid (best value):');
     for (const r of recs.paid) {
-      lines.push(`  /${r.alias} (${r.cost}) — ${r.why}`);
+      lines.push(`  /${r.alias} (${r.cost}) — ${r.why}${benchmarkTag(r)}`);
     }
   }
 
@@ -1474,6 +1533,79 @@ export function formatOrchestraModelRecs(): string {
   lines.push('Switch model before /orch run: just type /<model>');
 
   return lines.join('\n');
+}
+
+/**
+ * Classify task complexity from task title/description.
+ * Returns 'simple' | 'moderate' | 'complex'.
+ */
+export function classifyOrchestraTaskComplexity(taskTitle: string): 'simple' | 'moderate' | 'complex' {
+  const lower = taskTitle.toLowerCase();
+  // Complex: refactoring, multi-file, architecture, split, migration, rewrite
+  if (/\b(refactor|split|migrat|rewrite|architect|redesign|overhaul|multi-?file|reorganiz)\b/.test(lower)) return 'complex';
+  if (/\b(implement|build|create|integrate|system|engine|pipeline|framework)\b/.test(lower)) return 'moderate';
+  // Simple: fix, update, rename, add, docs, lint, format
+  if (/\b(fix|update|rename|typo|doc|lint|format|bump|remove|delete|clean)\b/.test(lower)) return 'simple';
+  return 'moderate';
+}
+
+/**
+ * Get model recommendations for a specific task complexity level.
+ * For complex tasks, only models with verified benchmarks (codingScore >= 60) are recommended.
+ */
+export function getTaskModelRecommendations(complexity: 'simple' | 'moderate' | 'complex'): {
+  models: OrchestraModelRec[];
+  complexityLabel: string;
+  emoji: string;
+} {
+  const recs = getOrchestraRecommendations();
+  const allPaid = recs.paid;
+
+  if (complexity === 'complex') {
+    // Only verified high-benchmark models
+    const all = getAllModels();
+    const toolModels = Object.values(all).filter(m => m.supportsTools && !m.isImageGen && !m.isFree);
+    const verified = toolModels
+      .filter(m => m.codingScore != null && m.codingScore >= 60)
+      .sort((a, b) => (b.codingScore || 0) - (a.codingScore || 0))
+      .slice(0, 4)
+      .map(m => ({
+        alias: m.alias,
+        name: m.name,
+        cost: m.cost,
+        why: m.specialty.replace(/^(Free|Paid)\s+/i, '').replace(/^Direct \w+ API - /i, ''),
+        intelligenceIndex: m.intelligenceIndex,
+        codingScore: m.codingScore,
+      }));
+    return { models: verified, complexityLabel: 'Complex task', emoji: '🔴' };
+  }
+
+  if (complexity === 'simple') {
+    // Cheap models are fine
+    return { models: allPaid.slice(0, 3), complexityLabel: 'Simple task', emoji: '🟢' };
+  }
+
+  // Moderate — prefer verified but include good value picks
+  return { models: allPaid.slice(0, 4), complexityLabel: 'Moderate task', emoji: '🟡' };
+}
+
+/**
+ * Get a short dynamic model recommendation string for stall/failure messages.
+ * Returns something like "Try \/deep, \/grok, or \/sonnet" using the top-scored models.
+ */
+export function getStallModelRecs(): string {
+  const recs = getOrchestraRecommendations();
+  // Pick top paid models with best benchmark data, fallback to top recs
+  const candidates = recs.paid
+    .filter(r => r.codingScore != null && r.codingScore >= 60)
+    .slice(0, 3);
+  if (candidates.length >= 2) {
+    const aliases = candidates.map(r => `/${r.alias}`);
+    return aliases.slice(0, -1).join(', ') + ', or ' + aliases[aliases.length - 1];
+  }
+  // Fallback: just use top 3 paid recs
+  const top = recs.paid.slice(0, 3).map(r => `/${r.alias}`);
+  return top.slice(0, -1).join(', ') + ', or ' + top[top.length - 1];
 }
 
 /**

@@ -7,7 +7,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { createOpenRouterClient, parseSSEStream, type ChatMessage, type ResponseFormat } from '../openrouter/client';
 import { executeTool, AVAILABLE_TOOLS, githubReadFile, type ToolContext, type ToolCall, TOOLS_WITHOUT_BROWSER, getToolsForPhase, modelSupportsTools } from '../openrouter/tools';
-import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, isAnthropicModel, registerDynamicModels, blockModels, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
+import { getModelId, getModel, getProvider, getProviderConfig, getReasoningParam, detectReasoningLevel, getFreeToolModels, categorizeModel, clampMaxTokens, getTemperature, isAnthropicModel, registerDynamicModels, blockModels, getStallModelRecs, type Provider, type ReasoningLevel, type ModelCategory } from '../openrouter/models';
 import { recordUsage, formatCostFooter, type TokenUsage } from '../openrouter/costs';
 import { injectCacheControl } from '../openrouter/prompt-cache';
 import { markdownToTelegramHtml } from '../utils/telegram-format';
@@ -714,7 +714,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             await this.sendTelegramMessageWithButtons(
               task.telegramToken,
               task.chatId,
-              `🛑 Task stalled after ${noProgressResumes} resumes with no progress (${task.iterations} iter, ${toolCountNow} tools).\n\n💡 Try a more capable model: /deep, /grok, or /sonnet\n\nProgress saved.`,
+              `🛑 Task stalled after ${noProgressResumes} resumes with no progress (${task.iterations} iter, ${toolCountNow} tools).\n\n💡 Try a more capable model: ${getStallModelRecs()}\n\nProgress saved.`,
               [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
             );
           }
@@ -2195,7 +2195,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             if (consecutiveInvalidArgsIterations >= MAX_INVALID_ARGS_BAIL) {
               console.log(`[TaskProcessor] Bailing out: ${consecutiveInvalidArgsIterations} consecutive iterations with all-invalid tool call args`);
               task.status = 'failed';
-              task.error = `Model cannot format tool call arguments correctly (${consecutiveInvalidArgsIterations} consecutive failures). Try a more capable model like /flash, /sonnet, or /deep.`;
+              task.error = `Model cannot format tool call arguments correctly (${consecutiveInvalidArgsIterations} consecutive failures). Try a more capable model like ${getStallModelRecs()}.`;
               task.result = `Tool calling failed: the model produced invalid JSON arguments for ${consecutiveInvalidArgsIterations} consecutive iterations. No tools were successfully executed.`;
               await this.doState.storage.put('task', task);
 
@@ -2203,7 +2203,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
                 await this.sendTelegramMessageWithButtons(
                   task.telegramToken,
                   task.chatId,
-                  `❌ Task failed: model can't format tool calls.\n\n${task.modelAlias} produced invalid JSON arguments ${consecutiveInvalidArgsIterations} times in a row.\n\n💡 Try a more capable model: /flash, /sonnet, or /deep`,
+                  `❌ Task failed: model can't format tool calls.\n\n${task.modelAlias} produced invalid JSON arguments ${consecutiveInvalidArgsIterations} times in a row.\n\n💡 Try a more capable model: ${getStallModelRecs()}`,
                   [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
                 );
               }
@@ -2371,7 +2371,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
           }
           await this.sendTelegramMessageWithButtons(
             request.telegramToken, request.chatId,
-            `🛑 Model stalled after ${task.iterations} iterations without using tools.\n\n💡 Try a more capable model: /deep, /grok, or /sonnet`,
+            `🛑 Model stalled after ${task.iterations} iterations without using tools.\n\n💡 Try a more capable model: ${getStallModelRecs()}`,
             [[{ text: '🔄 Resume', callback_data: 'resume:task' }]]
           );
           return;
@@ -2534,7 +2534,7 @@ export class TaskProcessor extends DurableObject<TaskProcessorEnv> {
             await sendProgressUpdate(true);
 
             // Build focused review context and call reviewer model
-            const reviewMessages = buildReviewMessages(conversationMessages, task.workPhaseContent, taskCategory);
+            const reviewMessages = buildReviewMessages(conversationMessages, task.workPhaseContent, taskCategory, isOrchestraRun);
             const reviewContent = await this.executeMultiAgentReview(
               reviewerAlias, reviewMessages, request.openrouterKey, task,
             );

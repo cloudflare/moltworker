@@ -21,6 +21,7 @@ import {
   formatOrchestraHistory,
   fetchRoadmapFromGitHub,
   formatRoadmapStatus,
+  parseRoadmapPhases,
   findMatchingTasks,
   resetRoadmapTasks,
   createRoadmapResetPR,
@@ -57,6 +58,8 @@ import {
   detectToolIntent,
   getFreeToolModels,
   formatOrchestraModelRecs,
+  classifyOrchestraTaskComplexity,
+  getTaskModelRecommendations,
   categorizeModel,
   getValueTier,
   resolveTaskModel,
@@ -1459,6 +1462,68 @@ export class TelegramHandler {
       return;
     }
 
+    // /orch advise — analyze next task and recommend best model
+    if (sub === 'advise') {
+      const lockedRepo = await this.storage.getOrchestraRepo(userId);
+      if (!lockedRepo) {
+        await this.bot.sendMessage(chatId, '❌ No default repo set.\n\nFirst run: /orch set owner/repo');
+        return;
+      }
+      if (!this.githubToken) {
+        await this.bot.sendMessage(chatId, '❌ GitHub token not configured.');
+        return;
+      }
+      try {
+        await this.bot.sendChatAction(chatId, 'typing');
+        const [owner, repoName] = lockedRepo.split('/');
+        const { content } = await fetchRoadmapFromGitHub(owner, repoName, this.githubToken);
+        const phases = parseRoadmapPhases(content);
+
+        // Find next unchecked task
+        let nextTask: { title: string; phase: string } | null = null;
+        for (const phase of phases) {
+          const pending = phase.tasks.find(t => !t.done);
+          if (pending) {
+            nextTask = { title: pending.title, phase: phase.name };
+            break;
+          }
+        }
+
+        if (!nextTask) {
+          await this.bot.sendMessage(chatId, '✅ All roadmap tasks are complete! Nothing to advise on.');
+          return;
+        }
+
+        const complexity = classifyOrchestraTaskComplexity(nextTask.title);
+        const { models, complexityLabel, emoji } = getTaskModelRecommendations(complexity);
+
+        const benchmarkTag = (r: { intelligenceIndex?: number; codingScore?: number }) => {
+          if (r.intelligenceIndex != null && r.codingScore != null) {
+            return ` (IQ:${r.intelligenceIndex}, Code:${r.codingScore})`;
+          }
+          return '';
+        };
+
+        const modelLines = models.map(r =>
+          `  /${r.alias} — ${r.why}${benchmarkTag(r)}`
+        ).join('\n');
+
+        await this.bot.sendMessage(
+          chatId,
+          `🔍 Next task: ${nextTask.title}\n` +
+          `📁 Phase: ${nextTask.phase}\n\n` +
+          `${emoji} ${complexityLabel} — use a strong coding model:\n` +
+          modelLines
+        );
+      } catch (error) {
+        await this.bot.sendMessage(
+          chatId,
+          `❌ ${error instanceof Error ? error.message : 'Failed to analyze roadmap'}`
+        );
+      }
+      return;
+    }
+
     // /orch roadmap [owner/repo] — fetch and display ROADMAP.md status
     if (sub === 'roadmap' || sub === 'status') {
       const maybeRepo = args[1];
@@ -1700,34 +1765,43 @@ export class TelegramHandler {
 
     const modelRecs = formatOrchestraModelRecs();
 
-    await this.bot.sendMessage(
-      chatId,
+    const helpText =
       '🎼 Orchestra Mode — AI-Driven Project Execution\n\n' +
       repoLine +
       '━━━ Quick Start ━━━\n' +
       '/orch set owner/repo — Lock your repo\n' +
       '/orch init <description> — Create roadmap + work log\n' +
       '/orch next — Execute next roadmap task\n\n' +
-      '━━━ Full Commands ━━━\n' +
-      '/orch init owner/repo <desc> — Create roadmap (explicit repo)\n' +
-      '/orch run owner/repo [task] — Run task (explicit repo)\n' +
-      '/orch next [task] — Run next task (locked repo)\n' +
-      '/orch set owner/repo — Lock default repo\n' +
-      '/orch unset — Clear locked repo\n' +
-      '/orch history — View past tasks\n' +
+      '━━━ Commands ━━━\n' +
+      '/orch advise — Analyze next task & pick best model\n' +
+      '/orch next [task] — Run next (or specific) task\n' +
       '/orch roadmap — View roadmap status\n' +
-      '/orch reset <task> — Uncheck task(s) for re-run\n' +
+      '/orch history — View past tasks\n' +
+      '/orch reset <task> — Uncheck for re-run\n' +
       '/orch redo <task> — Re-implement a failed task\n\n' +
       modelRecs + '\n\n' +
       '━━━ Workflow ━━━\n' +
       '1. /orch set PetrAnto/myapp\n' +
       '2. /orch init Build a user auth system\n' +
-      '3. /orch next  (repeat until done)\n\n' +
-      '━━━ Fixing Mistakes ━━━\n' +
-      '/orch redo <task> — Bot re-does a bad task\n' +
-      '/orch reset <task> — Uncheck, then /orch next\n' +
-      '/orch reset Phase 2 — Reset an entire phase'
-    );
+      '3. /orch advise → pick best model\n' +
+      '4. /orch next (repeat until done)';
+
+    // Show inline buttons when a repo is locked
+    if (lockedRepo) {
+      const buttons = [
+        [
+          { text: '▶️ Next Task', callback_data: 'orch:next' },
+          { text: '🔍 Advise', callback_data: 'orch:advise' },
+        ],
+        [
+          { text: '📋 Roadmap', callback_data: 'orch:roadmap' },
+          { text: '📜 History', callback_data: 'orch:history' },
+        ],
+      ];
+      await this.bot.sendMessageWithButtons(chatId, helpText, buttons);
+    } else {
+      await this.bot.sendMessage(chatId, helpText);
+    }
   }
 
   /**
@@ -2820,6 +2894,27 @@ export class TelegramHandler {
       case 'sa':
         // Sync-all quick-use: sa:<alias> — switch active model
         await this.handleSyncAllUseCallback(query, parts, userId, chatId);
+        break;
+
+      case 'orch':
+        // Orchestra quick-action buttons: orch:next, orch:advise, orch:roadmap, orch:history
+        if (query.message) {
+          await this.bot.editMessageReplyMarkup(chatId, query.message.message_id, null);
+        }
+        switch (payload) {
+          case 'next':
+            await this.handleOrchestraCommand(query.message as TelegramMessage, chatId, userId, ['next']);
+            break;
+          case 'advise':
+            await this.handleOrchestraCommand(query.message as TelegramMessage, chatId, userId, ['advise']);
+            break;
+          case 'roadmap':
+            await this.handleOrchestraCommand(query.message as TelegramMessage, chatId, userId, ['roadmap']);
+            break;
+          case 'history':
+            await this.handleOrchestraCommand(query.message as TelegramMessage, chatId, userId, ['history']);
+            break;
+        }
         break;
 
       default:

@@ -401,7 +401,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = [
           },
           changes: {
             type: 'string',
-            description: 'JSON array of file changes: [{"path":"file.ts","content":"...full file content...","action":"create|update|delete"}]. For "update", content must be the COMPLETE new file content (read the file first with github_read_file, modify it, then provide the full result). For "create", provide the full new file content. For "delete", content is not needed.',
+            description: 'JSON array of file changes: [{"path":"file.ts","content":"...full file content...","action":"create|update|delete"}]. For "update", content must be the COMPLETE new file content (read the file first with github_read_file, modify it, then provide the full result). For "create", provide the full new file content. For "delete", content is not needed. The value can also be passed as a native array instead of a JSON string.',
           },
           body: {
             type: 'string',
@@ -1011,7 +1011,7 @@ async function githubCreatePr(
   repo: string,
   title: string,
   branch: string,
-  changesJson: string,
+  changesInput: string | FileChange[],
   base?: string,
   body?: string,
   token?: string
@@ -1035,12 +1035,18 @@ async function githubCreatePr(
   const fullBranch = branch.startsWith('bot/') ? branch : `bot/${branch}`;
   const baseBranch = base || 'main';
 
-  // Parse changes
+  // Parse changes — accept both JSON string and native array
   let changes: FileChange[];
-  try {
-    changes = JSON.parse(changesJson);
-  } catch {
-    throw new Error('Invalid changes JSON. Expected: [{"path":"file.ts","content":"...","action":"create|update|delete"}]');
+  if (Array.isArray(changesInput)) {
+    changes = changesInput;
+  } else if (typeof changesInput === 'string') {
+    try {
+      changes = JSON.parse(changesInput);
+    } catch {
+      throw new Error('Invalid changes JSON. Expected: [{"path":"file.ts","content":"...","action":"create|update|delete"}]');
+    }
+  } else {
+    throw new Error('Changes must be a JSON string or an array of file changes.');
   }
 
   if (!Array.isArray(changes) || changes.length === 0) {

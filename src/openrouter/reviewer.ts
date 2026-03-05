@@ -118,6 +118,16 @@ const GENERAL_REVIEW_INSTRUCTIONS =
   '2. Are factual claims supported by the tool results provided?\n' +
   '3. Is anything missing or misleading?';
 
+const ORCHESTRA_REVIEW_INSTRUCTIONS =
+  'This is an ORCHESTRA task — the assistant was asked to implement a task and create a GitHub PR.\n\n' +
+  'Focus your review on:\n' +
+  '1. Did github_create_pr SUCCEED? Look at the tool results — if it returned "PR NOT CREATED" or any error, the PR does NOT exist. Do NOT approve if the PR was not created.\n' +
+  '2. Does the answer contain an ORCHESTRA_RESULT: block with a real PR URL (https://github.com/...)? If the URL is missing or is a placeholder, REJECT.\n' +
+  '3. Cross-check: does the PR URL in the answer match a successful github_create_pr result in the tool summary? If the tool summary shows failure but the answer claims success, REJECT.\n' +
+  '4. Were ROADMAP.md and WORK_LOG.md included in the PR changes?\n' +
+  '5. If any tool calls failed, does the answer acknowledge the failure honestly?\n\n' +
+  'CRITICAL: If there is NO evidence of a successful github_create_pr call in the tool results, you MUST reject and revise the answer to state that the PR was NOT created.';
+
 /**
  * Extract a concise summary of tool usage from the conversation.
  * Includes tool name, key args, and a truncated result snippet.
@@ -136,7 +146,11 @@ export function summarizeToolUsage(messages: readonly ChatMessage[]): string {
       const call = toolCallMap.get(msg.tool_call_id);
       if (call) {
         const result = typeof msg.content === 'string' ? msg.content : '';
-        const truncResult = result.length > 300 ? result.slice(0, 297) + '...' : result;
+        // Give mutation tools (github_create_pr, sandbox_exec) more space — their
+        // success/failure messages are critical for review and often exceed 300 chars
+        const isMutation = call.name === 'github_create_pr' || call.name === 'sandbox_exec';
+        const maxLen = isMutation ? 800 : 300;
+        const truncResult = result.length > maxLen ? result.slice(0, maxLen - 3) + '...' : result;
         // Parse args to show key details
         let argSummary = '';
         try {
@@ -196,12 +210,15 @@ export function buildReviewMessages(
   conversationMessages: readonly ChatMessage[],
   workPhaseContent: string,
   taskCategory: 'coding' | 'reasoning' | 'general',
+  isOrchestra?: boolean,
 ): ChatMessage[] {
   const userQuestion = extractUserQuestion(conversationMessages);
   const toolSummary = summarizeToolUsage(conversationMessages);
-  const reviewInstructions = taskCategory === 'coding'
-    ? CODING_REVIEW_INSTRUCTIONS
-    : GENERAL_REVIEW_INSTRUCTIONS;
+  const reviewInstructions = isOrchestra
+    ? ORCHESTRA_REVIEW_INSTRUCTIONS
+    : taskCategory === 'coding'
+      ? CODING_REVIEW_INSTRUCTIONS
+      : GENERAL_REVIEW_INSTRUCTIONS;
 
   const systemPrompt =
     'You are a review agent. Your job is to verify the quality and accuracy of an AI assistant\'s work.\n\n' +
