@@ -136,6 +136,7 @@ app.use('*', async (c, next) => {
 app.use('*', async (c, next) => {
   const options = buildSandboxOptions(c.env);
   const sandbox = getSandbox(c.env.Sandbox, 'moltbot', options);
+  await sandbox.start();
   c.set('sandbox', sandbox);
   await next();
 });
