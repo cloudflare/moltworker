@@ -217,6 +217,24 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
     } else {
         console.warn('CF_AI_GATEWAY_MODEL set but missing required config (account ID, gateway ID, or API key)');
     }
+} else {
+    // No AI Gateway model override — clean up any stale cf-ai-gw- providers
+    // restored from R2 backup and reset default model to built-in anthropic.
+    if (config.models && config.models.providers) {
+        for (const key of Object.keys(config.models.providers)) {
+            if (key.startsWith('cf-ai-gw-')) {
+                delete config.models.providers[key];
+                console.log('Removed stale AI Gateway provider: ' + key);
+            }
+        }
+    }
+    if (config.agents && config.agents.defaults && config.agents.defaults.model) {
+        const primary = config.agents.defaults.model.primary || '';
+        if (primary.startsWith('cf-ai-gw-')) {
+            delete config.agents.defaults.model;
+            console.log('Reset default model (was using removed AI Gateway provider: ' + primary + ')');
+        }
+    }
 }
 
 // Telegram configuration
