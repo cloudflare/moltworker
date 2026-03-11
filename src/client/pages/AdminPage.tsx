@@ -4,6 +4,7 @@ import {
   approveDevice,
   approveAllDevices,
   restartGateway,
+  getGatewayStatus,
   getStorageStatus,
   triggerSync,
   AuthError,
@@ -11,6 +12,7 @@ import {
   type PairedDevice,
   type DeviceListResponse,
   type StorageStatusResponse,
+  type GatewayStatusResponse,
 } from '../api';
 import './AdminPage.css';
 
@@ -49,6 +51,7 @@ export default function AdminPage() {
   const [pending, setPending] = useState<PendingDevice[]>([]);
   const [paired, setPaired] = useState<PairedDevice[]>([]);
   const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null);
+  const [gatewayStatus, setGatewayStatus] = useState<GatewayStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -88,10 +91,28 @@ export default function AdminPage() {
     }
   }, []);
 
+  const fetchGatewayStatus = useCallback(async () => {
+    try {
+      const status = await getGatewayStatus();
+      setGatewayStatus(status);
+      return status;
+    } catch (err) {
+      console.error('Failed to fetch gateway status:', err);
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     fetchDevices();
     fetchStorageStatus();
-  }, [fetchDevices, fetchStorageStatus]);
+    fetchGatewayStatus();
+  }, [fetchDevices, fetchStorageStatus, fetchGatewayStatus]);
+
+  // Poll gateway status every 15s so the badge stays current
+  useEffect(() => {
+    const id = setInterval(fetchGatewayStatus, 15000);
+    return () => clearInterval(id);
+  }, [fetchGatewayStatus]);
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId);
@@ -138,19 +159,31 @@ export default function AdminPage() {
     }
 
     setRestartInProgress(true);
+    setGatewayStatus((prev) => prev ? { ...prev, status: 'starting' } : { status: 'starting' });
     try {
       const result = await restartGateway();
       if (result.success) {
         setError(null);
-        // Show success message briefly
-        alert('Gateway restart initiated. Clients will reconnect automatically.');
+        // Poll for gateway status until running or timeout (60s)
+        const startTime = Date.now();
+        const poll = async () => {
+          const status = await fetchGatewayStatus();
+          if (status?.status === 'running' || Date.now() - startTime > 60000) {
+            setRestartInProgress(false);
+            return;
+          }
+          setTimeout(poll, 2000);
+        };
+        setTimeout(poll, 2000);
       } else {
         setError(result.error || 'Failed to restart gateway');
+        setRestartInProgress(false);
+        fetchGatewayStatus();
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart gateway');
-    } finally {
       setRestartInProgress(false);
+      fetchGatewayStatus();
     }
   };
 
@@ -220,7 +253,8 @@ export default function AdminPage() {
             <button
               className="btn btn-secondary btn-sm"
               onClick={handleSync}
-              disabled={syncInProgress}
+              disabled={syncInProgress || gatewayStatus?.status !== 'running'}
+              title={gatewayStatus?.status !== 'running' ? 'Gateway must be running to backup' : undefined}
             >
               {syncInProgress && <ButtonSpinner />}
               {syncInProgress ? 'Syncing...' : 'Backup Now'}
@@ -231,7 +265,17 @@ export default function AdminPage() {
 
       <section className="devices-section gateway-section">
         <div className="section-header">
-          <h2>Gateway Controls</h2>
+          <div className="section-title-row">
+            <h2>Gateway Controls</h2>
+            {gatewayStatus && (
+              <span className={`gateway-status-badge ${gatewayStatus.status}`}>
+                <span className="status-dot" />
+                {gatewayStatus.status === 'running' && 'Running'}
+                {gatewayStatus.status === 'starting' && 'Starting'}
+                {gatewayStatus.status === 'stopped' && 'Stopped'}
+              </span>
+            )}
+          </div>
           <button
             className="btn btn-danger"
             onClick={handleRestartGateway}
@@ -242,8 +286,9 @@ export default function AdminPage() {
           </button>
         </div>
         <p className="hint">
-          Restart the gateway to apply configuration changes or recover from errors. All connected
-          clients will be temporarily disconnected.
+          {gatewayStatus?.status === 'stopped'
+            ? 'The gateway is not running. It starts automatically on deploy — use restart to recover from errors.'
+            : 'Restart the gateway to apply configuration changes or recover from errors. All connected clients will be temporarily disconnected.'}
         </p>
       </section>
 
