@@ -81,8 +81,9 @@ fi
 if [ -n "$CF_AI_GATEWAY_GATEWAY_ID" ]; then
     echo "$CF_AI_GATEWAY_GATEWAY_ID" | npx wrangler secret put CF_AI_GATEWAY_GATEWAY_ID --name "$WORKER_NAME" >&2
 fi
-if [ -n "$CF_AI_GATEWAY_MODEL" ]; then
-    echo "$CF_AI_GATEWAY_MODEL" | npx wrangler secret put CF_AI_GATEWAY_MODEL --name "$WORKER_NAME" >&2
+CF_MODELS_VALUE="${CF_AI_GATEWAY_MODELS:-$CF_AI_GATEWAY_MODEL}"
+if [ -n "$CF_MODELS_VALUE" ]; then
+    echo "$CF_MODELS_VALUE" | npx wrangler secret put CF_AI_GATEWAY_MODELS --name "$WORKER_NAME" >&2
 fi
 # Legacy AI Gateway (still supported)
 if [ -n "$AI_GATEWAY_API_KEY" ]; then
