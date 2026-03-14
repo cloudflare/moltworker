@@ -28,6 +28,7 @@ import { MOLTBOT_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureMoltbotGateway, findExistingMoltbotProcess } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
+import { mentraRoutes } from './routes/mentra';
 import { redactSensitiveParams } from './utils/logging';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -150,6 +151,9 @@ app.route('/', publicRoutes);
 
 // Mount CDP routes (uses shared secret auth via query param, not CF Access)
 app.route('/cdp', cdp);
+
+// Mount MentraOS smart glasses bridge routes (public endpoints for glasses integration)
+app.route('/mentra', mentraRoutes);
 
 // =============================================================================
 // PROTECTED ROUTES: Cloudflare Access authentication required
