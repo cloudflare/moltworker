@@ -174,6 +174,18 @@ if (process.env.OPENCLAW_DEV_MODE === 'true') {
 // so we don't need to patch the provider config. Writing a provider
 // entry without a models array breaks OpenClaw's config validation.
 
+// OpenAI-only fallback: when OPENAI_API_KEY is set but no CF_AI_GATEWAY_MODEL
+// and no default model is configured, set gpt-4o as the default so the
+// chatbot produces actual responses instead of failing silently.
+if (process.env.OPENAI_API_KEY && !process.env.CF_AI_GATEWAY_MODEL) {
+    config.agents = config.agents || {};
+    config.agents.defaults = config.agents.defaults || {};
+    if (!config.agents.defaults.model) {
+        config.agents.defaults.model = { primary: 'openai/gpt-4o' };
+        console.log('OpenAI-only mode: set default model to openai/gpt-4o');
+    }
+}
+
 // AI Gateway model override (CF_AI_GATEWAY_MODEL=provider/model-id)
 // Adds a provider entry for any AI Gateway provider and sets it as default model.
 // Examples:
