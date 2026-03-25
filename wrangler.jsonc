@@ -67,6 +67,14 @@
   "browser": {
     "binding": "BROWSER",
   },
+  // Cron trigger to wake the container before OpenClaw cron jobs fire.
+  // The worker reads the cron job store from R2 and wakes the container
+  // if any job is scheduled within the lead time (default: 10 minutes).
+  // Adjust the interval to match your needs. Every 1 minute ensures
+  // jobs are never missed by more than 1 minute.
+  "triggers": {
+    "crons": ["* * * * *"],
+  },
   // Note: CF_ACCOUNT_ID should be set via `wrangler secret put CF_ACCOUNT_ID`
   // Secrets to configure via `wrangler secret put`:
   //
