@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { findExistingMoltbotProcess } from './process';
+import { findExistingMoltbotProcess, isGatewayPortOpen } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
-import { createMockSandbox } from '../test-utils';
+import { createMockSandbox, createMockExecResult } from '../test-utils';
 
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {
@@ -141,5 +141,31 @@ describe('findExistingMoltbotProcess', () => {
 
     const result = await findExistingMoltbotProcess(sandbox);
     expect(result).toBeNull();
+  });
+});
+
+describe('isGatewayPortOpen', () => {
+  it('returns true when port is open (nc exits 0)', async () => {
+    const { sandbox, execMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 0 }));
+
+    const result = await isGatewayPortOpen(sandbox);
+    expect(result).toBe(true);
+    expect(execMock).toHaveBeenCalledWith('nc -z localhost 18789');
+  });
+
+  it('returns false when port is closed (nc exits non-zero)', async () => {
+    const { sandbox, execMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+
+    const result = await isGatewayPortOpen(sandbox);
+    expect(result).toBe(false);
+  });
+
+  it('propagates errors from sandbox.exec', async () => {
+    const { sandbox, execMock } = createMockSandbox();
+    execMock.mockRejectedValue(new Error('container not ready'));
+
+    await expect(isGatewayPortOpen(sandbox)).rejects.toThrow('container not ready');
   });
 });
