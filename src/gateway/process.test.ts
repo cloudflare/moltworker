@@ -67,6 +67,19 @@ describe('findExistingMoltbotProcess', () => {
     expect(result).toBe(gatewayProcess);
   });
 
+  it('matches bash-invoked startup script with full path', async () => {
+    const gatewayProcess = createFullMockProcess({
+      id: 'gateway-1',
+      command: 'bash /usr/local/bin/start-openclaw.sh',
+      status: 'running',
+    });
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue([gatewayProcess]);
+
+    const result = await findExistingMoltbotProcess(sandbox);
+    expect(result).toBe(gatewayProcess);
+  });
+
   it('matches legacy clawdbot gateway command (transition compat)', async () => {
     const gatewayProcess = createFullMockProcess({
       id: 'gateway-1',

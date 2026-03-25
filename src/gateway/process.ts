@@ -18,6 +18,7 @@ export async function findExistingMoltbotProcess(sandbox: Sandbox): Promise<Proc
       // Don't match CLI commands like "openclaw devices list"
       const isGatewayProcess =
         proc.command.includes('start-openclaw.sh') ||
+        proc.command.includes('/usr/local/bin/start-openclaw.sh') ||
         proc.command.includes('openclaw gateway') ||
         // Legacy: match old startup script during transition
         proc.command.includes('start-moltbot.sh') ||
@@ -86,6 +87,25 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
         console.log('Failed to kill process:', killError);
       }
     }
+  }
+
+  // Safety net: probe the gateway port before spawning a new process.
+  // If the port is already open, the gateway is running but wasn't detected by
+  // listProcesses() (e.g. the command string didn't match any known pattern).
+  try {
+    const portCheck = await sandbox.exec(
+      `timeout 2 bash -c 'echo > /dev/tcp/localhost/${MOLTBOT_PORT}' 2>/dev/null && echo open || echo closed`,
+    );
+    if (portCheck.stdout?.trim() === 'open') {
+      console.log(
+        `Port ${MOLTBOT_PORT} already open — gateway running but undetected, skipping spawn`,
+      );
+      const procs = await sandbox.listProcesses();
+      const any = procs.find((p) => p.status === 'running' || p.status === 'starting');
+      if (any) return any;
+    }
+  } catch {
+    // Port probe failed — proceed to start normally
   }
 
   // Start a new OpenClaw gateway
