@@ -455,6 +455,20 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
 **`npm run dev` fails with an `Unauthorized` error:** You need to enable Cloudflare Containers in the [Containers dashboard](https://dash.cloudflare.com/?to=/:account/workers/containers)
 
+**Linux: `@cloudflare/workerd-linux-64` could not be found (or similar workerd binary errors):**
+This project depends on `workerd`, which downloads a platform-specific binary via **optionalDependencies**.
+If you install dependencies with flags that omit optional deps, workerd will be missing and builds will fail.
+
+- ✅ Do: `npm install` (or `npm ci` without omitting optional deps)
+- ❌ Avoid: `npm install --no-optional`, `npm ci --omit=optional`, `yarn --ignore-optional`, or any CI setting like `NPM_CONFIG_OPTIONAL=false`
+
+Fix (npm):
+```bash
+rm -rf node_modules package-lock.json
+npm config set optional true
+npm install
+```
+
 **Gateway fails to start:** Check `npx wrangler secret list` and `npx wrangler tail`
 
 **Config changes not working:** Edit the `# Build cache bust:` comment in `Dockerfile` and redeploy
