@@ -206,6 +206,7 @@ These are the env vars passed TO the container (internal names):
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
 | `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
 | `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
+| `SLACK_DM_POLICY` | `channels.slack.dm.policy` | `pairing` (default) or `open` |
 
 ## OpenClaw Config Schema
 

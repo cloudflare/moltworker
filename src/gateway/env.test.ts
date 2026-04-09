@@ -110,6 +110,7 @@ describe('buildEnvVars', () => {
       DISCORD_DM_POLICY: 'open',
       SLACK_BOT_TOKEN: 'slack-bot',
       SLACK_APP_TOKEN: 'slack-app',
+      SLACK_DM_POLICY: 'open',
     });
     const result = buildEnvVars(env);
 
@@ -119,6 +120,7 @@ describe('buildEnvVars', () => {
     expect(result.DISCORD_DM_POLICY).toBe('open');
     expect(result.SLACK_BOT_TOKEN).toBe('slack-bot');
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
+    expect(result.SLACK_DM_POLICY).toBe('open');
   });
 
   it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
