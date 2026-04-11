@@ -3,7 +3,7 @@ import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
 import { ensureGateway, findExistingGatewayProcess, killGateway, waitForProcess } from '../gateway';
 import { createSnapshot, getLastSync, signalRestoreNeeded } from '../persistence';
-import type { StorageStatusResponse } from '../client/api';
+import type { StorageStatusResponse, SyncResponse } from '../client/api';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -236,9 +236,9 @@ adminApi.post('/storage/sync', async (c) => {
     return c.json({
       success: true,
       message: 'Snapshot created successfully',
-      backupId: handle.id,
-      debug: { mountState, dirContents },
-    });
+      lastSync: new Date().toISOString(),
+      debug: { mountState, dirContents, handle },
+    } satisfies SyncResponse);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const status =
