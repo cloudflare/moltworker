@@ -136,9 +136,10 @@ export async function createSnapshot(
 }
 
 /**
- * Get the last stored backup handle (for status reporting).
+ * Get the timestamp of the last sync (for status reporting).
  */
-export async function getLastBackupId(bucket: R2Bucket): Promise<string | null> {
-  const handle = await getStoredHandle(bucket);
-  return handle?.id ?? null;
+export async function getLastSync(bucket: R2Bucket): Promise<string | null> {
+  const obj = await bucket.get(HANDLE_KEY);
+  if (!obj) return null;
+  return obj.uploaded.toISOString();
 }

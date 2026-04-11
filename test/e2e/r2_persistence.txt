@@ -43,7 +43,7 @@ where
 * result.success == true
 
 ===
-storage status shows last backup id
+storage status shows last sync time
 %require
 ===
 WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
@@ -53,7 +53,7 @@ WORKER_URL=$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")
 ---
 where
 * result.configured == true
-* result.lastBackupId matches /^[0-9a-f-]+$/
+* result.lastSync matches /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 ===
 third sync also succeeds

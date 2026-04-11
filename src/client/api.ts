@@ -128,6 +128,7 @@ export interface SyncResponse {
   success: boolean;
   message?: string;
   lastSync?: string;
+  debug?: object;
   error?: string;
   details?: string;
 }
