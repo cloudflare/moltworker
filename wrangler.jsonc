@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "moltbot-sandbox",
+  "name": "assistant-hermes",
+  "account_id": "0dd2a64681b8d23165f4bae578a6ec60",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],
@@ -60,7 +61,7 @@
   "r2_buckets": [
     {
       "binding": "BACKUP_BUCKET",
-      "bucket_name": "moltbot-data",
+      "bucket_name": "assistant-hermes-data",
     },
   ],
 
