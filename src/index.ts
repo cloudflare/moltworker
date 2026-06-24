@@ -30,6 +30,7 @@ import { ensureGateway, findExistingGatewayProcess, killGateway } from './gatewa
 import { publicRoutes, api, adminUi, debug, cdp } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import { restoreIfNeeded, createSnapshot } from './persistence';
+import { normalizeWebSocketCloseCode } from './websocket-close';
 import { handleScheduled } from './cron/handler';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -439,7 +440,7 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Client closed:', event.code, event.reason);
       }
-      containerWs.close(event.code, event.reason);
+      containerWs.close(normalizeWebSocketCloseCode(event.code), event.reason);
     });
 
     containerWs.addEventListener('close', (event) => {
@@ -454,7 +455,7 @@ app.all('*', async (c) => {
       if (debugLogs) {
         console.log('[WS] Transformed close reason:', reason);
       }
-      serverWs.close(event.code, reason);
+      serverWs.close(normalizeWebSocketCloseCode(event.code), reason);
     });
 
     // Handle errors
