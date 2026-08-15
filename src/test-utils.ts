@@ -10,6 +10,7 @@ export function createMockEnv(overrides: Partial<OpenClawEnv> = {}): OpenClawEnv
     Sandbox: {} as any,
     ASSETS: {} as any,
     BACKUP_BUCKET: {} as any,
+    AI: { run: vi.fn(), aiGatewayLogId: null } as unknown as Ai,
     ...overrides,
   };
 }

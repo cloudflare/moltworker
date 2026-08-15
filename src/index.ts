@@ -27,7 +27,7 @@ import type { AppEnv, OpenClawEnv } from './types';
 import { GATEWAY_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { ensureGateway, findExistingGatewayProcess, killGateway } from './gateway';
-import { publicRoutes, api, adminUi, debug, cdp } from './routes';
+import { publicRoutes, api, adminUi, debug, cdp, aiProxy } from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import { restoreIfNeeded, createSnapshot } from './persistence';
 import { handleScheduled } from './cron/handler';
@@ -67,7 +67,7 @@ export { Sandbox };
  * Validate required environment variables.
  * Returns an array of missing variable descriptions, or empty array if all are set.
  */
-function validateRequiredEnv(env: OpenClawEnv): string[] {
+export function validateRequiredEnv(env: OpenClawEnv): string[] {
   const missing: string[] = [];
   const isTestMode = env.DEV_MODE === 'true' || env.E2E_TEST_MODE === 'true';
 
@@ -95,10 +95,17 @@ function validateRequiredEnv(env: OpenClawEnv): string[] {
   const hasLegacyGateway = !!(env.AI_GATEWAY_API_KEY && env.AI_GATEWAY_BASE_URL);
   const hasAnthropicKey = !!env.ANTHROPIC_API_KEY;
   const hasOpenAIKey = !!env.OPENAI_API_KEY;
+  const hasAiProxy = !!(env.AI_PROXY_TOKEN && env.AI_GATEWAY_ID && env.WORKER_URL);
 
-  if (!hasCloudflareGateway && !hasLegacyGateway && !hasAnthropicKey && !hasOpenAIKey) {
+  if (
+    !hasAiProxy &&
+    !hasCloudflareGateway &&
+    !hasLegacyGateway &&
+    !hasAnthropicKey &&
+    !hasOpenAIKey
+  ) {
     missing.push(
-      'ANTHROPIC_API_KEY, OPENAI_API_KEY, or CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID',
+      'AI_PROXY_TOKEN + AI_GATEWAY_ID + WORKER_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY, CLOUDFLARE_AI_GATEWAY_API_KEY + CF_AI_GATEWAY_ACCOUNT_ID + CF_AI_GATEWAY_GATEWAY_ID, or AI_GATEWAY_API_KEY + AI_GATEWAY_BASE_URL',
     );
   }
 
@@ -145,6 +152,10 @@ app.use('*', async (c, next) => {
   console.log(`[REQ] DEBUG_ROUTES: ${c.env.DEBUG_ROUTES}`);
   await next();
 });
+
+// The container cannot complete an interactive Access login. This route uses
+// its own fail-closed Bearer authentication and must not initialize a sandbox.
+app.route('/', aiProxy);
 
 // Middleware: Initialize sandbox stub and restore backup if available.
 // Note: we intentionally do NOT call sandbox.start() here. The Sandbox SDK's

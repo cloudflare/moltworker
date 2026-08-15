@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
+  assetsInclude: ['**/*.html'],
   test: {
     globals: true,
     environment: 'node',
