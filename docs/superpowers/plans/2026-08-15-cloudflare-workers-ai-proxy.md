@@ -447,11 +447,12 @@ Then run the image with dummy proxy variables and a temporary config target, exe
 Run:
 
 ```bash
-git grep -nE 'happy\.bed|Bearer [A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]+' -- ':!docs/superpowers/plans/*'
+: "${MOLTW_ACCESS_EMAIL:?MOLTW_ACCESS_EMAIL must be set in the secure session}"
+if git grep -nF "$MOLTW_ACCESS_EMAIL"; then exit 1; fi
 git status --short
 ```
 
-Expected: no secret or authorized email match; only intended source/document changes are present.
+Expected: the exact authorized email has no match; only intended source/document changes are present. Generic dummy-key patterns are intentionally not searched because upstream documentation and tests contain safe examples such as `sk-ant-...` and `sk-test-key`.
 
 - [ ] **Step 6: Commit documentation and verified image changes**
 
@@ -504,7 +505,7 @@ Fetch the gateway afterward and compare every control value.
 
 - [ ] **Step 4: Generate and install independent secrets**
 
-Generate two independent 32-byte hex values with `openssl rand -hex 32` without printing them. Pipe them directly to `wrangler secret put AI_PROXY_TOKEN` and `wrangler secret put MOLTBOT_GATEWAY_TOKEN`. Also set `AI_GATEWAY_ID=moltworker`, `WORKER_URL`, and `SANDBOX_SLEEP_AFTER=10m` through Wrangler secrets/vars. Confirm `wrangler secret list` shows names only. Do not install `CLOUDFLARE_API_TOKEN` as a Worker secret.
+Generate two independent 32-byte hex values with `openssl rand -hex 32` without printing them. Before uploading, run `git grep -nF "$AI_PROXY_TOKEN"` and `git grep -nF "$MOLTBOT_GATEWAY_TOKEN"`; both commands must return no match. Pipe the values directly to `wrangler secret put AI_PROXY_TOKEN` and `wrangler secret put MOLTBOT_GATEWAY_TOKEN`. Also set `AI_GATEWAY_ID=moltworker`, `WORKER_URL`, and `SANDBOX_SLEEP_AFTER=10m` through Wrangler secrets/vars. Confirm `wrangler secret list` shows names only. Do not install `CLOUDFLARE_API_TOKEN` as a Worker secret.
 
 - [ ] **Step 5: Deploy the fail-closed Worker**
 
