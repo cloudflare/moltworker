@@ -151,4 +151,15 @@ describe('parseChatCompletionRequest', () => {
       ),
     ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
   });
+
+  it('validates deeply nested JSON without overflowing the call stack', async () => {
+    const deeplyNestedContent = `${'['.repeat(10_000)}"deep"${']'.repeat(10_000)}`;
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest(
+        `{"model":"@cf/zai-org/glm-4.7-flash","messages":[{"role":"user","content":${deeplyNestedContent}}]}`,
+      ),
+    );
+
+    expect(parsed.model).toBe(DEFAULT_MODEL);
+  });
 });

@@ -17,22 +17,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validateNoPrototypePollution(value: unknown): void {
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      validateNoPrototypePollution(item);
-    }
-    return;
-  }
+  const worklist: unknown[] = [value];
 
-  if (value === null || typeof value !== 'object') {
-    return;
-  }
+  while (worklist.length > 0) {
+    const currentValue = worklist.pop();
 
-  for (const [key, nestedValue] of Object.entries(value)) {
-    if (forbiddenKeys.has(key)) {
-      throw invalidRequest(`Request contains forbidden key: ${key}`);
+    if (Array.isArray(currentValue)) {
+      for (const item of currentValue) {
+        worklist.push(item);
+      }
+      continue;
     }
-    validateNoPrototypePollution(nestedValue);
+
+    if (currentValue === null || typeof currentValue !== 'object') {
+      continue;
+    }
+
+    for (const [key, nestedValue] of Object.entries(currentValue)) {
+      if (forbiddenKeys.has(key)) {
+        throw invalidRequest(`Request contains forbidden key: ${key}`);
+      }
+      worklist.push(nestedValue);
+    }
   }
 }
 
