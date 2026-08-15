@@ -26,6 +26,17 @@
 - Do not modify billing, subscriptions, memberships, API tokens, zones, or Worker routes.
 - Follow `AGENTS.md`: strict TypeScript, explicit function signatures, thin route handlers, colocated Vitest tests.
 
+## GitHub Tracking
+
+- Parent: [#1 Cloudflare Workers AI proxyでOpenClawを本番構築する](https://github.com/kyoneken/moltworker/issues/1)
+- Task 1: [#2 Proxy認証とOpenAIリクエスト契約を実装する](https://github.com/kyoneken/moltworker/issues/2)
+- Task 2: [#3 Workers AI応答とSSEをOpenAI互換形式へ変換する](https://github.com/kyoneken/moltworker/issues/3)
+- Task 3: [#4 認証済みAI proxy routeとWorkers AI bindingを追加する](https://github.com/kyoneken/moltworker/issues/4)
+- Task 4: [#5 OpenClawをWorker AI proxy providerへ接続する](https://github.com/kyoneken/moltworker/issues/5)
+- Task 5: [#6 Workers AI proxyのドキュメントとローカル検証を完成する](https://github.com/kyoneken/moltworker/issues/6)
+- Task 6: [#7 Cloudflareリソースを最小権限で構築してdeployする](https://github.com/kyoneken/moltworker/issues/7)
+- Task 7: [#8 本番受け入れ検証、PR、Issue完了処理を行う](https://github.com/kyoneken/moltworker/issues/8)
+
 ---
 
 ### Task 1: Proxy Authentication and Request Contract
