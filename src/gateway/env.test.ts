@@ -21,6 +21,34 @@ describe('buildEnvVars', () => {
     expect(result.OPENAI_API_KEY).toBe('sk-openai-key');
   });
 
+  it('maps the Worker AI proxy token to the container-specific name', () => {
+    const env = createMockEnv({ AI_PROXY_TOKEN: 'proxy-runtime-secret' });
+
+    expect(buildEnvVars(env).OPENCLAW_AI_PROXY_TOKEN).toBe('proxy-runtime-secret');
+  });
+
+  it('normalizes the Worker URL into the OpenAI-compatible proxy base URL', () => {
+    const env = createMockEnv({ WORKER_URL: 'https://moltworker.example.workers.dev///' });
+
+    expect(buildEnvVars(env).OPENCLAW_AI_PROXY_URL).toBe(
+      'https://moltworker.example.workers.dev/internal/ai/v1',
+    );
+  });
+
+  it('does not pass Worker-side AI management configuration to the container', () => {
+    const env = createMockEnv({
+      AI_PROXY_TOKEN: 'proxy-runtime-secret',
+      AI_GATEWAY_ID: 'managed-by-the-worker',
+      WORKER_URL: 'https://moltworker.example.workers.dev',
+      CLOUDFLARE_API_TOKEN: 'provisioning-secret',
+    } as Partial<Parameters<typeof createMockEnv>[0]> & { CLOUDFLARE_API_TOKEN: string });
+
+    const result = buildEnvVars(env);
+
+    expect(result.AI_GATEWAY_ID).toBeUndefined();
+    expect(result.CLOUDFLARE_API_TOKEN).toBeUndefined();
+  });
+
   // Cloudflare AI Gateway (new native provider)
   it('passes Cloudflare AI Gateway env vars', () => {
     const env = createMockEnv({
