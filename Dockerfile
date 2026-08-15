@@ -32,7 +32,9 @@ ENV HOME=/home/openclaw
 RUN mkdir -p /home/openclaw/.openclaw \
     && mkdir -p /home/openclaw/clawd \
     && mkdir -p /home/openclaw/clawd/skills \
+    && rm -rf /root/.openclaw \
     && ln -s /home/openclaw/.openclaw /root/.openclaw \
+    && test -L /root/.openclaw \
     && ln -s /home/openclaw/clawd /root/clawd
 
 # Copy startup configuration files

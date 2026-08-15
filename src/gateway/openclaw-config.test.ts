@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const patcherPath = resolve(process.cwd(), 'container/patch-openclaw-config.cjs');
+const dockerfilePath = resolve(process.cwd(), 'Dockerfile');
 const temporaryDirectories: string[] = [];
 
 interface OpenClawConfig {
@@ -178,5 +179,19 @@ describe('OpenClaw config patcher', () => {
 
     expect(config.models?.providers?.['cf-workers-ai']).toBeUndefined();
     expect(config.agents?.defaults?.model?.primary).toBeUndefined();
+  });
+});
+
+describe('OpenClaw image config path assembly', () => {
+  it('replaces the build-time root config directory with a verified home config symlink', () => {
+    const dockerfile = readFileSync(dockerfilePath, 'utf8');
+    const homeConfigCreation = dockerfile.indexOf('RUN mkdir -p /home/openclaw/.openclaw');
+    const rootConfigRemoval = dockerfile.indexOf('&& rm -rf /root/.openclaw');
+    const rootConfigLink = dockerfile.indexOf('&& ln -s /home/openclaw/.openclaw /root/.openclaw');
+    const rootConfigLinkAssertion = dockerfile.indexOf('&& test -L /root/.openclaw');
+
+    expect(rootConfigRemoval).toBeGreaterThan(homeConfigCreation);
+    expect(rootConfigLink).toBeGreaterThan(rootConfigRemoval);
+    expect(rootConfigLinkAssertion).toBeGreaterThan(rootConfigLink);
   });
 });
