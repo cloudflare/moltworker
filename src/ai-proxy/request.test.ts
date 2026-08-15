@@ -1,0 +1,154 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_MODEL, MAX_PROXY_BODY_BYTES, OPTIONAL_MODEL } from './constants';
+import { parseChatCompletionRequest } from './request';
+
+function chatCompletionRequest(body: unknown, headers?: HeadersInit): Request {
+  return new Request('https://example.test/internal/ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...headers,
+    },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+describe('parseChatCompletionRequest', () => {
+  it('accepts the default GLM model and preserves tool-calling and streaming fields', async () => {
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'get_weather',
+          parameters: { type: 'object', properties: { city: { type: 'string' } } },
+        },
+      },
+    ];
+    const messages = [
+      { role: 'user', content: 'What is the weather?' },
+      { role: 'assistant', tool_calls: [{ id: 'call_1', type: 'function' }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'Sunny' },
+    ];
+
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest({
+        model: DEFAULT_MODEL,
+        messages,
+        tools,
+        tool_choice: 'auto',
+        stream: true,
+        temperature: 0.2,
+        max_tokens: 512,
+      }),
+    );
+
+    expect(parsed.model).toBe(DEFAULT_MODEL);
+    expect(parsed.messages).toEqual(messages);
+    expect(parsed.tools).toEqual(tools);
+    expect(parsed.tool_choice).toBe('auto');
+    expect(parsed.stream).toBe(true);
+    expect(parsed.temperature).toBe(0.2);
+    expect(parsed.max_tokens).toBe(512);
+  });
+
+  it('accepts the optional Kimi model', async () => {
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest({
+        model: OPTIONAL_MODEL,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    );
+
+    expect(parsed.model).toBe(OPTIONAL_MODEL);
+  });
+
+  it('rejects an unknown model', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({
+          model: '@cf/unknown/model',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'model_not_allowed' });
+  });
+
+  it.each([undefined, null, 42])('rejects a missing or non-string model: %j', async (model) => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({ model, messages: [{ role: 'user', content: 'hi' }] }),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'model_not_allowed' });
+  });
+
+  it('rejects a request without messages', async () => {
+    await expect(
+      parseChatCompletionRequest(chatCompletionRequest({ model: DEFAULT_MODEL })),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+  });
+
+  it('rejects a request with non-array messages', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({ model: DEFAULT_MODEL, messages: 'not-an-array' }),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+  });
+
+  it.each([null, 42, []])('rejects a non-record message item: %j', async (message) => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({ model: DEFAULT_MODEL, messages: [message] }),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+  });
+
+  it('rejects malformed JSON', async () => {
+    await expect(
+      parseChatCompletionRequest(chatCompletionRequest('{"model":')),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_json' });
+  });
+
+  it('rejects a non-JSON content type', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest(
+          { model: DEFAULT_MODEL, messages: [{ role: 'user', content: 'hi' }] },
+          { 'content-type': 'text/plain' },
+        ),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'unsupported_media_type' });
+  });
+
+  it('rejects a Content-Length above the proxy body limit', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest(
+          { model: DEFAULT_MODEL, messages: [{ role: 'user', content: 'hi' }] },
+          { 'content-length': String(MAX_PROXY_BODY_BYTES + 1) },
+        ),
+      ),
+    ).rejects.toMatchObject({ status: 413, code: 'request_too_large' });
+  });
+
+  it('rejects an actual body above the proxy body limit', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({
+          model: DEFAULT_MODEL,
+          messages: [{ role: 'user', content: 'x'.repeat(MAX_PROXY_BODY_BYTES) }],
+        }),
+      ),
+    ).rejects.toMatchObject({ status: 413, code: 'request_too_large' });
+  });
+
+  it('rejects forbidden prototype-pollution keys at any depth', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest(
+          '{"model":"@cf/zai-org/glm-4.7-flash","messages":[{"role":"user","content":{"constructor":{"polluted":true}}}]}',
+        ),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+  });
+});
