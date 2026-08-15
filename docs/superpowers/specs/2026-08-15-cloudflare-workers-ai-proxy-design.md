@@ -122,8 +122,8 @@ remain unset.
 The dedicated AI Gateway has logging enabled and the following controls:
 
 - sliding-window rate limit: 60 requests per 600 seconds;
-- spend rule: USD 1 per day;
-- spend rule: USD 10 per month.
+- spend rule: USD 1 per rolling 24 hours;
+- spend rule: USD 10 per rolling 30 days.
 
 Spend enforcement is treated as eventually consistent, so concurrent requests
 may briefly exceed a configured amount. Reaching either request or spend limits
