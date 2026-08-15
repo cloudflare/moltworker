@@ -1,17 +1,20 @@
 # Copy this to .dev.vars and fill in your values
 # .dev.vars is gitignored and used by wrangler dev
 
-# AI Provider (at least one required)
-ANTHROPIC_API_KEY=sk-ant-...
-# OPENAI_API_KEY=sk-...
+# Workers AI proxy (default deployment)
+# The AI binding itself is configured as "AI" in wrangler.jsonc.
+AI_PROXY_TOKEN=replace-with-random-64-hex
+AI_GATEWAY_ID=moltworker
+WORKER_URL=https://moltbot-sandbox.example.workers.dev
+SANDBOX_SLEEP_AFTER=10m
 
-# Cloudflare AI Gateway (alternative to direct provider keys)
+# Backward-compatible upstream alternatives (not the default deployment)
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
 # CLOUDFLARE_AI_GATEWAY_API_KEY=your-provider-api-key
 # CF_AI_GATEWAY_ACCOUNT_ID=your-account-id
 # CF_AI_GATEWAY_GATEWAY_ID=your-gateway-id
 # CF_AI_GATEWAY_MODEL=workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast
-
-# Legacy AI Gateway (still supported)
 # AI_GATEWAY_API_KEY=your-key
 # AI_GATEWAY_BASE_URL=https://gateway.ai.cloudflare.com/v1/{account_id}/{gateway_id}/anthropic
 
@@ -26,7 +29,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # DEBUG_ROUTES=true
 
 # Optional - set a fixed token instead of auto-generated
-MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
+MOLTBOT_GATEWAY_TOKEN=replace-with-a-different-random-64-hex
 
 # Cloudflare Access configuration for /_admin and /api routes
 # Required for admin UI and device pairing API in production
@@ -39,4 +42,6 @@ MOLTBOT_GATEWAY_TOKEN=dev-token-change-in-prod
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth
-# WORKER_URL=https://your-worker.example.com
+
+# R2 persistence uses the BACKUP_BUCKET binding in wrangler.jsonc.
+# Do not add R2 access keys to the container environment.

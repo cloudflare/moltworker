@@ -6,7 +6,8 @@ End-to-end tests that deploy real Moltworker instances to Cloudflare infrastruct
 
 These tests run against actual Cloudflare infrastructure—the same environment users get when they deploy Moltworker themselves. This catches issues that local testing can't:
 
-- **R2 bucket mounting** only works in production (not with `wrangler dev`)
+- **R2-bound Sandbox snapshots** only work against deployed Cloudflare infrastructure
+- **Workers AI binding and AI Gateway routing** use the production platform path
 - **Container cold starts** and sandbox behavior
 - **Cloudflare Access** authentication flows
 - **Real network latency** and timeout handling
@@ -30,7 +31,8 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 │   Terraform (main.tf)           Wrangler deploy           Access API    │
 │   ├── Service token      →      ├── Worker           →    ├── App       │
 │   └── R2 bucket                 ├── Container             └── Policies  │
-│                                 └── Secrets                             │
+│                                 ├── AI binding                          │
+│                                 └── R2 binding                          │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -39,17 +41,16 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 │                                                                         │
 │   https://moltbot-sandbox-e2e-{id}.{subdomain}.workers.dev              │
 │                                                                         │
-│   Protected by Cloudflare Access:                                       │
-│   - Service token (for automated tests)                                 │
-│   - @cloudflare.com emails (for manual debugging)                       │
+│   User and admin routes protected by Cloudflare Access                  │
+│   /internal/ai/* uses a narrow Access bypass + proxy Bearer token        │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Test flow
 
 1. **Terraform** creates isolated resources: service token + R2 bucket
-2. **Wrangler** deploys worker with unique name (timestamp + random suffix)
-3. **Access API** creates Access application (must be after worker exists—workers.dev domains require the worker to exist first)
+2. **Wrangler** deploys the worker with a unique name and binds the R2 bucket and Workers AI
+3. **Access API** creates the host application after the worker exists; production proxy validation also requires the more-specific `/internal/ai/*` bypass application
 4. **plwr** opens browser with Access headers, navigates to worker
 5. **Tests run** with video recording capturing the full UI flow
 6. **Teardown** deletes everything: Access app → worker → R2 bucket → service token
@@ -59,6 +60,7 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 - **Unique IDs per test run**: `$(date +%s)-$(openssl rand -hex 4)` ensures parallel test runs don't conflict
 - **Access created post-deploy**: Terraform can't create Access apps for non-existent domains
 - **Container names**: Derived from worker name as `{worker-name}-sandbox`
+- **No container R2 credentials**: Persistence uses the Worker-side `BACKUP_BUCKET` binding and Sandbox SDK snapshots
 
 ## Test framework: cctr + plwr
 
@@ -138,7 +140,7 @@ plwr -S moltworker-e2e wait 'text=1499117' -T 120000
 
 ### Prerequisites
 
-1. Copy `.dev.vars.example` to `.dev.vars` and fill in credentials (see file for detailed instructions)
+1. Copy `.dev.vars.example` to `.dev.vars` and fill in the scoped Cloudflare credentials (see the file for details). Do not copy production proxy tokens or an authorized user's email into the repository.
 2. Install dependencies: `npm install`
 3. Install cctr: `brew install andreasjansson/tap/cctr` or `cargo install cctr`
 4. Install plwr: see [plwr install instructions](https://github.com/andreasjansson/plwr)
@@ -169,3 +171,9 @@ PLAYWRIGHT_HEADED=1 cctr test/e2e/
 ### View test videos
 
 Videos are saved to `/tmp/moltworker-e2e-videos/` after each run.
+
+## Production Proxy Smoke Test
+
+Run the production inference smoke test separately from the disposable browser E2E suite. Load `AI_PROXY_TOKEN` from a secret manager into the test process without printing it, and have the HTTP client construct the Bearer header in memory. Send one small request to `https://moltbot-sandbox.example.workers.dev/internal/ai/v1/chat/completions` using `@cf/zai-org/glm-4.7-flash`; verify the OpenAI-compatible response and matching `moltworker` AI Gateway log. Confirm Kimi remains available only as the manual `cf-workers-ai/@cf/moonshotai/kimi-k2.7-code` choice.
+
+Before live inference, verify an unauthenticated request returns `401` and an unknown model returns `400`. Do not put the proxy token in command arguments, fixtures, videos, logs, or committed `.dev.vars` files, and do not intentionally trigger rate or spend limits.
