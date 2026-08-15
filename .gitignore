@@ -61,3 +61,7 @@ test/e2e/.dev.vars
 
 # npm config
 .npmrc
+
+# Agent worktrees and execution ledgers
+.worktrees/
+.superpowers/
