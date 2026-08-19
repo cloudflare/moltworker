@@ -85,6 +85,16 @@ WORKERS_SUBDOMAIN=
 CF_ACCESS_TEAM_DOMAIN=
 
 # =============================================================================
+# DISPOSABLE E2E R2 CREDENTIALS
+# =============================================================================
+# Required by the current cloud E2E fixture for its Worker-side storage status
+# and deployment flow. Scope these credentials to disposable E2E buckets only.
+# They are Worker secrets for the legacy fixture and are NOT passed into the
+# OpenClaw container; production persistence uses the BACKUP_BUCKET binding.
+R2_ACCESS_KEY_ID=
+R2_SECRET_ACCESS_KEY=
+
+# =============================================================================
 # OPTIONAL SETTINGS
 # =============================================================================
 

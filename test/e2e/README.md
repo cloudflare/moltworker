@@ -140,7 +140,7 @@ plwr -S moltworker-e2e wait 'text=1499117' -T 120000
 
 ### Prerequisites
 
-1. Copy `.dev.vars.example` to `.dev.vars` and fill in the scoped Cloudflare credentials (see the file for details). Do not copy production proxy tokens or an authorized user's email into the repository.
+1. Copy `.dev.vars.example` to `.dev.vars` and fill in the scoped Cloudflare credentials (see the file for details). The current fixture expects disposable, bucket-scoped R2 credentials for its Worker-side compatibility flow; they are not forwarded to the container and are not part of the production binding-only setup. Do not copy production proxy tokens or an authorized user's email into the repository.
 2. Install dependencies: `npm install`
 3. Install cctr: `brew install andreasjansson/tap/cctr` or `cargo install cctr`
 4. Install plwr: see [plwr install instructions](https://github.com/andreasjansson/plwr)
