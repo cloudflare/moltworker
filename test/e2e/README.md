@@ -7,10 +7,11 @@ End-to-end tests that deploy real Moltworker instances to Cloudflare infrastruct
 These tests run against actual Cloudflare infrastructure—the same environment users get when they deploy Moltworker themselves. This catches issues that local testing can't:
 
 - **R2-bound Sandbox snapshots** only work against deployed Cloudflare infrastructure
-- **Workers AI binding and AI Gateway routing** use the production platform path
 - **Container cold starts** and sandbox behavior
 - **Cloudflare Access** authentication flows
 - **Real network latency** and timeout handling
+
+The Workers AI proxy—including `AI_PROXY_TOKEN`, `AI_GATEWAY_ID`, `WORKER_URL`, and its narrow `/internal/ai/*` Access bypass—is the production target architecture, not coverage provided by the current disposable browser fixture. That fixture deploys legacy provider configuration with `E2E_TEST_MODE`; it does not provision those proxy variables or the proxy bypass, and it does not test proxy inference.
 
 ## Architecture
 
@@ -41,16 +42,18 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 │                                                                         │
 │   https://moltbot-sandbox-e2e-{id}.{subdomain}.workers.dev              │
 │                                                                         │
-│   User and admin routes protected by Cloudflare Access                  │
-│   /internal/ai/* uses a narrow Access bypass + proxy Bearer token        │
+│   Production target: user and admin routes protected by Access          │
+│   Current E2E fixture uses E2E_TEST_MODE to bypass worker auth          │
+│   Production target: /internal/ai/* has narrow Access bypass + Bearer   │
+│   Current E2E fixture does not provision or test this proxy bypass      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Test flow
 
 1. **Terraform** creates isolated resources: service token + R2 bucket
-2. **Wrangler** deploys the worker with a unique name and binds the R2 bucket and Workers AI
-3. **Access API** creates the host application after the worker exists; production proxy validation also requires the more-specific `/internal/ai/*` bypass application
+2. **Wrangler** deploys the worker with a unique name and binds the R2 bucket. The current fixture configures a legacy provider rather than the production Workers AI proxy.
+3. **Access API** creates the host application after the worker exists. The current fixture does not create the production-only, more-specific `/internal/ai/*` bypass application.
 4. **plwr** opens browser with Access headers, navigates to worker
 5. **Tests run** with video recording capturing the full UI flow
 6. **Teardown** deletes everything: Access app → worker → R2 bucket → service token

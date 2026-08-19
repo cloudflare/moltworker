@@ -192,26 +192,13 @@ adminApi.post('/devices/approve-all', async (c) => {
 
 // GET /api/admin/storage - Get backup/restore status
 adminApi.get('/storage', async (c) => {
-  const hasCredentials = !!(
-    c.env.R2_ACCESS_KEY_ID &&
-    c.env.R2_SECRET_ACCESS_KEY &&
-    c.env.CLOUDFLARE_ACCOUNT_ID
-  );
-
-  const missing: string[] = [];
-  if (!c.env.R2_ACCESS_KEY_ID) missing.push('R2_ACCESS_KEY_ID');
-  if (!c.env.R2_SECRET_ACCESS_KEY) missing.push('R2_SECRET_ACCESS_KEY');
-  if (!c.env.CLOUDFLARE_ACCOUNT_ID) missing.push('CLOUDFLARE_ACCOUNT_ID');
-
-  const lastBackupId = hasCredentials ? await getLastBackupId(c.env.BACKUP_BUCKET) : null;
+  const lastBackupId = await getLastBackupId(c.env.BACKUP_BUCKET);
 
   return c.json({
-    configured: hasCredentials,
-    missing: missing.length > 0 ? missing : undefined,
+    configured: true,
     lastBackupId,
-    message: hasCredentials
-      ? 'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.'
-      : 'R2 storage is not configured. Paired devices and conversations will be lost when the container restarts.',
+    message:
+      'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.',
   });
 });
 

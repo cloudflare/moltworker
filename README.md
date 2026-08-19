@@ -63,6 +63,10 @@ _Cloudflare Sandboxes are available on the [Workers Paid plan](https://dash.clou
 # Install dependencies
 npm install
 
+# Create the R2 bucket required by the checked-in BACKUP_BUCKET binding before
+# deploying. Skip this command if the bucket already exists.
+npx wrangler r2 bucket create moltbot-data
+
 # Create the moltworker AI Gateway in the Cloudflare dashboard first. Generate
 # and save a random 64-hex proxy token in a password manager, then enter it at
 # Wrangler's prompt. Do not print it or reuse the gateway token.
@@ -93,7 +97,7 @@ Replace the example hostname with the deployed `workers.dev` hostname and `YOUR_
 > 1. [Set up Cloudflare Access](#setting-up-the-admin-ui) to protect the admin UI
 > 2. [Pair your device](#device-pairing) via the admin UI at `/_admin/`
 
-Before relying on the deployment, [create the R2 bucket](#persistent-storage-r2) used to preserve paired devices and conversation history across container restarts.
+The required `moltbot-data` bucket was created before deployment; see [Persistent Storage (R2)](#persistent-storage-r2) for how snapshot persistence works.
 
 ## Setting Up the Admin UI
 
