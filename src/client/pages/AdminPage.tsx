@@ -159,8 +159,7 @@ export default function AdminPage() {
     try {
       const result = await triggerSync();
       if (result.success) {
-        // Update the storage status with new lastSync time
-        setStorageStatus((prev) => (prev ? { ...prev, lastSync: result.lastSync || null } : null));
+        await fetchStorageStatus();
         setError(null);
       } else {
         setError(result.error || 'Sync failed');

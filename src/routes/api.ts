@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
 import { ensureGateway, findExistingGatewayProcess, killGateway, waitForProcess } from '../gateway';
-import { createSnapshot, getLastBackupId, signalRestoreNeeded } from '../persistence';
+import { createSnapshot, getBackupStatus, signalRestoreNeeded } from '../persistence';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -192,11 +192,11 @@ adminApi.post('/devices/approve-all', async (c) => {
 
 // GET /api/admin/storage - Get backup/restore status
 adminApi.get('/storage', async (c) => {
-  const lastBackupId = await getLastBackupId(c.env.BACKUP_BUCKET);
+  const status = await getBackupStatus(c.env.BACKUP_BUCKET);
 
   return c.json({
     configured: true,
-    lastBackupId,
+    ...status,
     message:
       'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.',
   });
