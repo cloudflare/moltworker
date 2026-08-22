@@ -84,6 +84,91 @@ describe('toOpenAIChatCompletion', () => {
       finish_reason: 'tool_calls',
     });
   });
+
+  // Catches a regression to the legacy `response`-only branch, which returns an empty answer
+  // for GLM's actual ChatCompletionsOutput `choices[0].message` payload.
+  it('adapts an OpenAI-compatible Workers AI text completion and usage', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        id: 'workers-ai-upstream-id',
+        object: 'chat.completion',
+        created: 1_786_723_201,
+        model: '@cf/zai-org/glm-4.7-flash',
+        choices: [
+          {
+            index: 0,
+            message: { role: 'assistant', content: 'GLM-OK', refusal: null },
+            finish_reason: 'stop',
+            logprobs: null,
+          },
+        ],
+        usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 },
+      },
+      context,
+    );
+
+    expect(response).toEqual({
+      id: 'chatcmpl-test',
+      object: 'chat.completion',
+      created: 1_786_723_200,
+      model: DEFAULT_MODEL,
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'GLM-OK' },
+          finish_reason: 'stop',
+        },
+      ],
+      usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 },
+    });
+  });
+
+  // Catches ignoring `choices[0].message.tool_calls` or returning `stop`, either of which
+  // prevents OpenClaw from executing a tool round trip.
+  it('adapts OpenAI-compatible Workers AI tool calls and finish reason', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: 'assistant',
+              content: null,
+              refusal: null,
+              tool_calls: [
+                {
+                  id: 'call_weather',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{"city":"Tokyo"}' },
+                },
+              ],
+            },
+            finish_reason: 'tool_calls',
+            logprobs: null,
+          },
+        ],
+        usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+      },
+      context,
+    );
+
+    expect(response.choices[0]).toEqual({
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: 'call_weather',
+            type: 'function',
+            function: { name: 'get_weather', arguments: '{"city":"Tokyo"}' },
+          },
+        ],
+      },
+      finish_reason: 'tool_calls',
+    });
+    expect(response.usage).toEqual({ prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 });
+  });
 });
 
 async function readStream(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -241,5 +326,110 @@ describe('createOpenAIChatCompletionStream', () => {
     abortController.abort();
 
     await expect(cancelled).resolves.toBeUndefined();
+  });
+
+  // Catches treating each OpenAI-compatible tool-call delta as a new call (or dropping a
+  // continuation without a name/id), which loses arguments before OpenClaw can invoke tools.
+  it('adapts OpenAI-compatible SSE deltas with stable tool-call fragments and one terminator', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"id":"workers-ai-upstream-id","object":"chat.completion.chunk","created":1786723201,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"role":"assistant","content":"Checking tools..."},"finish_reason":null}]}',
+              '',
+              'data: {"id":"workers-ai-upstream-id","object":"chat.completion.chunk","created":1786723201,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\""}},{"index":1,"id":"call_time","type":"function","function":{"name":"get_time","arguments":"{\\"timezone\\":\\""}}]},"finish_reason":null}]}',
+              '',
+              'data: {"id":"workers-ai-upstream-id","object":"chat.completion.chunk","created":1786723201,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Tokyo\\"}"}},{"index":1,"function":{"arguments":"Asia/Tokyo\\"}"}}]},"finish_reason":null}]}',
+              '',
+              'data: {"id":"workers-ai-upstream-id","object":"chat.completion.chunk","created":1786723201,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":21,"completion_tokens":9,"total_tokens":30}}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const output = await readStream(
+      createOpenAIChatCompletionStream(source, context, new AbortController().signal),
+    );
+    const records = dataRecords(output);
+    const chunks = records
+      .filter((record) => record !== '[DONE]')
+      .map((record) => JSON.parse(record));
+
+    expect(chunks).toEqual([
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1_786_723_200,
+        model: DEFAULT_MODEL,
+        choices: [
+          {
+            index: 0,
+            delta: { role: 'assistant', content: 'Checking tools...' },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1_786_723_200,
+        model: DEFAULT_MODEL,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_weather',
+                  type: 'function',
+                  function: { name: 'get_weather', arguments: '{"city":"' },
+                },
+                {
+                  index: 1,
+                  id: 'call_time',
+                  type: 'function',
+                  function: { name: 'get_time', arguments: '{"timezone":"' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1_786_723_200,
+        model: DEFAULT_MODEL,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [
+                { index: 0, function: { arguments: 'Tokyo"}' } },
+                { index: 1, function: { arguments: 'Asia/Tokyo"}' } },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      {
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        created: 1_786_723_200,
+        model: DEFAULT_MODEL,
+        choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 21, completion_tokens: 9, total_tokens: 30 },
+      },
+    ]);
+    expect(records.filter((record) => record === '[DONE]')).toHaveLength(1);
   });
 });

@@ -48,11 +48,21 @@ interface OpenAIChatCompletionChunk {
     delta: {
       role?: 'assistant';
       content?: string;
-      tool_calls?: Array<OpenAIToolCall & { index: number }>;
+      tool_calls?: OpenAIStreamToolCall[];
     };
     finish_reason: 'stop' | 'tool_calls' | null;
   }>;
   usage?: OpenAIUsage;
+}
+
+interface OpenAIStreamToolCall {
+  index: number;
+  id?: string;
+  type?: 'function';
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -106,6 +116,57 @@ function normalizeToolCalls(value: unknown): OpenAIToolCall[] {
   });
 }
 
+function firstChoice(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!Array.isArray(value.choices)) {
+    return undefined;
+  }
+
+  return value.choices.find(isRecord);
+}
+
+function normalizeStreamToolCalls(value: unknown): OpenAIStreamToolCall[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((toolCall, fallbackIndex) => {
+    if (!isRecord(toolCall)) {
+      return [];
+    }
+
+    const functionValue = isRecord(toolCall.function) ? toolCall.function : undefined;
+    const id = typeof toolCall.id === 'string' ? toolCall.id : undefined;
+    const type = toolCall.type === 'function' ? 'function' : undefined;
+    const name = typeof functionValue?.name === 'string' ? functionValue.name : undefined;
+    const argumentsValue =
+      typeof functionValue?.arguments === 'string' ? functionValue.arguments : undefined;
+    if (
+      id === undefined &&
+      type === undefined &&
+      name === undefined &&
+      argumentsValue === undefined
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        index: typeof toolCall.index === 'number' ? toolCall.index : fallbackIndex,
+        ...(id === undefined ? {} : { id }),
+        ...(type === undefined ? {} : { type }),
+        ...(functionValue === undefined
+          ? {}
+          : {
+              function: {
+                ...(name === undefined ? {} : { name }),
+                ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
+              },
+            }),
+      },
+    ];
+  });
+}
+
 function normalizeUsage(value: unknown): OpenAIUsage | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -128,7 +189,9 @@ export function toOpenAIChatCompletion(
   context: ChatCompletionContext,
 ): OpenAIChatCompletionResponse {
   const unwrapped = unwrapResult(result);
-  const toolCalls = normalizeToolCalls(unwrapped.tool_calls);
+  const choice = firstChoice(unwrapped);
+  const message = choice !== undefined && isRecord(choice.message) ? choice.message : undefined;
+  const toolCalls = normalizeToolCalls(message?.tool_calls ?? unwrapped.tool_calls);
   const usage = normalizeUsage(unwrapped.usage);
   const response: OpenAIChatCompletionResponse = {
     id: context.id,
@@ -140,10 +203,16 @@ export function toOpenAIChatCompletion(
         index: 0,
         message: {
           role: 'assistant',
-          content: typeof unwrapped.response === 'string' ? unwrapped.response : null,
+          content:
+            typeof message?.content === 'string'
+              ? message.content
+              : typeof unwrapped.response === 'string'
+                ? unwrapped.response
+                : null,
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
-        finish_reason: toolCalls.length > 0 ? 'tool_calls' : 'stop',
+        finish_reason:
+          toolCalls.length > 0 || choice?.finish_reason === 'tool_calls' ? 'tool_calls' : 'stop',
       },
     ],
     ...(usage === undefined ? {} : { usage }),
@@ -218,26 +287,44 @@ export function createOpenAIChatCompletionStream(
         }
 
         const parsed = unwrapResult(JSON.parse(data));
-        const text = typeof parsed.response === 'string' ? parsed.response : undefined;
-        const toolCalls = normalizeToolCalls(parsed.tool_calls);
+        const choice = firstChoice(parsed);
+        const delta = choice !== undefined && isRecord(choice.delta) ? choice.delta : undefined;
+        const text =
+          typeof delta?.content === 'string'
+            ? delta.content
+            : typeof parsed.response === 'string'
+              ? parsed.response
+              : undefined;
+        const toolCalls: OpenAIStreamToolCall[] =
+          delta === undefined
+            ? normalizeToolCalls(parsed.tool_calls).map((toolCall, index) =>
+                Object.assign({ index }, toolCall),
+              )
+            : normalizeStreamToolCalls(delta.tool_calls);
         const parsedUsage = normalizeUsage(parsed.usage);
         if (parsedUsage !== undefined) {
           usage = parsedUsage;
         }
 
         if (text !== undefined || toolCalls.length > 0) {
-          const delta: OpenAIChatCompletionChunk['choices'][number]['delta'] = {
-            ...(!sentFirstChunk ? { role: 'assistant' as const } : {}),
+          const outputDelta: OpenAIChatCompletionChunk['choices'][number]['delta'] = {
+            ...(!sentFirstChunk || delta?.role === 'assistant'
+              ? { role: 'assistant' as const }
+              : {}),
             ...(text === undefined ? {} : { content: text }),
             ...(toolCalls.length === 0
               ? {}
               : {
-                  tool_calls: toolCalls.map((toolCall, index) => ({ index, ...toolCall })),
+                  tool_calls: toolCalls,
                 }),
           };
           sawToolCalls ||= toolCalls.length > 0;
           sentFirstChunk = true;
-          enqueueRecord(chunk(delta, null));
+          enqueueRecord(chunk(outputDelta, null));
+        }
+
+        if (choice?.finish_reason === 'tool_calls') {
+          sawToolCalls = true;
         }
 
         return false;
