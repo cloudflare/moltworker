@@ -26,10 +26,9 @@ import { getSandbox, Sandbox, type SandboxOptions } from '@cloudflare/sandbox';
 import type { AppEnv, OpenClawEnv } from './types';
 import { GATEWAY_PORT } from './config';
 import { createAccessMiddleware } from './auth';
-import { ensureGateway, findExistingGatewayProcess, killGateway } from './gateway';
+import { findExistingGatewayProcess, killGateway, prepareGateway } from './gateway';
 import { publicRoutes, api, adminUi, debug, cdp, aiProxy } from './routes';
 import { redactSensitiveParams } from './utils/logging';
-import { restoreIfNeeded, createSnapshot } from './persistence';
 import { handleScheduled } from './cron/handler';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -160,7 +159,7 @@ app.route('/', aiProxy);
 // Middleware: Initialize sandbox stub and restore backup if available.
 // Note: we intentionally do NOT call sandbox.start() here. The Sandbox SDK's
 // containerFetch() auto-starts the container when needed, and the catch-all
-// proxy route uses ensureGateway() which handles startup explicitly.
+// proxy route uses prepareGateway() which handles state restoration and startup.
 // Adding start() here would add an unnecessary RPC call on every request,
 // including static assets and health checks that don't need the container.
 app.use('*', async (c, next) => {
@@ -295,16 +294,11 @@ app.all('*', async (c) => {
     }
   }
 
-  // For non-WebSocket, non-HTML requests (API calls, static assets), we need
-  // the gateway to be running. Restore first, then start.
+  // For non-WebSocket, non-HTML requests (API calls, static assets), prepare
+  // persisted state before starting the gateway.
   if (!isWebSocketRequest && !acceptsHtml) {
     try {
-      await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
-    } catch {
-      // non-fatal
-    }
-    try {
-      await ensureGateway(sandbox, c.env);
+      await prepareGateway(sandbox, c.env);
     } catch (error) {
       console.error('[PROXY] Failed to start gateway:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -336,6 +330,13 @@ app.all('*', async (c) => {
       wsRequest = new Request(tokenUrl.toString(), request);
     }
 
+    try {
+      await prepareGateway(sandbox, c.env);
+    } catch (error) {
+      console.error('[WS] Failed to prepare gateway:', error);
+      return new Response('Gateway not ready', { status: 503 });
+    }
+
     // Get WebSocket connection to the container (with retry on crash)
     let containerResponse: Response;
     try {
@@ -344,12 +345,7 @@ app.all('*', async (c) => {
       if (isGatewayCrashedError(err)) {
         console.log('[WS] Gateway crashed, attempting restore + restart and retry...');
         await killGateway(sandbox);
-        try {
-          await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
-        } catch {
-          // non-fatal
-        }
-        await ensureGateway(sandbox, c.env);
+        await prepareGateway(sandbox, c.env);
         try {
           containerResponse = await sandbox.wsConnect(wsRequest, GATEWAY_PORT);
         } catch (retryErr) {
@@ -497,12 +493,7 @@ app.all('*', async (c) => {
     if (isGatewayCrashedError(err)) {
       console.log('[HTTP] Gateway crashed, attempting restore + restart and retry...');
       await killGateway(sandbox);
-      try {
-        await restoreIfNeeded(sandbox, c.env.BACKUP_BUCKET);
-      } catch {
-        // non-fatal
-      }
-      await ensureGateway(sandbox, c.env);
+      await prepareGateway(sandbox, c.env);
       try {
         httpResponse = await sandbox.containerFetch(request, GATEWAY_PORT);
       } catch (retryErr) {

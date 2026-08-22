@@ -112,12 +112,19 @@ export async function findExistingGatewayProcess(sandbox: Sandbox): Promise<Proc
  * @returns The running gateway process, or null if the gateway is up but we
  *          don't have a process handle (detected via port probe only)
  */
+export interface EnsureGatewayOptions {
+  waitForReady?: boolean;
+  /** When false, never spawn a gateway if an existing one disappears. */
+  startIfMissing?: boolean;
+}
+
 export async function ensureGateway(
   sandbox: Sandbox,
   env: OpenClawEnv,
-  options?: { waitForReady?: boolean },
+  options?: EnsureGatewayOptions,
 ): Promise<Process | null> {
   const waitForReady = options?.waitForReady !== false;
+  const startIfMissing = options?.startIfMissing !== false;
   // Check if gateway is already running or starting
   const existingProcess = await findExistingGatewayProcess(sandbox);
   if (existingProcess) {
@@ -128,6 +135,11 @@ export async function ensureGateway(
       existingProcess.status,
     );
 
+    if (!waitForReady) {
+      console.log('Gateway process exists; skipping readiness wait by request');
+      return existingProcess;
+    }
+
     // Always use full startup timeout - a process can be "running" but not ready yet
     // (e.g., just started by another concurrent request). Using a shorter timeout
     // causes race conditions where we kill processes that are still initializing.
@@ -137,13 +149,16 @@ export async function ensureGateway(
       console.log('Gateway is reachable');
       return existingProcess;
       // eslint-disable-next-line no-unused-vars
-    } catch (_e) {
+    } catch (error) {
       // Timeout waiting for port - process is likely dead or stuck, kill and restart
       console.log('Existing process not reachable after full timeout, killing and restarting...');
       try {
         await existingProcess.kill();
       } catch (killError) {
         console.log('Failed to kill process:', killError);
+      }
+      if (!startIfMissing) {
+        throw new Error('Existing OpenClaw gateway process is not reachable', { cause: error });
       }
     }
   }
@@ -160,6 +175,10 @@ export async function ensureGateway(
     }
   } catch (e) {
     console.log('Port probe failed, proceeding to start gateway:', e);
+  }
+
+  if (!startIfMissing) {
+    throw new Error('OpenClaw gateway is not running');
   }
 
   // Start a new OpenClaw gateway

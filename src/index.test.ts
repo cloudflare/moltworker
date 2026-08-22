@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { getSandbox } = vi.hoisted(() => ({ getSandbox: vi.fn(() => ({})) }));
+const { getSandbox, prepareGateway } = vi.hoisted(() => ({
+  getSandbox: vi.fn(() => ({})),
+  prepareGateway: vi.fn(),
+}));
 
 vi.mock('@cloudflare/sandbox', () => ({
   getSandbox,
@@ -10,6 +13,7 @@ vi.mock('./assets/loading.html', () => ({ default: '<html>loading</html>' }));
 vi.mock('./assets/config-error.html', () => ({
   default: '<html>{{MISSING_VARS}}</html>',
 }));
+vi.mock('./gateway/lifecycle', () => ({ prepareGateway }));
 
 import { createMockEnv } from './test-utils';
 import worker, { validateRequiredEnv } from './index';
@@ -105,5 +109,29 @@ describe('AI proxy route ordering', () => {
     expect(response.status).toBe(200);
     expect(aiRun).toHaveBeenCalledTimes(1);
     expect(getSandbox).not.toHaveBeenCalled();
+  });
+});
+
+describe('WebSocket gateway preparation', () => {
+  it('prepares persisted state before the initial WebSocket connection', async () => {
+    const events: string[] = [];
+    prepareGateway.mockImplementation(async () => events.push('prepare'));
+    getSandbox.mockReturnValue({
+      wsConnect: vi.fn(async () => {
+        events.push('connect');
+        return new Response(null, { status: 200 });
+      }),
+    });
+
+    const response = await worker.fetch(
+      new Request('https://moltworker.example/ws', {
+        headers: { Upgrade: 'websocket' },
+      }),
+      createMockEnv({ DEV_MODE: 'true' }),
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(200);
+    expect(events).toEqual(['prepare', 'connect']);
   });
 });

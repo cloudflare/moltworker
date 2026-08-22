@@ -9,9 +9,10 @@ const RESTORE_NEEDED_KEY = 'restore-needed';
 let restored = false;
 
 /**
- * Signal that a restore is needed (e.g. after gateway restart).
- * Writes a marker to R2 so ALL Worker isolates will re-restore,
- * not just the one that handled the restart request.
+ * Signal that a restore is needed after a gateway restart. A cold container
+ * with no canonical config consumes this marker when it restores. A live
+ * container's config deliberately wins over an older snapshot, so it leaves
+ * the marker pending for a future cold restoration.
  */
 export async function signalRestoreNeeded(bucket: R2Bucket): Promise<void> {
   restored = false;
@@ -37,14 +38,29 @@ async function deleteHandle(bucket: R2Bucket): Promise<void> {
   await bucket.delete(HANDLE_KEY);
 }
 
+async function deleteBackupObjectsBestEffort(
+  bucket: R2Bucket,
+  handle: { id: string; dir: string },
+  reason: string,
+): Promise<void> {
+  const results = await Promise.allSettled([
+    bucket.delete(`backups/${handle.id}/data.sqsh`),
+    bucket.delete(`backups/${handle.id}/meta.json`),
+  ]);
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error(`[persistence] Failed to clean ${reason} backup ${handle.id}:`, result.reason);
+    }
+  }
+}
+
 /**
  * Restore the most recent backup if one exists and hasn't been restored yet.
  *
- * IMPORTANT: This must only be called from the catch-all route (gateway proxy)
- * and /api/status — NOT from admin routes like sync or debug/cli. The Sandbox
- * SDK's createBackup() resets the FUSE overlay, wiping any upper-layer writes.
- * If restoreIfNeeded mounts an overlay before createBackup runs, the backup
- * will lose files written to the upper layer.
+ * Gateway preparation calls this only when a stopped container has no
+ * canonical config. A snapshot records the current directory state, including
+ * the restored overlay's writable changes, so preparation must complete before
+ * a snapshot is taken.
  *
  * The backup handle is read from R2 (persisted across Worker isolate restarts).
  * An in-memory flag prevents redundant restores within the same isolate.
@@ -84,8 +100,10 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('BACKUP_EXPIRED') || msg.includes('BACKUP_NOT_FOUND')) {
-      console.log(`[persistence] Backup ${handle.id} expired/gone, clearing handle`);
+      console.log(`[persistence] Backup ${handle.id} expired/gone, clearing state`);
       await deleteHandle(bucket);
+      await bucket.delete(RESTORE_NEEDED_KEY);
+      restored = true;
     } else {
       console.error(`[persistence] Restore failed:`, err);
       throw err;
@@ -96,9 +114,8 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
 /**
  * Create a new snapshot of /home/openclaw (config + workspace + skills).
  *
- * Follows the delete-then-write pattern from the Cloudflare docs: the previous
- * backup's R2 objects are removed before creating a new one, and the handle is
- * persisted to R2 for cross-isolate access.
+ * Creates and persists a replacement before retiring the previous snapshot,
+ * so a failed backup cannot make the old state unavailable.
  *
  * The Sandbox SDK only allows backup of directories under /home, /workspace,
  * /tmp, or /var/tmp. The Dockerfile sets HOME=/home/openclaw and symlinks
@@ -108,12 +125,7 @@ export async function createSnapshot(
   sandbox: Sandbox,
   bucket: R2Bucket,
 ): Promise<{ id: string; dir: string }> {
-  // Delete previous backup objects from R2
   const previousHandle = await getStoredHandle(bucket);
-  if (previousHandle) {
-    await bucket.delete(`backups/${previousHandle.id}/data.sqsh`);
-    await bucket.delete(`backups/${previousHandle.id}/meta.json`);
-  }
 
   // Log directory contents before backup so we can verify what's captured
   try {
@@ -130,7 +142,17 @@ export async function createSnapshot(
     ttl: 604800, // 7 days
   });
 
-  await storeHandle(bucket, handle);
+  try {
+    await storeHandle(bucket, handle);
+  } catch (error) {
+    await deleteBackupObjectsBestEffort(bucket, handle, 'orphaned new');
+    throw error;
+  }
+
+  if (previousHandle && previousHandle.id !== handle.id) {
+    await deleteBackupObjectsBestEffort(bucket, previousHandle, 'previous');
+  }
+
   console.log(`[persistence] Backup ${handle.id} created in ${Date.now() - t0}ms`);
   return handle;
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { findExistingGatewayProcess, isGatewayPortOpen } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
-import { createMockSandbox, createMockExecResult } from '../test-utils';
+import { createMockEnv, createMockSandbox, createMockExecResult } from '../test-utils';
 
 function createFullMockProcess(overrides: Partial<Process> = {}): Process {
   return {
@@ -180,5 +180,20 @@ describe('isGatewayPortOpen', () => {
     execMock.mockRejectedValue(new Error('container not ready'));
 
     await expect(isGatewayPortOpen(sandbox)).rejects.toThrow('container not ready');
+  });
+});
+
+describe('ensureGateway', () => {
+  it('does not wait for an already-starting gateway when waitForReady is false', async () => {
+    const process = createFullMockProcess({ status: 'starting' });
+    const { sandbox, listProcessesMock } = createMockSandbox();
+    listProcessesMock.mockResolvedValue([process]);
+
+    const { ensureGateway } = await import('./process');
+    await expect(ensureGateway(sandbox, createMockEnv(), { waitForReady: false })).resolves.toBe(
+      process,
+    );
+
+    expect(process.waitForPort).not.toHaveBeenCalled();
   });
 });
