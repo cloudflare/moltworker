@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import type { Sandbox } from '@cloudflare/sandbox';
 import { createMockEnv, createMockExecResult } from '../test-utils';
 import { prepareGateway } from './lifecycle';
@@ -141,5 +142,23 @@ describe('prepareGateway', () => {
     expect(command).toContain('trap \'rm -f -- "$probe"\' EXIT');
     expect(command).toContain('printf x > "$probe"');
     expect(command).not.toContain('rm -rf');
+  });
+
+  it('keeps a failed health probe inside a subshell so the persistent parent shell continues', async () => {
+    const sandbox = sandboxWithConfig(true);
+    findExistingGatewayProcess.mockResolvedValue(null);
+    ensureGateway.mockResolvedValue(null);
+
+    await prepareGateway(sandbox, createMockEnv({ BACKUP_BUCKET: leaseBucket() }));
+
+    const healthProbe = vi.mocked(sandbox.exec).mock.calls[0]?.[0] as string;
+    expect(healthProbe.trim()).toMatch(/^\( set -e;/);
+    expect(healthProbe.trim()).not.toMatch(/^set -e/);
+
+    const result = spawnSync('/bin/sh', ['-c', `${healthProbe}; printf parent-alive`], {
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('parent-alive');
   });
 });

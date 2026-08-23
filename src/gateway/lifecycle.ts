@@ -45,7 +45,7 @@ async function hasHealthyCanonicalConfig(sandbox: Sandbox): Promise<boolean> {
   // Read one byte rather than trusting metadata, then write and remove only
   // this process's probe file. The EXIT trap also cleans it on probe failure.
   const healthProbe = [
-    'set -e',
+    '( set -e',
     `config=${CANONICAL_CONFIG_PATH}`,
     `config_dir=${CANONICAL_CONFIG_DIR}`,
     'probe="$config_dir/.gateway-preparation-health-$$"',
@@ -55,6 +55,7 @@ async function hasHealthyCanonicalConfig(sandbox: Sandbox): Promise<boolean> {
     '(umask 077; set -C; printf x > "$probe")',
     'rm -f -- "$probe"',
     'trap - EXIT',
+    ')',
   ].join('; ');
 
   try {
