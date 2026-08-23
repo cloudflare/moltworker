@@ -17,7 +17,7 @@ if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
     exit 0
 fi
 
-CONFIG_DIR="/root/.openclaw"
+CONFIG_DIR="/home/openclaw/.openclaw"
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
 WORKSPACE_DIR="/root/clawd"
 SKILLS_DIR="/root/clawd/skills"

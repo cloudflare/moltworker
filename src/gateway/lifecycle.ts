@@ -4,6 +4,7 @@ import { clearPersistenceCache, restoreIfNeeded } from '../persistence';
 import { ensureGateway, findExistingGatewayProcess, type EnsureGatewayOptions } from './process';
 
 const CANONICAL_CONFIG_PATH = '/home/openclaw/.openclaw/openclaw.json';
+const CANONICAL_CONFIG_DIR = '/home/openclaw/.openclaw';
 const PREPARATION_LEASE_KEY = 'gateway-preparation-lock';
 const LEASE_DURATION_MS = 240_000;
 const LEASE_HEARTBEAT_MS = 30_000;
@@ -37,6 +38,32 @@ function leaseMetadata(owner: string, expiresAt: number): Record<string, string>
 function leaseExpiry(object: R2Object): number {
   const expiresAt = Number(object.customMetadata?.expiresAt);
   return Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : 0;
+}
+
+async function hasHealthyCanonicalConfig(sandbox: Sandbox): Promise<boolean> {
+  // /root/.openclaw is a symlink to this canonical, persisted /home path.
+  // Read one byte rather than trusting metadata, then write and remove only
+  // this process's probe file. The EXIT trap also cleans it on probe failure.
+  const healthProbe = [
+    'set -e',
+    `config=${CANONICAL_CONFIG_PATH}`,
+    `config_dir=${CANONICAL_CONFIG_DIR}`,
+    'probe="$config_dir/.gateway-preparation-health-$$"',
+    'trap \'rm -f -- "$probe"\' EXIT',
+    'test -s "$config"',
+    'head -c 1 -- "$config" >/dev/null',
+    '(umask 077; set -C; printf x > "$probe")',
+    'rm -f -- "$probe"',
+    'trap - EXIT',
+  ].join('; ');
+
+  try {
+    return (await sandbox.exec(healthProbe)).exitCode === 0;
+  } catch {
+    // A disconnected overlay (for example ENOTCONN) is unhealthy. Do not log
+    // config contents; restoration handles stale mounts before gateway start.
+    return false;
+  }
 }
 
 async function acquirePreparationLease(
@@ -253,8 +280,7 @@ async function prepareWithLease(
       return ensureGateway(sandbox, env, options);
     }
 
-    const configCheck = await sandbox.exec(`test -s ${CANONICAL_CONFIG_PATH}`);
-    if (configCheck.exitCode !== 0) {
+    if (!(await hasHealthyCanonicalConfig(sandbox))) {
       await keeper.renewRequired();
       clearPersistenceCache();
       await restoreIfNeeded(sandbox, env.BACKUP_BUCKET);

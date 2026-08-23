@@ -12,13 +12,13 @@ import { buildEnvVars } from './env';
  */
 export async function killGateway(sandbox: Sandbox): Promise<void> {
   // Strategy 1: pgrep by exact name (most precise)
-  // Strategy 2: pkill by pattern (broader match)
-  // Strategy 3: ss to find PID by port (most reliable but needs ss)
+  // Strategy 2: ss to find PID by port (most reliable but needs ss)
+  // Do not use a broad `pkill -f openclaw` here: FUSE overlay commands can
+  // legitimately contain /home/openclaw in their arguments.
   try {
     await sandbox.exec(
       [
-        'kill -9 $(pgrep -x "openclaw-gateway" 2>/dev/null) $(pgrep -x "openclaw" 2>/dev/null) 2>/dev/null',
-        'pkill -9 -f "openclaw" 2>/dev/null',
+        'kill -9 $(pgrep -x "openclaw-gateway" 2>/dev/null) 2>/dev/null',
         `kill -9 $(ss -tlnp sport = :${GATEWAY_PORT} 2>/dev/null | grep -oP "pid=\\K[0-9]+") 2>/dev/null`,
         'true',
       ].join('; '),

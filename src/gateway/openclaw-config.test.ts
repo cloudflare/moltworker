@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const patcherPath = resolve(process.cwd(), 'container/patch-openclaw-config.cjs');
 const dockerfilePath = resolve(process.cwd(), 'Dockerfile');
+const startupScriptPath = resolve(process.cwd(), 'start-openclaw.sh');
 const temporaryDirectories: string[] = [];
 
 interface OpenClawConfig {
@@ -193,5 +194,12 @@ describe('OpenClaw image config path assembly', () => {
     expect(rootConfigRemoval).toBeGreaterThan(homeConfigCreation);
     expect(rootConfigLink).toBeGreaterThan(rootConfigRemoval);
     expect(rootConfigLinkAssertion).toBeGreaterThan(rootConfigLink);
+  });
+
+  it('starts OpenClaw from the same canonical home config path that persistence probes', () => {
+    const startupScript = readFileSync(startupScriptPath, 'utf8');
+
+    expect(startupScript).toContain('CONFIG_DIR="/home/openclaw/.openclaw"');
+    expect(startupScript).not.toContain('CONFIG_DIR="/root/.openclaw"');
   });
 });

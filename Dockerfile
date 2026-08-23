@@ -38,7 +38,7 @@ RUN mkdir -p /home/openclaw/.openclaw \
     && ln -s /home/openclaw/clawd /root/clawd
 
 # Copy startup configuration files
-# Build cache bust: 2026-08-15-v33-workers-ai-proxy
+# Build cache bust: 2026-08-23-v34-workers-ai-proxy
 COPY container/patch-openclaw-config.cjs /usr/local/lib/openclaw/patch-openclaw-config.cjs
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh

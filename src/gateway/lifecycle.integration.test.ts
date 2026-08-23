@@ -34,7 +34,7 @@ describe('prepareGateway start ownership', () => {
         return processChecks === 1 ? [existing] : [];
       }),
       exec: vi.fn().mockImplementation(async (command: string) => {
-        if (command === 'test -s /home/openclaw/.openclaw/openclaw.json') {
+        if (command.includes('head -c 1')) {
           return createMockExecResult('', { exitCode: 1 });
         }
         if (command === 'nc -z localhost 18789') {

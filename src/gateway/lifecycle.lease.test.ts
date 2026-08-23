@@ -37,8 +37,7 @@ function sandboxWithConfig(configExists: boolean): Sandbox {
   return {
     exec: vi.fn().mockImplementation(async (command: string) =>
       createMockExecResult('', {
-        exitCode:
-          command === 'test -s /home/openclaw/.openclaw/openclaw.json' && !configExists ? 1 : 0,
+        exitCode: command.includes('head -c 1') && !configExists ? 1 : 0,
       }),
     ),
   } as unknown as Sandbox;

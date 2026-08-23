@@ -19,12 +19,13 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function sandboxWithConfig(configExists: boolean): Sandbox {
+function sandboxWithConfig(configHealthy: boolean): Sandbox {
   return {
     exec: vi.fn().mockImplementation(async (command: string) =>
       createMockExecResult('', {
-        exitCode:
-          command === 'test -s /home/openclaw/.openclaw/openclaw.json' && !configExists ? 1 : 0,
+        // Simulate a metadata-visible config whose actual bytes or directory
+        // write probe can fail after an overlay disconnect.
+        exitCode: command.includes('head -c 1') && !configHealthy ? 1 : 0,
       }),
     ),
   } as unknown as Sandbox;
@@ -76,7 +77,7 @@ describe('prepareGateway', () => {
 
     expect(events).toEqual(['find', 'find', 'ensure']);
     expect(vi.mocked(sandbox.exec)).toHaveBeenCalledWith(
-      'test -s /home/openclaw/.openclaw/openclaw.json',
+      expect.stringContaining('head -c 1 -- "$config" >/dev/null'),
     );
     expect(clearPersistenceCache).not.toHaveBeenCalled();
     expect(restoreIfNeeded).not.toHaveBeenCalled();
@@ -100,5 +101,45 @@ describe('prepareGateway', () => {
     await prepareGateway(sandbox, createMockEnv({ BACKUP_BUCKET: leaseBucket() }));
 
     expect(events).toEqual(['find', 'find', 'clear', 'restore', 'ensure']);
+  });
+
+  it('restores when a metadata-visible config cannot be read or its directory cannot be written', async () => {
+    const sandbox = sandboxWithConfig(false);
+    findExistingGatewayProcess.mockResolvedValue(null);
+    ensureGateway.mockResolvedValue(null);
+
+    await prepareGateway(sandbox, createMockEnv({ BACKUP_BUCKET: leaseBucket() }));
+
+    expect(clearPersistenceCache).toHaveBeenCalledOnce();
+    expect(restoreIfNeeded).toHaveBeenCalledOnce();
+  });
+
+  it('restores when the config health probe reports a disconnected overlay', async () => {
+    const sandbox = {
+      exec: vi.fn().mockRejectedValue(new Error('ENOTCONN: socket is not connected')),
+    } as unknown as Sandbox;
+    findExistingGatewayProcess.mockResolvedValue(null);
+    ensureGateway.mockResolvedValue(null);
+
+    await prepareGateway(sandbox, createMockEnv({ BACKUP_BUCKET: leaseBucket() }));
+
+    expect(clearPersistenceCache).toHaveBeenCalledOnce();
+    expect(restoreIfNeeded).toHaveBeenCalledOnce();
+  });
+
+  it('uses a byte-bounded canonical config probe and removes only its exact temporary file', async () => {
+    const sandbox = sandboxWithConfig(true);
+    findExistingGatewayProcess.mockResolvedValue(null);
+    ensureGateway.mockResolvedValue(null);
+
+    await prepareGateway(sandbox, createMockEnv({ BACKUP_BUCKET: leaseBucket() }));
+
+    const command = vi.mocked(sandbox.exec).mock.calls[0]?.[0] as string;
+    expect(command).toContain('config=/home/openclaw/.openclaw/openclaw.json');
+    expect(command).toContain('head -c 1 -- "$config" >/dev/null');
+    expect(command).toContain('probe="$config_dir/.gateway-preparation-health-$$"');
+    expect(command).toContain('trap \'rm -f -- "$probe"\' EXIT');
+    expect(command).toContain('printf x > "$probe"');
+    expect(command).not.toContain('rm -rf');
   });
 });

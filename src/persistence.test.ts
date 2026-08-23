@@ -86,6 +86,31 @@ describe('createSnapshot', () => {
 });
 
 describe('restoreIfNeeded', () => {
+  it('unmounts a stale overlay before treating an absent backup handle as clean', async () => {
+    clearPersistenceCache();
+    const events: string[] = [];
+    const bucket = {
+      get: vi.fn().mockImplementation(async () => {
+        events.push('get:backup-handle.json');
+        return null;
+      }),
+      delete: vi.fn(),
+    } as unknown as R2Bucket;
+    const sandbox = {
+      exec: vi.fn().mockImplementation(async (command: string) => {
+        events.push(command);
+        return createMockExecResult();
+      }),
+      restoreBackup: vi.fn(),
+    } as unknown as Sandbox;
+
+    await expect(restoreIfNeeded(sandbox, bucket)).resolves.toBeUndefined();
+
+    expect(events).toEqual(['umount /home/openclaw 2>/dev/null; true', 'get:backup-handle.json']);
+    expect(vi.mocked(sandbox.restoreBackup)).not.toHaveBeenCalled();
+    expect(vi.mocked(bucket.delete)).not.toHaveBeenCalled();
+  });
+
   it.each(['BACKUP_EXPIRED', 'BACKUP_NOT_FOUND'])(
     'clears a %s handle and pending restore marker, then marks this isolate restored',
     async (backupError) => {

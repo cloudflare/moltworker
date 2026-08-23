@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { findExistingGatewayProcess, isGatewayPortOpen } from './process';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { findExistingGatewayProcess, isGatewayPortOpen, killGateway } from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
 import { createMockEnv, createMockSandbox, createMockExecResult } from '../test-utils';
 
@@ -17,6 +17,32 @@ function createFullMockProcess(overrides: Partial<Process> = {}): Process {
     ...overrides,
   } as Process;
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('killGateway', () => {
+  it('kills only exact gateway names, its listening port, and the tracked process', async () => {
+    vi.useFakeTimers();
+    const trackedGateway = createFullMockProcess({
+      command: 'openclaw gateway --port 18789',
+      status: 'running',
+    });
+    const { sandbox, execMock } = createMockSandbox({ processes: [trackedGateway] });
+
+    const killed = killGateway(sandbox);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await killed;
+
+    const terminationCommand = vi.mocked(execMock).mock.calls[0]?.[0] as string;
+    expect(terminationCommand).toContain('pgrep -x "openclaw-gateway"');
+    expect(terminationCommand).toContain('ss -tlnp sport = :18789');
+    expect(terminationCommand).not.toMatch(/pkill\s+-9\s+-f/);
+    expect(terminationCommand).not.toContain('pgrep -x "openclaw" 2>/dev/null');
+    expect(trackedGateway.kill).toHaveBeenCalledOnce();
+  });
+});
 
 describe('findExistingGatewayProcess', () => {
   it('returns null when no processes exist', async () => {

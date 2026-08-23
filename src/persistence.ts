@@ -75,18 +75,19 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
     restored = false;
   }
 
+  // Unmount any stale/disconnected overlay before inspecting the handle.
+  // This also repairs a cold unhealthy container when no backup exists.
+  try {
+    await sandbox.exec(`umount ${BACKUP_DIR} 2>/dev/null; true`);
+  } catch {
+    // May not be mounted
+  }
+
   const handle = await getStoredHandle(bucket);
   if (!handle) {
     console.log('[persistence] No backup handle found in R2, skipping restore');
     restored = true;
     return;
-  }
-
-  // Unmount any stale overlay with whiteout entries before re-mounting
-  try {
-    await sandbox.exec(`umount ${BACKUP_DIR} 2>/dev/null; true`);
-  } catch {
-    // May not be mounted
   }
 
   console.log(`[persistence] Restoring backup ${handle.id}...`);
