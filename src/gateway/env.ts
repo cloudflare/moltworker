@@ -53,6 +53,12 @@ export function buildEnvVars(env: OpenClawEnv): Record<string, string> {
   if (env.DISCORD_DM_POLICY) envVars.DISCORD_DM_POLICY = env.DISCORD_DM_POLICY;
   if (env.SLACK_BOT_TOKEN) envVars.SLACK_BOT_TOKEN = env.SLACK_BOT_TOKEN;
   if (env.SLACK_APP_TOKEN) envVars.SLACK_APP_TOKEN = env.SLACK_APP_TOKEN;
+  if (env.SLACK_GROUP_POLICY !== undefined) {
+    envVars.SLACK_GROUP_POLICY = env.SLACK_GROUP_POLICY;
+  }
+  if (env.SLACK_ALLOWED_CHANNELS !== undefined) {
+    envVars.SLACK_ALLOWED_CHANNELS = env.SLACK_ALLOWED_CHANNELS;
+  }
   if (env.SLACK_CHANNEL_REPLY_TO_MODE !== undefined) {
     envVars.SLACK_CHANNEL_REPLY_TO_MODE = env.SLACK_CHANNEL_REPLY_TO_MODE;
   }

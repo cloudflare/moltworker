@@ -20,14 +20,18 @@ defaults:
 
 | Variable | Default | Allowed values |
 |----------|---------|----------------|
+| `SLACK_GROUP_POLICY` | `allowlist` | `allowlist`, `open`, `disabled`; set `open` explicitly for an all-joined-channels test, or use `SLACK_ALLOWED_CHANNELS` |
+| `SLACK_ALLOWED_CHANNELS` | empty | Comma-separated stable Slack channel IDs (`C...`/`G...`) when using `allowlist` |
 | `SLACK_CHANNEL_REPLY_TO_MODE` | `all` | `off`, `first`, `all`, `batched` |
 | `SLACK_THREAD_HISTORY_SCOPE` | `thread` | `thread`, `channel` |
 | `SLACK_THREAD_INHERIT_PARENT` | `false` | `true`, `false` |
 | `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | `20` | Base-10 safe integer `>= 0` |
 | `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | `false` | `true`, `false` |
 
-With these defaults, a top-level channel mention starts a Slack thread. Once
-OpenClaw has replied, a follow-up in that Slack thread does not need another
+For a disposable all-channel test, set `SLACK_GROUP_POLICY=open` explicitly;
+otherwise keep `allowlist` and include the test channel's stable ID in
+`SLACK_ALLOWED_CHANNELS`. With a permitted channel, a top-level mention starts
+a Slack thread. Once OpenClaw has replied, a follow-up in that Slack thread does not need another
 mention and remains in the same isolated OpenClaw thread session. Distinct
 Slack roots use distinct sessions. `inheritParent=false` prevents unrelated
 channel history from entering a thread session, and the initial hydration

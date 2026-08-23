@@ -41,6 +41,8 @@ MOLTBOT_GATEWAY_TOKEN=replace-with-a-different-random-64-hex
 # DISCORD_BOT_TOKEN=optional
 # SLACK_BOT_TOKEN=xoxb-optional
 # SLACK_APP_TOKEN=xapp-optional
+# SLACK_GROUP_POLICY=allowlist    # allowlist (default) | open | disabled
+# SLACK_ALLOWED_CHANNELS=C123,G456 # stable Slack channel IDs for allowlist
 # Slack threading overrides (used when both Slack tokens are set)
 # SLACK_CHANNEL_REPLY_TO_MODE=all       # off | first | all | batched
 # SLACK_THREAD_HISTORY_SCOPE=thread     # thread | channel

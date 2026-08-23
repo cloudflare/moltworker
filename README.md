@@ -310,13 +310,28 @@ npx wrangler secret put SLACK_BOT_TOKEN
 # Enter the xapp- token at the second prompt.
 npx wrangler secret put SLACK_APP_TOKEN
 
+# Recommended: enter one or more comma-separated stable channel IDs (C... or G...).
+# In Slack, open the channel details and copy the Channel ID from the About tab.
+npx wrangler secret put SLACK_ALLOWED_CHANNELS
+
 npm run deploy
 ```
 
 Both tokens are required. The deployed container enables Slack in Socket Mode
-with `groupPolicy: "open"`. This means every public or private channel that the
-Slack app has joined is allowed; channels the app has not joined remain
-invisible to it. Channel messages require an `@OpenClaw` mention by default.
+with `groupPolicy: "allowlist"` by default. With no allowlist, channel
+messages are blocked. The command above stores the allowlist as an encrypted
+Worker secret; it may instead be configured as a regular Worker variable in the
+Cloudflare dashboard. To allow every channel the app joins, omit the allowlist
+command and explicitly opt in before deployment:
+
+```bash
+npx wrangler secret put SLACK_GROUP_POLICY
+# Enter: open
+```
+
+`open` applies to every public or private channel the Slack app has joined;
+channels the app has not joined remain invisible to it. Channel messages still
+require an `@OpenClaw` mention by default.
 
 #### 3. Add a channel and create its first session
 
@@ -348,21 +363,24 @@ of that file and its R2 snapshots.
 
 | Variable | Default | Allowed values / meaning |
 |----------|---------|--------------------------|
+| `SLACK_GROUP_POLICY` | `allowlist` | `allowlist`, `open`, or `disabled`; `open` is an explicit opt-in for all joined channels |
+| `SLACK_ALLOWED_CHANNELS` | empty | Comma-separated stable Slack channel IDs such as `C12345678` or `G12345678`; used by `allowlist` and empty means no channel access |
 | `SLACK_CHANNEL_REPLY_TO_MODE` | `all` | `off`, `first`, `all`, or `batched`; controls top-level `replyToMode` and the channel value in `replyToModeByChatType` |
 | `SLACK_THREAD_HISTORY_SCOPE` | `thread` | `thread` or `channel`; selects the history scope used to hydrate a thread |
 | `SLACK_THREAD_INHERIT_PARENT` | `false` | `true` or `false`; `false` keeps a thread from inheriting unrelated channel history |
 | `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | `20` | A base-10 safe integer greater than or equal to `0`; maximum initial messages fetched for hydration |
 | `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | `false` | `true` or `false`; when `false`, a follow-up in a thread needs no new mention after OpenClaw has participated |
 
-With the defaults, a top-level channel mention starts a Slack thread. Replies
-in that Slack thread continue in the same isolated OpenClaw thread session and
-do not need another mention after the bot has participated. Different Slack
-roots have different sessions. `inheritParent=false` prevents unrelated
-channel transcript from being copied into a new thread session, and the first
-hydration fetches 20 messages by default. Direct messages and group DMs remain
-off-thread: their `replyToModeByChatType` values are always `off` and cannot be
-changed with these environment variables. The channel value is the only
-chat-type reply mode exposed for override.
+For a channel admitted by the allowlist (or by explicit `open` policy), the
+threading defaults make a top-level mention start a Slack thread. Replies in
+that Slack thread continue in the same isolated OpenClaw thread session and do
+not need another mention after the bot has participated. Different Slack roots
+have different sessions. `inheritParent=false` prevents unrelated channel
+transcript from being copied into a new thread session, and the first hydration
+fetches 20 messages by default. Direct messages and group DMs remain off-thread:
+their `replyToModeByChatType` values are always `off` and cannot be changed with
+these environment variables. The channel value is the only chat-type reply mode
+exposed for override.
 
 ## Optional: Browser Automation (CDP)
 
@@ -478,6 +496,8 @@ Also verify that a request without the Bearer credential returns `401`, an unkno
 | `DISCORD_DM_POLICY` | Variable | No | Discord DM policy: `pairing` (default) or `open` |
 | `SLACK_BOT_TOKEN` | Secret | No | Slack Bot User OAuth Token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Secret | No | Slack App-Level Token (`xapp-...`) with `connections:write` |
+| `SLACK_GROUP_POLICY` | Variable | No | Channel policy: `allowlist` (default), `open` (explicit opt-in), or `disabled` |
+| `SLACK_ALLOWED_CHANNELS` | Variable | No | Comma-separated stable Slack channel IDs used by the `allowlist` policy |
 | `SLACK_CHANNEL_REPLY_TO_MODE` | Variable | No | Channel reply mode: `off`, `first`, `all` (default), or `batched` |
 | `SLACK_THREAD_HISTORY_SCOPE` | Variable | No | Thread hydration scope: `thread` (default) or `channel` |
 | `SLACK_THREAD_INHERIT_PARENT` | Variable | No | Whether a thread inherits parent history: `false` (default) or `true` |

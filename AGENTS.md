@@ -206,6 +206,8 @@ These are the env vars passed TO the container (internal names):
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
 | `SLACK_BOT_TOKEN` | default Slack account env fallback | Not serialized to config |
 | `SLACK_APP_TOKEN` | default Slack account env fallback | Not serialized to config |
+| `SLACK_GROUP_POLICY` | `channels.slack.groupPolicy` | `allowlist` (default), `open` (explicit opt-in), or `disabled` |
+| `SLACK_ALLOWED_CHANNELS` | `channels.slack.channels` | Comma-separated stable Slack channel IDs (`C...`/`G...`) used by the `allowlist` policy |
 | `SLACK_CHANNEL_REPLY_TO_MODE` | `channels.slack.replyToMode` and `replyToModeByChatType.channel` | `off`, `first`, `all` (default), or `batched` |
 | `SLACK_THREAD_HISTORY_SCOPE` | `channels.slack.thread.historyScope` | `thread` (default) or `channel` |
 | `SLACK_THREAD_INHERIT_PARENT` | `channels.slack.thread.inheritParent` | `false` (default) or `true` |
@@ -220,7 +222,12 @@ It deliberately omits the token values from `openclaw.json`; the configured
 default Slack account reads `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` from the
 container environment so they are not included in R2 snapshots.
 
-The startup patch also manages Slack threading. With its defaults, a top-level
+The startup patch also manages Slack access and threading. Slack defaults to the
+fail-closed `groupPolicy=allowlist`; an empty `SLACK_ALLOWED_CHANNELS` value
+blocks channel messages. Set `SLACK_GROUP_POLICY=open` explicitly only when
+every channel the app has joined should be eligible. For an allowlist, provide
+stable channel IDs (for example `C123...`) through `SLACK_ALLOWED_CHANNELS`.
+With its threading defaults, a top-level
 channel mention starts a Slack thread; follow-ups stay in the same isolated
 OpenClaw thread session without another mention after the bot has participated.
 Distinct Slack roots use distinct sessions. `inheritParent=false` avoids

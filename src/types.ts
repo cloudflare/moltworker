@@ -33,6 +33,8 @@ export interface OpenClawEnv {
   DISCORD_DM_POLICY?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
+  SLACK_GROUP_POLICY?: string;
+  SLACK_ALLOWED_CHANNELS?: string;
   SLACK_CHANNEL_REPLY_TO_MODE?: string;
   SLACK_THREAD_HISTORY_SCOPE?: string;
   SLACK_THREAD_INHERIT_PARENT?: string;

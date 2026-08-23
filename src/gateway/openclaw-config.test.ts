@@ -195,7 +195,8 @@ describe('OpenClaw config patcher', () => {
       slack: {
         enabled: true,
         mode: 'socket',
-        groupPolicy: 'open',
+        groupPolicy: 'allowlist',
+        channels: {},
         replyToMode: 'all',
         replyToModeByChatType: {
           direct: 'off',
@@ -260,7 +261,8 @@ describe('OpenClaw config patcher', () => {
     expect(config.channels?.slack).toEqual({
       enabled: true,
       mode: 'socket',
-      groupPolicy: 'open',
+      groupPolicy: 'allowlist',
+      channels: {},
       replyToMode: 'all',
       replyToModeByChatType: {
         direct: 'off',
@@ -277,6 +279,149 @@ describe('OpenClaw config patcher', () => {
     expect(serialized).not.toContain('slack-bot-token');
     expect(serialized).not.toContain('slack-app-token');
   });
+
+  it.each<Record<string, string>>([
+    {},
+    { SLACK_BOT_TOKEN: 'current-bot-token' },
+    { SLACK_APP_TOKEN: 'current-app-token' },
+  ])(
+    'scrubs restored Slack credentials and disables legacy config without both current tokens',
+    (environment) => {
+      const { config, serialized } = patchConfig(
+        {
+          channels: {
+            slack: {
+              enabled: true,
+              botToken: 'legacy-root-bot-token',
+              appToken: 'legacy-root-app-token',
+              userToken: 'legacy-root-user-token',
+              signingSecret: 'legacy-root-signing-secret',
+              token: 'legacy-root-token',
+              accounts: {
+                default: {
+                  enabled: true,
+                  botToken: 'legacy-default-bot-token',
+                  appToken: 'legacy-default-app-token',
+                  userToken: 'legacy-default-user-token',
+                  signingSecret: 'legacy-default-signing-secret',
+                  token: 'legacy-default-token',
+                  relay: {
+                    endpoint: 'https://relay.example.test',
+                    authToken: 'legacy-default-relay-token',
+                  },
+                },
+                named: {
+                  enabled: true,
+                  botToken: 'legacy-named-bot-token',
+                  appToken: 'legacy-named-app-token',
+                },
+              },
+              channels: { C123: { enabled: true } },
+            },
+          },
+          plugins: { entries: { slack: { enabled: true } } },
+        },
+        environment,
+      );
+
+      const slack = config.channels?.slack as {
+        enabled?: boolean;
+        botToken?: string;
+        appToken?: string;
+        userToken?: string;
+        signingSecret?: string;
+        token?: string;
+        accounts?: Record<string, Record<string, unknown>>;
+        channels?: Record<string, unknown>;
+      };
+      expect(slack.enabled).toBe(false);
+      expect(slack.botToken).toBeUndefined();
+      expect(slack.appToken).toBeUndefined();
+      expect(slack.userToken).toBeUndefined();
+      expect(slack.signingSecret).toBeUndefined();
+      expect(slack.token).toBeUndefined();
+      expect(slack.accounts?.default).toMatchObject({
+        enabled: false,
+        relay: { endpoint: 'https://relay.example.test' },
+      });
+      const defaultRelay = slack.accounts?.default?.relay;
+      expect(
+        defaultRelay && typeof defaultRelay === 'object'
+          ? (defaultRelay as { authToken?: string }).authToken
+          : undefined,
+      ).toBeUndefined();
+      expect(slack.accounts?.named).toMatchObject({ enabled: false });
+      expect(slack.channels).toMatchObject({ C123: { enabled: true } });
+      expect(config.plugins?.entries?.slack).toMatchObject({ enabled: false });
+      expect(serialized).not.toContain('legacy-');
+    },
+  );
+
+  it('opts into Slack open group policy only with an explicit environment value', () => {
+    const { config } = patchConfig(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_GROUP_POLICY: 'open',
+      },
+    );
+
+    expect(config.channels?.slack).toMatchObject({
+      groupPolicy: 'open',
+    });
+    expect(config.channels?.slack).not.toHaveProperty('channels');
+  });
+
+  it('builds a Slack channel allowlist from validated channel IDs', () => {
+    const { config } = patchConfig(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_ALLOWED_CHANNELS: 'C123,G456',
+      },
+    );
+
+    expect(config.channels?.slack).toMatchObject({
+      groupPolicy: 'allowlist',
+      channels: {
+        C123: { enabled: true, requireMention: true },
+        G456: { enabled: true, requireMention: true },
+      },
+    });
+  });
+
+  it('rejects an invalid Slack group policy', () => {
+    const failure = patchConfigFailure(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_GROUP_POLICY: 'everyone',
+      },
+    );
+
+    expect(failure.status).not.toBe(0);
+    expect(failure.stderr).toContain('SLACK_GROUP_POLICY');
+  });
+
+  it.each(['#public-claw', 'public-claw', 'C123,', 'C123,C123'])(
+    'rejects invalid Slack channel allowlist value %s',
+    (value) => {
+      const failure = patchConfigFailure(
+        {},
+        {
+          SLACK_BOT_TOKEN: 'slack-bot-token',
+          SLACK_APP_TOKEN: 'slack-app-token',
+          SLACK_ALLOWED_CHANNELS: value,
+        },
+      );
+
+      expect(failure.status).not.toBe(0);
+      expect(failure.stderr).toContain('SLACK_ALLOWED_CHANNELS');
+    },
+  );
 
   it('uses Slack threading overrides while keeping direct and group chats off-thread', () => {
     const { config } = patchConfig(
