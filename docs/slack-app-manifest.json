@@ -1,0 +1,65 @@
+{
+  "display_information": {
+    "name": "OpenClaw",
+    "description": "Slack connector for OpenClaw"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "OpenClaw",
+      "always_online": true
+    },
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "assistant_view": {
+      "assistant_description": "OpenClaw connects Slack assistant threads to OpenClaw agents.",
+      "suggested_prompts": [
+        {
+          "title": "What can you do?",
+          "message": "What can you help me with?"
+        },
+        {
+          "title": "Summarize this channel",
+          "message": "Summarize the recent activity in this channel."
+        }
+      ]
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "assistant:write",
+        "channels:history",
+        "channels:read",
+        "chat:write",
+        "groups:history",
+        "groups:read",
+        "im:history",
+        "im:read",
+        "im:write",
+        "mpim:history",
+        "mpim:read",
+        "mpim:write",
+        "users:read"
+      ]
+    }
+  },
+  "settings": {
+    "socket_mode_enabled": true,
+    "event_subscriptions": {
+      "bot_events": [
+        "app_home_opened",
+        "app_mention",
+        "assistant_thread_started",
+        "assistant_thread_context_changed",
+        "message.channels",
+        "message.groups",
+        "message.im",
+        "message.mpim"
+      ]
+    }
+  }
+}

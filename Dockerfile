@@ -20,10 +20,12 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && node --version \
     && npm --version
 
-# Install OpenClaw
-# Pin to specific version for reproducible builds
-RUN npm install -g openclaw@2026.7.1-2 \
-    && openclaw --version
+# Install OpenClaw and its externalized Slack plugin. Keep both pinned to
+# compatible releases for reproducible builds. The plugin is installed in the
+# immutable global prefix so restoring /home/openclaw cannot remove it.
+RUN npm install -g openclaw@2026.7.1-2 @openclaw/slack@2026.7.1 \
+    && openclaw --version \
+    && test -f /usr/local/lib/node_modules/@openclaw/slack/openclaw.plugin.json
 
 # Use /home/openclaw as the home directory instead of /root.
 # The Sandbox SDK backup API only allows directories under /home, /workspace,
@@ -38,7 +40,7 @@ RUN mkdir -p /home/openclaw/.openclaw \
     && ln -s /home/openclaw/clawd /root/clawd
 
 # Copy startup configuration files
-# Build cache bust: 2026-08-23-v34-workers-ai-proxy
+# Build cache bust: 2026-08-23-v35-slack-channel
 COPY container/patch-openclaw-config.cjs /usr/local/lib/openclaw/patch-openclaw-config.cjs
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
 RUN chmod +x /usr/local/bin/start-openclaw.sh

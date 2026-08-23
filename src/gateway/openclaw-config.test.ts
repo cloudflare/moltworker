@@ -21,6 +21,11 @@ interface OpenClawConfig {
   models?: {
     providers?: Record<string, unknown>;
   };
+  plugins?: {
+    allow?: string[];
+    entries?: Record<string, { enabled?: boolean }>;
+    load?: { paths?: string[] };
+  };
 }
 
 function patchConfig(
@@ -42,6 +47,26 @@ function patchConfig(
 
   const serialized = readFileSync(configPath, 'utf8');
   return { config: JSON.parse(serialized) as OpenClawConfig, serialized };
+}
+
+function patchConfigFailure(
+  initialConfig: OpenClawConfig,
+  environment: Record<string, string>,
+): { status: number | undefined; stderr: string } {
+  try {
+    patchConfig(initialConfig, environment);
+  } catch (error) {
+    const processError = error as NodeJS.ErrnoException & {
+      status?: number;
+      stderr?: Buffer;
+    };
+    return {
+      status: processError.status,
+      stderr: processError.stderr?.toString() ?? '',
+    };
+  }
+
+  throw new Error('Expected patcher to reject the environment value');
 }
 
 afterEach(() => {
@@ -130,7 +155,7 @@ describe('OpenClaw config patcher', () => {
   });
 
   it('retains gateway and channel patch behavior', () => {
-    const { config } = patchConfig(
+    const { config, serialized } = patchConfig(
       {
         gateway: { existingSetting: 'retained' },
         channels: { telegram: { staleKey: 'removed' } },
@@ -168,11 +193,25 @@ describe('OpenClaw config patcher', () => {
         dm: { policy: 'open', allowFrom: ['*'] },
       },
       slack: {
-        botToken: 'slack-bot-token',
-        appToken: 'slack-app-token',
         enabled: true,
+        mode: 'socket',
+        groupPolicy: 'open',
+        replyToMode: 'all',
+        replyToModeByChatType: {
+          direct: 'off',
+          group: 'off',
+          channel: 'all',
+        },
+        thread: {
+          historyScope: 'thread',
+          inheritParent: false,
+          initialHistoryLimit: 20,
+          requireExplicitMention: false,
+        },
       },
     });
+    expect(serialized).not.toContain('slack-bot-token');
+    expect(serialized).not.toContain('slack-app-token');
   });
 
   it('does not register the proxy provider unless both proxy variables exist', () => {
@@ -180,6 +219,143 @@ describe('OpenClaw config patcher', () => {
 
     expect(config.models?.providers?.['cf-workers-ai']).toBeUndefined();
     expect(config.agents?.defaults?.model?.primary).toBeUndefined();
+  });
+
+  it('registers the image-baked Slack plugin without replacing existing plugin policy', () => {
+    const { config } = patchConfig(
+      {
+        plugins: {
+          allow: ['existing-plugin'],
+          entries: { 'existing-plugin': { enabled: true } },
+          load: { paths: ['/opt/existing-plugin'] },
+        },
+      },
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+      },
+    );
+
+    expect(config.plugins).toEqual({
+      allow: ['existing-plugin', 'slack'],
+      entries: {
+        'existing-plugin': { enabled: true },
+        slack: { enabled: true },
+      },
+      load: {
+        paths: ['/opt/existing-plugin', '/usr/local/lib/node_modules/@openclaw/slack'],
+      },
+    });
+  });
+
+  it('configures channel roots to reply in isolated Slack threads by default', () => {
+    const { config, serialized } = patchConfig(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+      },
+    );
+
+    expect(config.channels?.slack).toEqual({
+      enabled: true,
+      mode: 'socket',
+      groupPolicy: 'open',
+      replyToMode: 'all',
+      replyToModeByChatType: {
+        direct: 'off',
+        group: 'off',
+        channel: 'all',
+      },
+      thread: {
+        historyScope: 'thread',
+        inheritParent: false,
+        initialHistoryLimit: 20,
+        requireExplicitMention: false,
+      },
+    });
+    expect(serialized).not.toContain('slack-bot-token');
+    expect(serialized).not.toContain('slack-app-token');
+  });
+
+  it('uses Slack threading overrides while keeping direct and group chats off-thread', () => {
+    const { config } = patchConfig(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_CHANNEL_REPLY_TO_MODE: 'batched',
+        SLACK_THREAD_HISTORY_SCOPE: 'channel',
+        SLACK_THREAD_INHERIT_PARENT: 'true',
+        SLACK_THREAD_INITIAL_HISTORY_LIMIT: '0',
+        SLACK_THREAD_REQUIRE_EXPLICIT_MENTION: 'true',
+      },
+    );
+
+    expect(config.channels?.slack).toMatchObject({
+      replyToMode: 'batched',
+      replyToModeByChatType: {
+        direct: 'off',
+        group: 'off',
+        channel: 'batched',
+      },
+      thread: {
+        historyScope: 'channel',
+        inheritParent: true,
+        initialHistoryLimit: 0,
+        requireExplicitMention: true,
+      },
+    });
+  });
+
+  it('ignores invalid Slack overrides when neither Slack token enables the integration', () => {
+    const { config } = patchConfig(
+      {},
+      {
+        SLACK_CHANNEL_REPLY_TO_MODE: 'unexpected',
+        SLACK_THREAD_HISTORY_SCOPE: 'all',
+        SLACK_THREAD_INHERIT_PARENT: 'yes',
+        SLACK_THREAD_INITIAL_HISTORY_LIMIT: '-1',
+        SLACK_THREAD_REQUIRE_EXPLICIT_MENTION: '1',
+      },
+    );
+
+    expect(config.channels?.slack).toBeUndefined();
+  });
+
+  it('ignores invalid Slack overrides when only one Slack token is present', () => {
+    const { config } = patchConfig(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_CHANNEL_REPLY_TO_MODE: 'unexpected',
+      },
+    );
+
+    expect(config.channels?.slack).toBeUndefined();
+  });
+
+  it.each([
+    ['SLACK_CHANNEL_REPLY_TO_MODE', 'unexpected'],
+    ['SLACK_THREAD_HISTORY_SCOPE', 'all'],
+    ['SLACK_THREAD_INHERIT_PARENT', 'yes'],
+    ['SLACK_THREAD_REQUIRE_EXPLICIT_MENTION', '1'],
+    ['SLACK_THREAD_INITIAL_HISTORY_LIMIT', '-1'],
+    ['SLACK_THREAD_INITIAL_HISTORY_LIMIT', '1.5'],
+    ['SLACK_THREAD_INITIAL_HISTORY_LIMIT', '1e3'],
+    ['SLACK_THREAD_INITIAL_HISTORY_LIMIT', '999999999999999999999999999999999999999999999999'],
+  ])('rejects invalid %s values', (variable, value) => {
+    const failure = patchConfigFailure(
+      {},
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        [variable]: value,
+      },
+    );
+
+    expect(failure.status).not.toBe(0);
+    expect(failure.stderr).toContain(variable);
   });
 });
 

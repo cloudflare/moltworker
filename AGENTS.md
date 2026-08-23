@@ -204,8 +204,31 @@ These are the env vars passed TO the container (internal names):
 | `OPENCLAW_DEV_MODE` | `controlUi.allowInsecureAuth` | Mapped from `DEV_MODE` |
 | `TELEGRAM_BOT_TOKEN` | `channels.telegram.botToken` | |
 | `DISCORD_BOT_TOKEN` | `channels.discord.token` | |
-| `SLACK_BOT_TOKEN` | `channels.slack.botToken` | |
-| `SLACK_APP_TOKEN` | `channels.slack.appToken` | |
+| `SLACK_BOT_TOKEN` | default Slack account env fallback | Not serialized to config |
+| `SLACK_APP_TOKEN` | default Slack account env fallback | Not serialized to config |
+| `SLACK_CHANNEL_REPLY_TO_MODE` | `channels.slack.replyToMode` and `replyToModeByChatType.channel` | `off`, `first`, `all` (default), or `batched` |
+| `SLACK_THREAD_HISTORY_SCOPE` | `channels.slack.thread.historyScope` | `thread` (default) or `channel` |
+| `SLACK_THREAD_INHERIT_PARENT` | `channels.slack.thread.inheritParent` | `false` (default) or `true` |
+| `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | `channels.slack.thread.initialHistoryLimit` | Base-10 safe integer `>= 0`; default `20` |
+| `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | `channels.slack.thread.requireExplicitMention` | `false` (default) or `true` |
+
+Slack is an external plugin in OpenClaw 2026.5 and later. The Docker image
+installs the plugin in the global npm prefix rather than `/home/openclaw`,
+because R2 restores replace the persisted `/home/openclaw` tree. The startup
+patcher registers that immutable plugin path when both Slack tokens are set.
+It deliberately omits the token values from `openclaw.json`; the configured
+default Slack account reads `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` from the
+container environment so they are not included in R2 snapshots.
+
+The startup patch also manages Slack threading. With its defaults, a top-level
+channel mention starts a Slack thread; follow-ups stay in the same isolated
+OpenClaw thread session without another mention after the bot has participated.
+Distinct Slack roots use distinct sessions. `inheritParent=false` avoids
+unrelated channel history, and initial hydration fetches 20 messages by
+default. Direct messages and group DMs remain off-thread: their
+`replyToModeByChatType` values are fixed to `off`; only the channel reply mode
+is environment-configurable. These environment variables are the supported
+override mechanism for the managed patch values.
 
 ## OpenClaw Config Schema
 

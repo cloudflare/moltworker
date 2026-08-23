@@ -149,6 +149,24 @@ describe('buildEnvVars', () => {
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
   });
 
+  it('forwards Slack threading configuration to the container', () => {
+    const env = createMockEnv({
+      SLACK_CHANNEL_REPLY_TO_MODE: 'first',
+      SLACK_THREAD_HISTORY_SCOPE: 'channel',
+      SLACK_THREAD_INHERIT_PARENT: 'true',
+      SLACK_THREAD_INITIAL_HISTORY_LIMIT: '0',
+      SLACK_THREAD_REQUIRE_EXPLICIT_MENTION: 'true',
+    });
+
+    expect(buildEnvVars(env)).toMatchObject({
+      SLACK_CHANNEL_REPLY_TO_MODE: 'first',
+      SLACK_THREAD_HISTORY_SCOPE: 'channel',
+      SLACK_THREAD_INHERIT_PARENT: 'true',
+      SLACK_THREAD_INITIAL_HISTORY_LIMIT: '0',
+      SLACK_THREAD_REQUIRE_EXPLICIT_MENTION: 'true',
+    });
+  });
+
   it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
     const env = createMockEnv({
       DEV_MODE: 'true',

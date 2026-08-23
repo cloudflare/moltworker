@@ -1,6 +1,32 @@
 const fs = require('fs');
 
 const configPath = process.env.OPENCLAW_CONFIG_PATH || '/root/.openclaw/openclaw.json';
+
+function slackEnum(name, value, allowedValues, defaultValue) {
+  const resolvedValue = value === undefined ? defaultValue : value;
+  if (!allowedValues.includes(resolvedValue)) {
+    throw new Error(`Invalid ${name}: ${JSON.stringify(value)}`);
+  }
+  return resolvedValue;
+}
+
+function slackBoolean(name, value, defaultValue) {
+  const resolvedValue = value === undefined ? defaultValue : value;
+  if (resolvedValue !== 'true' && resolvedValue !== 'false') {
+    throw new Error(`Invalid ${name}: ${JSON.stringify(value)}`);
+  }
+  return resolvedValue === 'true';
+}
+
+function slackNonnegativeInteger(name, value, defaultValue) {
+  const resolvedValue = value === undefined ? defaultValue : value;
+  const parsedValue = Number(resolvedValue);
+  if (!/^\d+$/.test(resolvedValue) || !Number.isSafeInteger(parsedValue)) {
+    throw new Error(`Invalid ${name}: ${JSON.stringify(value)}`);
+  }
+  return parsedValue;
+}
+
 console.log('Patching config at:', configPath);
 let config = {};
 
@@ -158,10 +184,72 @@ if (process.env.DISCORD_BOT_TOKEN) {
 }
 
 if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
-  config.channels.slack = {
-    botToken: process.env.SLACK_BOT_TOKEN,
-    appToken: process.env.SLACK_APP_TOKEN,
+  const slackChannelReplyToMode = slackEnum(
+    'SLACK_CHANNEL_REPLY_TO_MODE',
+    process.env.SLACK_CHANNEL_REPLY_TO_MODE,
+    ['off', 'first', 'all', 'batched'],
+    'all',
+  );
+  const slackThreadHistoryScope = slackEnum(
+    'SLACK_THREAD_HISTORY_SCOPE',
+    process.env.SLACK_THREAD_HISTORY_SCOPE,
+    ['thread', 'channel'],
+    'thread',
+  );
+  const slackThreadInheritParent = slackBoolean(
+    'SLACK_THREAD_INHERIT_PARENT',
+    process.env.SLACK_THREAD_INHERIT_PARENT,
+    'false',
+  );
+  const slackThreadInitialHistoryLimit = slackNonnegativeInteger(
+    'SLACK_THREAD_INITIAL_HISTORY_LIMIT',
+    process.env.SLACK_THREAD_INITIAL_HISTORY_LIMIT,
+    '20',
+  );
+  const slackThreadRequireExplicitMention = slackBoolean(
+    'SLACK_THREAD_REQUIRE_EXPLICIT_MENTION',
+    process.env.SLACK_THREAD_REQUIRE_EXPLICIT_MENTION,
+    'false',
+  );
+
+  // The externalized Slack plugin lives outside /home so an R2 restore cannot
+  // overwrite it. Once this channel block exists, OpenClaw resolves the
+  // default account credentials from SLACK_BOT_TOKEN and SLACK_APP_TOKEN;
+  // keeping them out of this object prevents secrets entering R2 snapshots.
+  const slackPluginPath = '/usr/local/lib/node_modules/@openclaw/slack';
+  config.plugins = config.plugins || {};
+  config.plugins.load = config.plugins.load || {};
+  config.plugins.load.paths = Array.isArray(config.plugins.load.paths)
+    ? config.plugins.load.paths
+    : [];
+  if (!config.plugins.load.paths.includes(slackPluginPath)) {
+    config.plugins.load.paths.push(slackPluginPath);
+  }
+  config.plugins.entries = config.plugins.entries || {};
+  config.plugins.entries.slack = {
+    ...(config.plugins.entries.slack || {}),
     enabled: true,
+  };
+  if (Array.isArray(config.plugins.allow) && !config.plugins.allow.includes('slack')) {
+    config.plugins.allow.push('slack');
+  }
+
+  config.channels.slack = {
+    enabled: true,
+    mode: 'socket',
+    groupPolicy: 'open',
+    replyToMode: slackChannelReplyToMode,
+    replyToModeByChatType: {
+      direct: 'off',
+      group: 'off',
+      channel: slackChannelReplyToMode,
+    },
+    thread: {
+      historyScope: slackThreadHistoryScope,
+      inheritParent: slackThreadInheritParent,
+      initialHistoryLimit: slackThreadInitialHistoryLimit,
+      requireExplicitMention: slackThreadRequireExplicitMention,
+    },
   };
 }
 
