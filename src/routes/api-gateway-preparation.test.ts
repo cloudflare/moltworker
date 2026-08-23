@@ -5,12 +5,15 @@ import type { AppEnv } from '../types';
 import { createMockEnv, createMockProcess } from '../test-utils';
 
 const { prepareGateway } = vi.hoisted(() => ({ prepareGateway: vi.fn() }));
-const { createSnapshot } = vi.hoisted(() => ({ createSnapshot: vi.fn() }));
+const { createSnapshotUnderLease, withBackupOperationLease } = vi.hoisted(() => ({
+  createSnapshotUnderLease: vi.fn(),
+  withBackupOperationLease: vi.fn(),
+}));
 
 vi.mock('../gateway/lifecycle', () => ({ prepareGateway }));
 vi.mock('../persistence', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../persistence')>();
-  return { ...actual, createSnapshot };
+  return { ...actual, createSnapshotUnderLease, withBackupOperationLease };
 });
 
 import { api } from './api';
@@ -52,8 +55,12 @@ describe('admin gateway preparation', () => {
 
   it('prepares persisted gateway state before creating a snapshot', async () => {
     const events: string[] = [];
+    withBackupOperationLease.mockImplementation(async (_bucket, operation) => {
+      events.push('lease');
+      return operation({ renew: vi.fn().mockResolvedValue(undefined) });
+    });
     prepareGateway.mockImplementation(async () => events.push('prepare'));
-    createSnapshot.mockImplementation(async () => {
+    createSnapshotUnderLease.mockImplementation(async () => {
       events.push('snapshot');
       return { id: 'backup-1', dir: '/home/openclaw' };
     });
@@ -68,6 +75,6 @@ describe('admin gateway preparation', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(events).toEqual(['prepare', 'snapshot']);
+    expect(events).toEqual(['lease', 'prepare', 'snapshot']);
   });
 });

@@ -131,7 +131,7 @@ export default function AdminPage() {
   const handleRestartGateway = async () => {
     if (
       !confirm(
-        'Are you sure you want to restart the gateway? This will disconnect all clients temporarily.',
+        'Recreate the container? On next access, its state will be restored from R2. All clients will be temporarily disconnected.',
       )
     ) {
       return;
@@ -143,7 +143,9 @@ export default function AdminPage() {
       if (result.success) {
         setError(null);
         // Show success message briefly
-        alert('Gateway restart initiated. Clients will reconnect automatically.');
+        alert(
+          'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
+        );
       } else {
         setError(result.error || 'Failed to restart gateway');
       }
@@ -237,12 +239,13 @@ export default function AdminPage() {
             disabled={restartInProgress}
           >
             {restartInProgress && <ButtonSpinner />}
-            {restartInProgress ? 'Restarting...' : 'Restart Gateway'}
+            {restartInProgress ? 'Recreating...' : 'Recreate Container'}
           </button>
         </div>
         <p className="hint">
-          Restart the gateway to apply configuration changes or recover from errors. All connected
-          clients will be temporarily disconnected.
+          Recreate the container to apply configuration changes or recover from errors. On the next
+          access, state will be restored from R2 and all connected clients will be temporarily
+          disconnected.
         </p>
       </section>
 

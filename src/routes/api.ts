@@ -1,13 +1,15 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
+import { prepareGateway, waitForProcess } from '../gateway';
 import {
-  findExistingGatewayProcess,
-  killGateway,
-  prepareGateway,
-  waitForProcess,
-} from '../gateway';
-import { createSnapshot, getBackupStatus, signalRestoreNeeded } from '../persistence';
+  BackupOperationLeaseTimeoutError,
+  createSnapshotUnderLease,
+  getBackupStatus,
+  hasUsableBackup,
+  signalRestoreNeeded,
+  withBackupOperationLease,
+} from '../persistence';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -209,25 +211,30 @@ adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    await prepareGateway(sandbox, c.env);
+    return await withBackupOperationLease(c.env.BACKUP_BUCKET, async (lease) => {
+      await lease.renew();
+      await prepareGateway(sandbox, c.env);
+      await lease.renew();
 
-    // Log mount state before backup for diagnostics
-    let mountState = 'unknown';
-    let dirContents = 'unknown';
-    try {
-      const mnt = await sandbox.exec('mount | grep openclaw || echo "NO_OVERLAY"');
-      mountState = mnt.stdout?.trim() ?? 'empty';
-      const ls = await sandbox.exec('ls /home/openclaw/clawd/ 2>&1 || echo "(empty)"');
-      dirContents = ls.stdout?.trim() ?? 'empty';
-    } catch {
-      // non-fatal
-    }
-    const handle = await createSnapshot(sandbox, c.env.BACKUP_BUCKET);
-    return c.json({
-      success: true,
-      message: 'Snapshot created successfully',
-      backupId: handle.id,
-      debug: { mountState, dirContents },
+      // Log mount state before backup so we can verify what's captured
+      let mountState = 'unknown';
+      let dirContents = 'unknown';
+      try {
+        const mnt = await sandbox.exec('mount | grep openclaw || echo "NO_OVERLAY"');
+        mountState = mnt.stdout?.trim() ?? 'empty';
+        const ls = await sandbox.exec('ls /home/openclaw/clawd/ 2>&1 || echo "(empty)"');
+        dirContents = ls.stdout?.trim() ?? 'empty';
+      } catch {
+        // non-fatal
+      }
+      await lease.renew();
+      const handle = await createSnapshotUnderLease(sandbox, c.env.BACKUP_BUCKET, lease);
+      return c.json({
+        success: true,
+        message: 'Snapshot created successfully',
+        backupId: handle.id,
+        debug: { mountState, dirContents },
+      });
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -243,30 +250,41 @@ adminApi.post('/storage/sync', async (c) => {
   }
 });
 
-// POST /api/admin/gateway/restart - Kill the current gateway and start a new one
+// POST /api/admin/gateway/restart - Recreate the sandbox after verifying R2 backup data
 adminApi.post('/gateway/restart', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Kill the gateway process (shared logic with crash retry)
-    const existingProcess = await findExistingGatewayProcess(sandbox);
-    console.log('[Restart] Killing gateway, existing process:', existingProcess?.id ?? 'none');
-    await killGateway(sandbox);
+    return await withBackupOperationLease(c.env.BACKUP_BUCKET, async (lease) => {
+      const backupAvailable = await hasUsableBackup(c.env.BACKUP_BUCKET);
+      if (!backupAvailable) {
+        return c.json(
+          {
+            error:
+              'No persisted backup is available. Create a backup before recreating the container.',
+          },
+          409,
+        );
+      }
 
-    // A future cold container consumes this marker before it starts. A live
-    // canonical config intentionally wins and leaves it pending.
-    await signalRestoreNeeded(c.env.BACKUP_BUCKET);
+      // The next cold container consumes this marker before it starts.
+      await lease.renew();
+      await signalRestoreNeeded(c.env.BACKUP_BUCKET);
+      await lease.renew();
+      await sandbox.destroy();
 
-    return c.json({
-      success: true,
-      message: existingProcess
-        ? 'Gateway process killed, will restart on next request'
-        : 'No existing process found, will start on next request',
-      previousProcessId: existingProcess?.id,
+      return c.json({
+        success: true,
+        message:
+          'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
+      });
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
+    return c.json(
+      { error: errorMessage },
+      error instanceof BackupOperationLeaseTimeoutError ? 503 : 500,
+    );
   }
 });
 
