@@ -39,6 +39,16 @@ MOLTBOT_GATEWAY_TOKEN=replace-with-a-different-random-64-hex
 # Optional chat channels
 # TELEGRAM_BOT_TOKEN=optional
 # DISCORD_BOT_TOKEN=optional
+# SLACK_BOT_TOKEN=xoxb-optional
+# SLACK_APP_TOKEN=xapp-optional
+# SLACK_GROUP_POLICY=allowlist    # allowlist (default) | open | disabled
+# SLACK_ALLOWED_CHANNELS=C123,G456 # stable Slack channel IDs for allowlist
+# Slack threading overrides (used when both Slack tokens are set)
+# SLACK_CHANNEL_REPLY_TO_MODE=all       # off | first | all | batched
+# SLACK_THREAD_HISTORY_SCOPE=thread     # thread | channel
+# SLACK_THREAD_INHERIT_PARENT=false     # true | false
+# SLACK_THREAD_INITIAL_HISTORY_LIMIT=20  # base-10 integer >= 0
+# SLACK_THREAD_REQUIRE_EXPLICIT_MENTION=false # true | false
 
 # CDP (Chrome DevTools Protocol) configuration for browser automation
 # CDP_SECRET=shared-secret-for-cdp-auth

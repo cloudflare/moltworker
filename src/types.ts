@@ -33,6 +33,13 @@ export interface OpenClawEnv {
   DISCORD_DM_POLICY?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_APP_TOKEN?: string;
+  SLACK_GROUP_POLICY?: string;
+  SLACK_ALLOWED_CHANNELS?: string;
+  SLACK_CHANNEL_REPLY_TO_MODE?: string;
+  SLACK_THREAD_HISTORY_SCOPE?: string;
+  SLACK_THREAD_INHERIT_PARENT?: string;
+  SLACK_THREAD_INITIAL_HISTORY_LIMIT?: string;
+  SLACK_THREAD_REQUIRE_EXPLICIT_MENTION?: string;
   // Cloudflare Access configuration for admin routes
   CF_ACCESS_TEAM_DOMAIN?: string; // e.g., 'myteam.cloudflareaccess.com'
   CF_ACCESS_AUD?: string; // Application Audience (AUD) tag

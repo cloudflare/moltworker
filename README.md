@@ -284,11 +284,103 @@ npm run deploy
 
 ### Slack
 
+Moltworker uses OpenClaw's Slack plugin in Socket Mode. There is no Slack
+channel or session "Add" button in the Control UI: install the Slack app into
+the workspace, invite it to a Slack channel, and send the first mention. The
+session is created automatically when OpenClaw receives that message.
+
+#### 1. Create the Slack app
+
+1. Open [Slack API Apps](https://api.slack.com/apps) and select **Create New App** > **From a manifest**.
+2. Select the target workspace.
+3. Paste [`docs/slack-app-manifest.json`](./docs/slack-app-manifest.json), then create the app.
+4. Under **Basic Information** > **App-Level Tokens**, select **Generate Token and Scopes**.
+5. Add the `connections:write` scope and copy the resulting `xapp-...` token.
+6. Under **Install App**, install the app to the workspace and copy the **Bot User OAuth Token** (`xoxb-...`). Reinstall the app after any later scope or event changes.
+
+Socket Mode uses an outbound WebSocket connection, so Slack does not need a
+public Request URL for the Worker.
+
+#### 2. Configure and deploy Moltworker
+
 ```bash
+# Enter the xoxb- token at the first prompt.
 npx wrangler secret put SLACK_BOT_TOKEN
+
+# Enter the xapp- token at the second prompt.
 npx wrangler secret put SLACK_APP_TOKEN
+
+# Recommended: enter one or more comma-separated stable channel IDs (C... or G...).
+# In Slack, open the channel details and copy the Channel ID from the About tab.
+npx wrangler secret put SLACK_ALLOWED_CHANNELS
+
 npm run deploy
 ```
+
+Both tokens are required. The deployed container enables Slack in Socket Mode
+with `groupPolicy: "allowlist"` by default. With no allowlist, channel
+messages are blocked. The command above stores the allowlist as an encrypted
+Worker secret; it may instead be configured as a regular Worker variable in the
+Cloudflare dashboard. To allow every channel the app joins, omit the allowlist
+command and explicitly opt in before deployment:
+
+```bash
+npx wrangler secret put SLACK_GROUP_POLICY
+# Enter: open
+```
+
+`open` applies to every public or private channel the Slack app has joined;
+channels the app has not joined remain invisible to it. Channel messages still
+require an `@OpenClaw` mention by default.
+
+#### 3. Add a channel and create its first session
+
+In each Slack channel that should use OpenClaw:
+
+1. Run `/invite @OpenClaw` (use the bot display name selected in the manifest).
+2. Send `@OpenClaw hello`.
+3. Wait for the reply, then open the OpenClaw Control UI. The Slack session now appears in the session list; it is not created in advance from Overview.
+
+Top-level conversation state is isolated by Slack channel. A mentioned message
+that starts a Slack thread and its replies use a separate thread session, while
+ordinary top-level messages continue using the channel session. Replies in a
+thread where OpenClaw already participated do not need another mention by
+default.
+
+If the bot does not reply, confirm that it is a member of the channel, both
+secrets are present, and the Slack app was reinstalled after its manifest was
+changed. Then recreate the container from `/_admin/` or redeploy so the gateway
+restarts with the current secrets.
+
+#### Slack threading configuration
+
+The startup patch owns the Slack channel configuration. Set the environment
+variables below to override the managed values; this is the supported override
+mechanism. Validation occurs only when both Slack tokens enable the
+integration; then the variables affect the Slack config. The resolved threading
+values are written to `openclaw.json`; only the Slack token values are kept out
+of that file and its R2 snapshots.
+
+| Variable | Default | Allowed values / meaning |
+|----------|---------|--------------------------|
+| `SLACK_GROUP_POLICY` | `allowlist` | `allowlist`, `open`, or `disabled`; `open` is an explicit opt-in for all joined channels |
+| `SLACK_ALLOWED_CHANNELS` | empty | Comma-separated stable Slack channel IDs such as `C12345678` or `G12345678`; used by `allowlist` and empty means no channel access |
+| `SLACK_CHANNEL_REPLY_TO_MODE` | `all` | `off`, `first`, `all`, or `batched`; controls top-level `replyToMode` and the channel value in `replyToModeByChatType` |
+| `SLACK_THREAD_HISTORY_SCOPE` | `thread` | `thread` or `channel`; selects the history scope used to hydrate a thread |
+| `SLACK_THREAD_INHERIT_PARENT` | `false` | `true` or `false`; `false` keeps a thread from inheriting unrelated channel history |
+| `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | `20` | A base-10 safe integer greater than or equal to `0`; maximum initial messages fetched for hydration |
+| `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | `false` | `true` or `false`; when `false`, a follow-up in a thread needs no new mention after OpenClaw has participated |
+
+For a channel admitted by the allowlist (or by explicit `open` policy), the
+threading defaults make a top-level mention start a Slack thread. Replies in
+that Slack thread continue in the same isolated OpenClaw thread session and do
+not need another mention after the bot has participated. Different Slack roots
+have different sessions. `inheritParent=false` prevents unrelated channel
+transcript from being copied into a new thread session, and the first hydration
+fetches 20 messages by default. Direct messages and group DMs remain off-thread:
+their `replyToModeByChatType` values are always `off` and cannot be changed with
+these environment variables. The channel value is the only chat-type reply mode
+exposed for override.
 
 ## Optional: Browser Automation (CDP)
 
@@ -402,8 +494,15 @@ Also verify that a request without the Bearer credential returns `401`, an unkno
 | `TELEGRAM_DM_POLICY` | Variable | No | Telegram DM policy: `pairing` (default) or `open` |
 | `DISCORD_BOT_TOKEN` | Secret | No | Discord bot token |
 | `DISCORD_DM_POLICY` | Variable | No | Discord DM policy: `pairing` (default) or `open` |
-| `SLACK_BOT_TOKEN` | Secret | No | Slack bot token |
-| `SLACK_APP_TOKEN` | Secret | No | Slack app token |
+| `SLACK_BOT_TOKEN` | Secret | No | Slack Bot User OAuth Token (`xoxb-...`) |
+| `SLACK_APP_TOKEN` | Secret | No | Slack App-Level Token (`xapp-...`) with `connections:write` |
+| `SLACK_GROUP_POLICY` | Variable | No | Channel policy: `allowlist` (default), `open` (explicit opt-in), or `disabled` |
+| `SLACK_ALLOWED_CHANNELS` | Variable | No | Comma-separated stable Slack channel IDs used by the `allowlist` policy |
+| `SLACK_CHANNEL_REPLY_TO_MODE` | Variable | No | Channel reply mode: `off`, `first`, `all` (default), or `batched` |
+| `SLACK_THREAD_HISTORY_SCOPE` | Variable | No | Thread hydration scope: `thread` (default) or `channel` |
+| `SLACK_THREAD_INHERIT_PARENT` | Variable | No | Whether a thread inherits parent history: `false` (default) or `true` |
+| `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | Variable | No | Base-10 nonnegative safe integer; default `20` |
+| `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | Variable | No | Require a mention for every thread follow-up: `false` (default) or `true` |
 | `CDP_SECRET` | Secret | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
 
 `Yes*` marks the values and bindings required together for the default Workers AI proxy deployment. A backward-compatible provider alternative can satisfy application startup validation instead, but it does not implement this deployment architecture.

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildEnvVars } from './env';
 import { createMockEnv } from '../test-utils';
+import type { OpenClawEnv } from '../types';
 
 describe('buildEnvVars', () => {
   it('returns empty object when no env vars set', () => {
@@ -147,6 +148,38 @@ describe('buildEnvVars', () => {
     expect(result.DISCORD_DM_POLICY).toBe('open');
     expect(result.SLACK_BOT_TOKEN).toBe('slack-bot');
     expect(result.SLACK_APP_TOKEN).toBe('slack-app');
+  });
+
+  it('forwards Slack threading configuration to the container', () => {
+    const env = createMockEnv({
+      SLACK_CHANNEL_REPLY_TO_MODE: 'first',
+      SLACK_THREAD_HISTORY_SCOPE: 'channel',
+      SLACK_THREAD_INHERIT_PARENT: 'true',
+      SLACK_THREAD_INITIAL_HISTORY_LIMIT: '0',
+      SLACK_THREAD_REQUIRE_EXPLICIT_MENTION: 'true',
+    });
+
+    expect(buildEnvVars(env)).toMatchObject({
+      SLACK_CHANNEL_REPLY_TO_MODE: 'first',
+      SLACK_THREAD_HISTORY_SCOPE: 'channel',
+      SLACK_THREAD_INHERIT_PARENT: 'true',
+      SLACK_THREAD_INITIAL_HISTORY_LIMIT: '0',
+      SLACK_THREAD_REQUIRE_EXPLICIT_MENTION: 'true',
+    });
+  });
+
+  it('forwards Slack group policy and channel allowlist configuration to the container', () => {
+    const env = createMockEnv() as OpenClawEnv & {
+      SLACK_GROUP_POLICY: string;
+      SLACK_ALLOWED_CHANNELS: string;
+    };
+    env.SLACK_GROUP_POLICY = 'open';
+    env.SLACK_ALLOWED_CHANNELS = 'C123,G456';
+
+    expect(buildEnvVars(env)).toMatchObject({
+      SLACK_GROUP_POLICY: 'open',
+      SLACK_ALLOWED_CHANNELS: 'C123,G456',
+    });
   });
 
   it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
