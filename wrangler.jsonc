@@ -64,6 +64,11 @@
     },
   ],
 
+  // Workers AI binding for the authenticated OpenAI-compatible proxy.
+  "ai": {
+    "binding": "AI",
+  },
+
   // Browser Rendering binding for CDP shim
   "browser": {
     "binding": "BROWSER",

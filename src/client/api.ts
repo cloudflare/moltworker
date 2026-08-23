@@ -116,6 +116,7 @@ export async function restartGateway(): Promise<RestartGatewayResponse> {
 export interface StorageStatusResponse {
   configured: boolean;
   missing?: string[];
+  lastBackupId: string | null;
   lastSync: string | null;
   message: string;
 }
@@ -127,7 +128,6 @@ export async function getStorageStatus(): Promise<StorageStatusResponse> {
 export interface SyncResponse {
   success: boolean;
   message?: string;
-  lastSync?: string;
   error?: string;
   details?: string;
 }

@@ -85,24 +85,12 @@ WORKERS_SUBDOMAIN=
 CF_ACCESS_TEAM_DOMAIN=
 
 # =============================================================================
-# R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY
+# DISPOSABLE E2E R2 CREDENTIALS
 # =============================================================================
-# Required: R2 API credentials for bucket mounting inside the container
-#
-# How to create:
-# 1. Go to https://dash.cloudflare.com/ → R2 → Overview
-# 2. Click "Manage R2 API Tokens" (top right)
-# 3. Click "Create API Token"
-# 4. Configure:
-#    - Token name: moltworker-e2e (or whatever you prefer)
-#    - Permissions: Object Read & Write
-#    - Specify bucket(s): You can leave as "Apply to all buckets" or
-#      limit to buckets starting with "moltbot-" for safety
-#    - TTL: (optional)
-# 5. Click "Create API Token"
-# 6. Copy both the "Access Key ID" and "Secret Access Key"
-#    (Secret is only shown once!)
-#
+# Required by the current cloud E2E fixture for its Worker-side storage status
+# and deployment flow. Scope these credentials to disposable E2E buckets only.
+# They are Worker secrets for the legacy fixture and are NOT passed into the
+# OpenClaw container; production persistence uses the BACKUP_BUCKET binding.
 R2_ACCESS_KEY_ID=
 R2_SECRET_ACCESS_KEY=
 
@@ -114,7 +102,16 @@ R2_SECRET_ACCESS_KEY=
 # In CI, set this to the PR number or a unique identifier to allow parallel runs
 # E2E_TEST_RUN_ID=local
 
-# AI provider credentials (at least one recommended for chat/conversation tests)
+# Production Workers AI proxy values. Use disposable test values only; never
+# copy production secrets into this file. The AI and BACKUP_BUCKET bindings are
+# configured in the generated Wrangler configuration, not as container keys.
+# AI_PROXY_TOKEN=replace-with-random-64-hex
+# AI_GATEWAY_ID=moltworker
+# WORKER_URL=https://moltbot-sandbox.example.workers.dev
+# SANDBOX_SLEEP_AFTER=10m
+
+# Backward-compatible upstream alternatives for legacy E2E runs (not the
+# default Workers AI proxy deployment)
 # AI_GATEWAY_API_KEY=
 # AI_GATEWAY_BASE_URL=
 # ANTHROPIC_API_KEY=

@@ -1,8 +1,15 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 import { createAccessMiddleware } from '../auth';
-import { ensureGateway, findExistingGatewayProcess, killGateway, waitForProcess } from '../gateway';
-import { createSnapshot, getLastBackupId, signalRestoreNeeded } from '../persistence';
+import { prepareGateway, waitForProcess } from '../gateway';
+import {
+  BackupOperationLeaseTimeoutError,
+  createSnapshotUnderLease,
+  getBackupStatus,
+  hasUsableBackup,
+  signalRestoreNeeded,
+  withBackupOperationLease,
+} from '../persistence';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -28,8 +35,7 @@ adminApi.get('/devices', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Ensure gateway is running first
-    await ensureGateway(sandbox, c.env);
+    await prepareGateway(sandbox, c.env);
 
     // Run OpenClaw CLI to list devices
     // Must specify --url and --token (OpenClaw v2026.2.3 requires explicit credentials with --url)
@@ -85,8 +91,7 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
   }
 
   try {
-    // Ensure gateway is running first
-    await ensureGateway(sandbox, c.env);
+    await prepareGateway(sandbox, c.env);
 
     // Run OpenClaw CLI to approve the device
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
@@ -121,8 +126,7 @@ adminApi.post('/devices/approve-all', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Ensure gateway is running first
-    await ensureGateway(sandbox, c.env);
+    await prepareGateway(sandbox, c.env);
 
     // First, get the list of pending devices
     const token = c.env.MOLTBOT_GATEWAY_TOKEN;
@@ -192,26 +196,13 @@ adminApi.post('/devices/approve-all', async (c) => {
 
 // GET /api/admin/storage - Get backup/restore status
 adminApi.get('/storage', async (c) => {
-  const hasCredentials = !!(
-    c.env.R2_ACCESS_KEY_ID &&
-    c.env.R2_SECRET_ACCESS_KEY &&
-    c.env.CLOUDFLARE_ACCOUNT_ID
-  );
-
-  const missing: string[] = [];
-  if (!c.env.R2_ACCESS_KEY_ID) missing.push('R2_ACCESS_KEY_ID');
-  if (!c.env.R2_SECRET_ACCESS_KEY) missing.push('R2_SECRET_ACCESS_KEY');
-  if (!c.env.CLOUDFLARE_ACCOUNT_ID) missing.push('CLOUDFLARE_ACCOUNT_ID');
-
-  const lastBackupId = hasCredentials ? await getLastBackupId(c.env.BACKUP_BUCKET) : null;
+  const status = await getBackupStatus(c.env.BACKUP_BUCKET);
 
   return c.json({
-    configured: hasCredentials,
-    missing: missing.length > 0 ? missing : undefined,
-    lastBackupId,
-    message: hasCredentials
-      ? 'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.'
-      : 'R2 storage is not configured. Paired devices and conversations will be lost when the container restarts.',
+    configured: true,
+    ...status,
+    message:
+      'R2 storage is configured. Your data will persist across container restarts via SDK snapshots.',
   });
 });
 
@@ -220,23 +211,30 @@ adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Log mount state before backup for diagnostics
-    let mountState = 'unknown';
-    let dirContents = 'unknown';
-    try {
-      const mnt = await sandbox.exec('mount | grep openclaw || echo "NO_OVERLAY"');
-      mountState = mnt.stdout?.trim() ?? 'empty';
-      const ls = await sandbox.exec('ls /home/openclaw/clawd/ 2>&1 || echo "(empty)"');
-      dirContents = ls.stdout?.trim() ?? 'empty';
-    } catch {
-      // non-fatal
-    }
-    const handle = await createSnapshot(sandbox, c.env.BACKUP_BUCKET);
-    return c.json({
-      success: true,
-      message: 'Snapshot created successfully',
-      backupId: handle.id,
-      debug: { mountState, dirContents },
+    return await withBackupOperationLease(c.env.BACKUP_BUCKET, async (lease) => {
+      await lease.renew();
+      await prepareGateway(sandbox, c.env);
+      await lease.renew();
+
+      // Log mount state before backup so we can verify what's captured
+      let mountState = 'unknown';
+      let dirContents = 'unknown';
+      try {
+        const mnt = await sandbox.exec('mount | grep openclaw || echo "NO_OVERLAY"');
+        mountState = mnt.stdout?.trim() ?? 'empty';
+        const ls = await sandbox.exec('ls /home/openclaw/clawd/ 2>&1 || echo "(empty)"');
+        dirContents = ls.stdout?.trim() ?? 'empty';
+      } catch {
+        // non-fatal
+      }
+      await lease.renew();
+      const handle = await createSnapshotUnderLease(sandbox, c.env.BACKUP_BUCKET, lease);
+      return c.json({
+        success: true,
+        message: 'Snapshot created successfully',
+        backupId: handle.id,
+        debug: { mountState, dirContents },
+      });
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -252,32 +250,41 @@ adminApi.post('/storage/sync', async (c) => {
   }
 });
 
-// POST /api/admin/gateway/restart - Kill the current gateway and start a new one
+// POST /api/admin/gateway/restart - Recreate the sandbox after verifying R2 backup data
 adminApi.post('/gateway/restart', async (c) => {
   const sandbox = c.get('sandbox');
 
   try {
-    // Kill the gateway process (shared logic with crash retry)
-    const existingProcess = await findExistingGatewayProcess(sandbox);
-    console.log('[Restart] Killing gateway, existing process:', existingProcess?.id ?? 'none');
-    await killGateway(sandbox);
+    return await withBackupOperationLease(c.env.BACKUP_BUCKET, async (lease) => {
+      const backupAvailable = await hasUsableBackup(c.env.BACKUP_BUCKET);
+      if (!backupAvailable) {
+        return c.json(
+          {
+            error:
+              'No persisted backup is available. Create a backup before recreating the container.',
+          },
+          409,
+        );
+      }
 
-    // Signal that all Worker isolates need to re-restore from R2.
-    // This writes a marker to R2 that restoreIfNeeded checks, ensuring
-    // the FUSE overlay is mounted even if a different isolate handles
-    // the next request (e.g. browser WebSocket reconnect).
-    await signalRestoreNeeded(c.env.BACKUP_BUCKET);
+      // The next cold container consumes this marker before it starts.
+      await lease.renew();
+      await signalRestoreNeeded(c.env.BACKUP_BUCKET);
+      await lease.renew();
+      await sandbox.destroy();
 
-    return c.json({
-      success: true,
-      message: existingProcess
-        ? 'Gateway process killed, will restart on next request'
-        : 'No existing process found, will start on next request',
-      previousProcessId: existingProcess?.id,
+      return c.json({
+        success: true,
+        message:
+          'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
+      });
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return c.json({ error: errorMessage }, 500);
+    return c.json(
+      { error: errorMessage },
+      error instanceof BackupOperationLeaseTimeoutError ? 503 : 500,
+    );
   }
 });
 

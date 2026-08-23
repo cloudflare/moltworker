@@ -12,13 +12,13 @@ import { buildEnvVars } from './env';
  */
 export async function killGateway(sandbox: Sandbox): Promise<void> {
   // Strategy 1: pgrep by exact name (most precise)
-  // Strategy 2: pkill by pattern (broader match)
-  // Strategy 3: ss to find PID by port (most reliable but needs ss)
+  // Strategy 2: ss to find PID by port (most reliable but needs ss)
+  // Do not use a broad `pkill -f openclaw` here: FUSE overlay commands can
+  // legitimately contain /home/openclaw in their arguments.
   try {
     await sandbox.exec(
       [
-        'kill -9 $(pgrep -x "openclaw-gateway" 2>/dev/null) $(pgrep -x "openclaw" 2>/dev/null) 2>/dev/null',
-        'pkill -9 -f "openclaw" 2>/dev/null',
+        'kill -9 $(pgrep -x "openclaw-gateway" 2>/dev/null) 2>/dev/null',
         `kill -9 $(ss -tlnp sport = :${GATEWAY_PORT} 2>/dev/null | grep -oP "pid=\\K[0-9]+") 2>/dev/null`,
         'true',
       ].join('; '),
@@ -112,12 +112,19 @@ export async function findExistingGatewayProcess(sandbox: Sandbox): Promise<Proc
  * @returns The running gateway process, or null if the gateway is up but we
  *          don't have a process handle (detected via port probe only)
  */
+export interface EnsureGatewayOptions {
+  waitForReady?: boolean;
+  /** When false, never spawn a gateway if an existing one disappears. */
+  startIfMissing?: boolean;
+}
+
 export async function ensureGateway(
   sandbox: Sandbox,
   env: OpenClawEnv,
-  options?: { waitForReady?: boolean },
+  options?: EnsureGatewayOptions,
 ): Promise<Process | null> {
   const waitForReady = options?.waitForReady !== false;
+  const startIfMissing = options?.startIfMissing !== false;
   // Check if gateway is already running or starting
   const existingProcess = await findExistingGatewayProcess(sandbox);
   if (existingProcess) {
@@ -128,6 +135,11 @@ export async function ensureGateway(
       existingProcess.status,
     );
 
+    if (!waitForReady) {
+      console.log('Gateway process exists; skipping readiness wait by request');
+      return existingProcess;
+    }
+
     // Always use full startup timeout - a process can be "running" but not ready yet
     // (e.g., just started by another concurrent request). Using a shorter timeout
     // causes race conditions where we kill processes that are still initializing.
@@ -137,13 +149,16 @@ export async function ensureGateway(
       console.log('Gateway is reachable');
       return existingProcess;
       // eslint-disable-next-line no-unused-vars
-    } catch (_e) {
+    } catch (error) {
       // Timeout waiting for port - process is likely dead or stuck, kill and restart
       console.log('Existing process not reachable after full timeout, killing and restarting...');
       try {
         await existingProcess.kill();
       } catch (killError) {
         console.log('Failed to kill process:', killError);
+      }
+      if (!startIfMissing) {
+        throw new Error('Existing OpenClaw gateway process is not reachable', { cause: error });
       }
     }
   }
@@ -160,6 +175,10 @@ export async function ensureGateway(
     }
   } catch (e) {
     console.log('Port probe failed, proceeding to start gateway:', e);
+  }
+
+  if (!startIfMissing) {
+    throw new Error('OpenClaw gateway is not running');
   }
 
   // Start a new OpenClaw gateway

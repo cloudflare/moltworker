@@ -7,6 +7,9 @@ export interface OpenClawEnv {
   Sandbox: DurableObjectNamespace<Sandbox>;
   ASSETS: Fetcher; // Assets binding for admin UI static files
   BACKUP_BUCKET: R2Bucket; // R2 bucket for Sandbox SDK backup/restore
+  AI: Ai; // Workers AI binding used by the authenticated inference proxy
+  AI_PROXY_TOKEN?: string; // Dedicated Bearer secret for the internal inference proxy
+  AI_GATEWAY_ID?: string; // AI Gateway used for Workers AI inference and logging
   // Cloudflare AI Gateway configuration (preferred)
   CF_AI_GATEWAY_ACCOUNT_ID?: string; // Cloudflare account ID for AI Gateway
   CF_AI_GATEWAY_GATEWAY_ID?: string; // AI Gateway ID
