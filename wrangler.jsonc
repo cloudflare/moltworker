@@ -4,6 +4,13 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "moltbot.kentymyty.com",
+      "custom_domain": true,
+    },
+  ],
   "observability": {
     "enabled": true,
   },
