@@ -1,0 +1,56 @@
+[
+  {
+    "id": "@cf/zai-org/glm-4.7-flash",
+    "name": "GLM 4.7 Flash",
+    "alias": "GLM 4.7 Flash",
+    "selection": "primary",
+    "contextWindow": 131072,
+    "maxTokens": 8192,
+    "documentedCapabilities": {
+      "reasoning": true,
+      "tools": true,
+      "vision": false
+    },
+    "input": ["text"],
+    "compat": {
+      "supportsTools": true
+    },
+    "sourceUrl": "https://developers.cloudflare.com/workers-ai/models/glm-4.7-flash/"
+  },
+  {
+    "id": "@cf/moonshotai/kimi-k2.7-code",
+    "name": "Kimi K2.7 Code",
+    "alias": "Kimi K2.7 Code (manual)",
+    "selection": "manual",
+    "contextWindow": 262144,
+    "maxTokens": 8192,
+    "documentedCapabilities": {
+      "reasoning": true,
+      "tools": true,
+      "vision": true
+    },
+    "input": ["text"],
+    "compat": {
+      "supportsTools": true
+    },
+    "sourceUrl": "https://developers.cloudflare.com/workers-ai/models/kimi-k2.7-code/"
+  },
+  {
+    "id": "@cf/qwen/qwen3.8-27b",
+    "name": "Qwen 3.8 27B",
+    "alias": "Qwen 3.8 27B (manual)",
+    "selection": "manual",
+    "contextWindow": 262144,
+    "maxTokens": 8192,
+    "documentedCapabilities": {
+      "reasoning": true,
+      "tools": true,
+      "vision": true
+    },
+    "input": ["text"],
+    "compat": {
+      "supportsTools": true
+    },
+    "sourceUrl": "https://developers.cloudflare.com/workers-ai/models/qwen3.8-27b/"
+  }
+]

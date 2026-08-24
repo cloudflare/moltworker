@@ -4,6 +4,7 @@ import { createMockEnv } from '../test-utils';
 import { aiProxy } from './ai-proxy';
 
 const route = '/internal/ai/v1/chat/completions';
+const modelsRoute = '/internal/ai/v1/models';
 
 function request(body: unknown, token = 'proxy-secret'): RequestInit {
   return {
@@ -57,8 +58,81 @@ describe('aiProxy', () => {
     expect(response.headers.get('allow')).toBe('POST');
   });
 
-  it('leaves other paths unmatched', async () => {
-    const response = await aiProxy.request('/internal/ai/v1/models', { method: 'GET' });
+  it.each([
+    ['a missing Authorization header', undefined],
+    ['an incorrect Bearer token', 'Bearer incorrect-secret'],
+  ])(
+    'returns a stable 401 error for model listing with %s',
+    async (_description, authorization) => {
+      const headers: Record<string, string> = {};
+      if (authorization !== undefined) headers.authorization = authorization;
+
+      const response = await aiProxy.request(
+        modelsRoute,
+        { method: 'GET', headers },
+        createMockEnv({ AI_PROXY_TOKEN: 'proxy-secret' }),
+      );
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({
+        error: {
+          message: 'Unauthorized',
+          type: 'authentication_error',
+          code: 'invalid_api_key',
+        },
+        request_id: expect.any(String),
+      });
+    },
+  );
+
+  it('lists exactly the registered models for an authorized request', async () => {
+    const response = await aiProxy.request(
+      modelsRoute,
+      { method: 'GET', headers: { authorization: 'Bearer proxy-secret' } },
+      createMockEnv({ AI_PROXY_TOKEN: 'proxy-secret' }),
+    );
+
+    const body = (await response.json()) as { object: string; data: Array<{ id: string }> };
+    expect(response.status).toBe(200);
+    expect(body.object).toBe('list');
+    expect(body.data.map(({ id }) => id)).toEqual([
+      '@cf/zai-org/glm-4.7-flash',
+      '@cf/moonshotai/kimi-k2.7-code',
+      '@cf/qwen/qwen3.8-27b',
+    ]);
+  });
+
+  it('lists Qwen as manual text input while reporting documented vision capability', async () => {
+    const response = await aiProxy.request(
+      modelsRoute,
+      { method: 'GET', headers: { authorization: 'Bearer proxy-secret' } },
+      createMockEnv({ AI_PROXY_TOKEN: 'proxy-secret' }),
+    );
+
+    const body = (await response.json()) as {
+      data: Array<Record<string, unknown>>;
+    };
+    expect(body.data.find(({ id }) => id === '@cf/qwen/qwen3.8-27b')).toMatchObject({
+      primary: false,
+      manual_only: true,
+      context_window: 262144,
+      input: ['text'],
+      upstream_capabilities: { vision: true },
+    });
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])(
+    'rejects %s on the model-list endpoint with 405',
+    async (method) => {
+      const response = await aiProxy.request(modelsRoute, { method }, createMockEnv());
+
+      expect(response.status).toBe(405);
+      expect(response.headers.get('allow')).toBe('GET');
+    },
+  );
+
+  it('leaves other internal AI paths unmatched', async () => {
+    const response = await aiProxy.request('/internal/ai/v1/not-a-route', { method: 'GET' });
 
     expect(response.status).toBe(404);
   });
