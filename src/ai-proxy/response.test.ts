@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MODEL, QWEN_MODEL } from './constants';
+import { DEFAULT_MODEL, KIMI_MODEL, QWEN_MODEL } from './constants';
 import { createOpenAIChatCompletionStream, toOpenAIChatCompletion } from './response';
 
 const context = {
@@ -12,6 +12,12 @@ const qwenContext = {
   id: 'chatcmpl-qwen',
   created: 1_786_723_202,
   model: '@cf/qwen/qwen3.8-27b' as typeof QWEN_MODEL,
+};
+
+const kimiContext = {
+  id: 'chatcmpl-kimi',
+  created: 1_786_723_203,
+  model: KIMI_MODEL,
 };
 
 describe('toOpenAIChatCompletion', () => {
@@ -249,6 +255,48 @@ describe('toOpenAIChatCompletion', () => {
       role: 'assistant',
       content: 'plain answer',
     });
+  });
+
+  // Catches exposing Qwen-only reasoning fields from GLM responses.
+  it('omits reasoning fields from GLM completions', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'GLM-OK',
+              reasoning_content: 'GLM private chain',
+              reasoning: 'GLM alias chain',
+            },
+          },
+        ],
+      },
+      context,
+    );
+
+    expect(response.choices[0].message).toEqual({ role: 'assistant', content: 'GLM-OK' });
+  });
+
+  // Catches exposing Qwen-only reasoning fields from Kimi responses.
+  it('omits reasoning fields from Kimi completions', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'Kimi-OK',
+              reasoning_content: 'Kimi private chain',
+              reasoning: 'Kimi alias chain',
+            },
+          },
+        ],
+      },
+      kimiContext,
+    );
+
+    expect(response.choices[0].message).toEqual({ role: 'assistant', content: 'Kimi-OK' });
   });
 });
 
@@ -677,5 +725,69 @@ describe('createOpenAIChatCompletionStream', () => {
     ]);
     expect(records.filter((record) => record === '[DONE]')).toHaveLength(1);
     expect(records.filter((record) => record !== '[DONE]')).toHaveLength(1);
+  });
+
+  // Catches emitting Qwen-only reasoning deltas for GLM streams.
+  it('omits reasoning fields from GLM stream deltas', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"reasoning_content":"GLM private chain"},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"content":"GLM-OK"},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(createOpenAIChatCompletionStream(source, context, new AbortController().signal)),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1786723200,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"role":"assistant","content":"GLM-OK"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1786723200,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ]);
+  });
+
+  // Catches emitting Qwen-only reasoning aliases for Kimi streams.
+  it('omits reasoning fields from Kimi stream deltas', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"reasoning":"Kimi alias chain"},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"content":"Kimi-OK"},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, kimiContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-kimi","object":"chat.completion.chunk","created":1786723203,"model":"@cf/moonshotai/kimi-k2.7-code","choices":[{"index":0,"delta":{"role":"assistant","content":"Kimi-OK"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-kimi","object":"chat.completion.chunk","created":1786723203,"model":"@cf/moonshotai/kimi-k2.7-code","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ]);
   });
 });

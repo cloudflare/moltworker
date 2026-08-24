@@ -1,4 +1,5 @@
 import type { AllowedModel } from './types';
+import { QWEN_MODEL } from './constants';
 
 export interface ChatCompletionContext {
   id: string;
@@ -206,7 +207,7 @@ export function toOpenAIChatCompletion(
   const choice = firstChoice(unwrapped);
   const message = choice !== undefined && isRecord(choice.message) ? choice.message : undefined;
   const toolCalls = normalizeToolCalls(message?.tool_calls ?? unwrapped.tool_calls);
-  const reasoning = normalizeReasoning(message);
+  const reasoning = context.model === QWEN_MODEL ? normalizeReasoning(message) : undefined;
   const usage = normalizeUsage(unwrapped.usage);
   const response: OpenAIChatCompletionResponse = {
     id: context.id,
@@ -311,7 +312,7 @@ export function createOpenAIChatCompletionStream(
             : typeof parsed.response === 'string'
               ? parsed.response
               : undefined;
-        const reasoning = normalizeReasoning(delta);
+        const reasoning = context.model === QWEN_MODEL ? normalizeReasoning(delta) : undefined;
         const toolCalls: OpenAIStreamToolCall[] =
           delta === undefined
             ? normalizeToolCalls(parsed.tool_calls).map((toolCall, index) =>
