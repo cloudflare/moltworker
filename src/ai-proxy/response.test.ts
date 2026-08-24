@@ -705,9 +705,7 @@ describe('createOpenAIChatCompletionStream', () => {
     const source = new ReadableStream<Uint8Array>({
       start(controller): void {
         controller.enqueue(
-          new TextEncoder().encode(
-            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
-          ),
+          new TextEncoder().encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'),
         );
         controller.close();
       },
@@ -748,7 +746,9 @@ describe('createOpenAIChatCompletionStream', () => {
     });
 
     const records = dataRecords(
-      await readStream(createOpenAIChatCompletionStream(source, context, new AbortController().signal)),
+      await readStream(
+        createOpenAIChatCompletionStream(source, context, new AbortController().signal),
+      ),
     );
 
     expect(records).toEqual([
