@@ -465,7 +465,7 @@ The upstream direct Anthropic, direct OpenAI, native Cloudflare AI Gateway, and 
 
 ## Production Proxy Smoke Test
 
-The checked-in smoke runner performs six structural checks: authenticated model listing, unknown-model rejection, Qwen non-streaming text, Qwen streaming, one tool call, and parallel tool calls. It reads `WORKER_URL` and `AI_PROXY_TOKEN` only from the process environment, constructs the Bearer header in memory, and prints only case names, statuses, request IDs, selected models, and structural counts. It never prints or writes response content, request headers, Access JWTs, tool arguments, or the proxy token.
+The checked-in smoke runner performs six structural checks: authenticated model listing, unknown-model rejection, Qwen non-streaming text, Qwen streaming, one tool call, and parallel tool calls. The tool cases send `tool_choice: "required"` and prompts asking for each named tool exactly once, but tool selection remains model output: a parallel response with fewer than two calls is reported as a structural failure even when the proxy is healthy. It reads `WORKER_URL` and `AI_PROXY_TOKEN` only from the process environment, constructs the Bearer header in memory, and prints only case names, statuses, request IDs, selected models, and structural counts. It never prints or writes response content, request headers, Access JWTs, tool arguments, or the proxy token.
 
 Run it only after separate approval for the deployment and any paid inference. Use a secret manager to inject the token, do not paste it into shell history, and do not capture command output as an artifact:
 

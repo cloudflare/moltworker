@@ -148,8 +148,9 @@ const CASES = [
     path: COMPLETIONS_PATH,
     body: {
       model: QWEN_MODEL,
-      messages: [{ role: 'user', content: 'Use the tool.' }],
+      messages: [{ role: 'user', content: 'Call smoke_tool_0 exactly once.' }],
       tools: tools(1),
+      tool_choice: 'required',
     },
     check: async (response) => {
       const body = await readJson(response);
@@ -167,9 +168,12 @@ const CASES = [
     path: COMPLETIONS_PATH,
     body: {
       model: QWEN_MODEL,
-      messages: [{ role: 'user', content: 'Use both tools.' }],
+      messages: [
+        { role: 'user', content: 'Call smoke_tool_0 and smoke_tool_1 exactly once each.' },
+      ],
       tools: tools(2),
       parallel_tool_calls: true,
+      tool_choice: 'required',
     },
     check: async (response) => {
       const body = await readJson(response);

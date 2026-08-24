@@ -123,6 +123,8 @@ describe('runSmoke', () => {
 
       const toolCount = Array.isArray(request?.tools) ? request.tools.length : 0;
       if (toolCount > 0) {
+        expect(request.tool_choice).toBe('required');
+        expect(request.messages[0].content).toContain('exactly once');
         return completion(
           '@cf/qwen/qwen3.8-27b',
           toolCount === 1 ? 'single-tool-request-id' : 'parallel-tool-request-id',
