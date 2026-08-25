@@ -24,6 +24,7 @@ The plan passes only when it:
 - uses sanitized model-specific response fixtures to decide any reasoning/response-adapter change, and tests ordinary and streaming responses, terminal/usage behavior, tool calls, and supported interleaving without forwarding arbitrary upstream fields;
 - updates registry/model tests, request and authenticated model-list route tests, and verifies the list exposes the new model's selection and capability metadata;
 - verifies generated OpenClaw provider configuration, alias, selection policy, absence of fallback, and secret-free serialization;
+- verifies the `Dockerfile` registry-copy destination remains resolvable by the patcher through the relevant container/build contract check;
 - updates the README with manual selection and the enabled-versus-documented capability boundary;
 - updates and unit-tests the smoke runner with structural, secret-safe output and no raw request/response content or credentials;
 - runs focused checks plus typecheck and the relevant full regression/build checks; and

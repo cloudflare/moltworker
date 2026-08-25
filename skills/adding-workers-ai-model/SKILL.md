@@ -23,6 +23,7 @@ Inspect every registry consumer and update its assertions or documentation as ne
 - `src/ai-proxy/models.ts` and its tests for validation, ordering, and listing metadata;
 - request and route tests for acceptance, authenticated listing, and rejection of unknown models;
 - `container/patch-openclaw-config.cjs` and `src/gateway/openclaw-config.test.ts` for generated aliases, selection, and secret-free config;
+- `Dockerfile` for copying the registry to a destination that the patcher can resolve, covered by the relevant container/build contract check; and
 - `README.md` and `scripts/smoke-workers-ai-model.mjs` with its tests.
 
 Change a consumer implementation only when an integration test demonstrates a genuine gap. Do not infer a Docker, startup, secret, primary, fallback, or deployment change from adding a registry entry.
