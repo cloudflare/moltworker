@@ -1,15 +1,12 @@
-import { ALLOWED_MODELS, MAX_PROXY_BODY_BYTES } from './constants';
-import { ProxyRequestError, type AllowedModel, type OpenAIChatCompletionRequest } from './types';
+import { MAX_PROXY_BODY_BYTES } from './constants';
+import { isAllowedModel } from './models';
+import { ProxyRequestError, type OpenAIChatCompletionRequest } from './types';
 
 const forbiddenKeys = new Set(['__proto__', 'prototype', 'constructor']);
 const textDecoder = new TextDecoder();
 
 function invalidRequest(message: string): ProxyRequestError {
   return new ProxyRequestError(400, 'invalid_request', message);
-}
-
-function isAllowedModel(model: string): model is AllowedModel {
-  return (ALLOWED_MODELS as readonly string[]).includes(model);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

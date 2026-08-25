@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MODEL, MAX_PROXY_BODY_BYTES, OPTIONAL_MODEL } from './constants';
+import { DEFAULT_MODEL, MAX_PROXY_BODY_BYTES, OPTIONAL_MODEL, QWEN_MODEL } from './constants';
 import { parseChatCompletionRequest } from './request';
 
 function chatCompletionRequest(body: unknown, headers?: HeadersInit): Request {
@@ -60,6 +60,44 @@ describe('parseChatCompletionRequest', () => {
     );
 
     expect(parsed.model).toBe(OPTIONAL_MODEL);
+  });
+
+  it('accepts Qwen and preserves tool, reasoning, parallel-tool, and stream fields', async () => {
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'get_weather',
+          parameters: { type: 'object', properties: { city: { type: 'string' } } },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_time',
+          parameters: { type: 'object', properties: { timezone: { type: 'string' } } },
+        },
+      },
+    ];
+    const messages = [{ role: 'user', content: 'Use both tools' }];
+
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest({
+        model: QWEN_MODEL,
+        messages,
+        tools,
+        parallel_tool_calls: true,
+        reasoning_effort: 'medium',
+        stream: true,
+      }),
+    );
+
+    expect(parsed.model).toBe('@cf/qwen/qwen3.8-27b');
+    expect(parsed.messages).toEqual(messages);
+    expect(parsed.tools).toEqual(tools);
+    expect(parsed.parallel_tool_calls).toBe(true);
+    expect(parsed.reasoning_effort).toBe('medium');
+    expect(parsed.stream).toBe(true);
   });
 
   it('rejects an unknown model', async () => {

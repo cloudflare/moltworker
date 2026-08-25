@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { hasValidProxyAuthorization } from '../ai-proxy/auth';
 import { runWorkersAi } from '../ai-proxy/inference';
+import { createOpenAIModelList } from '../ai-proxy/models';
 import { parseChatCompletionRequest } from '../ai-proxy/request';
 import { ProxyRequestError, type AllowedModel } from '../ai-proxy/types';
 import type { AppEnv } from '../types';
@@ -58,6 +59,39 @@ export function openAIError(
 export const aiProxy = new Hono<AppEnv>();
 
 const chatCompletionsPath = '/internal/ai/v1/chat/completions';
+const modelsPath = '/internal/ai/v1/models';
+
+function modelListMethodNotAllowed(c: Context<AppEnv>): Response {
+  const requestId = crypto.randomUUID();
+  logProxyError({ requestId, stage: 'method', status: 405 });
+  c.header('allow', 'GET');
+  return openAIError(c, 405, 'method_not_allowed', 'Method not allowed', requestId);
+}
+
+aiProxy.use(modelsPath, async (c, next) => {
+  if (c.req.raw.method === 'HEAD') {
+    return modelListMethodNotAllowed(c);
+  }
+  await next();
+});
+
+aiProxy.get(modelsPath, async (c) => {
+  const requestId = crypto.randomUUID();
+  const authorized = await hasValidProxyAuthorization(
+    c.req.header('Authorization'),
+    c.env.AI_PROXY_TOKEN,
+  );
+  if (!authorized) {
+    logProxyError({ requestId, stage: 'authentication', status: 401 });
+    return openAIError(c, 401, 'invalid_api_key', 'Unauthorized', requestId);
+  }
+
+  return c.json(createOpenAIModelList());
+});
+
+aiProxy.all(modelsPath, (c) => {
+  return modelListMethodNotAllowed(c);
+});
 
 aiProxy.post(chatCompletionsPath, async (c) => {
   const requestId = crypto.randomUUID();
