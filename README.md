@@ -72,7 +72,7 @@ npx wrangler r2 bucket create moltbot-data
 # Wrangler's prompt. Do not print it or reuse the gateway token.
 npx wrangler secret put AI_PROXY_TOKEN
 printf '%s' 'moltworker' | npx wrangler secret put AI_GATEWAY_ID
-printf '%s' 'https://moltbot-sandbox.example.workers.dev' | npx wrangler secret put WORKER_URL
+printf '%s' 'https://moltbot.kentymyty.com' | npx wrangler secret put WORKER_URL
 printf '%s' '10m' | npx wrangler secret put SANDBOX_SLEEP_AFTER
 
 # Generate and save a different random 64-hex gateway token in a password
@@ -86,10 +86,10 @@ npm run deploy
 After deploying, open the Control UI with your token:
 
 ```
-https://moltbot-sandbox.example.workers.dev/?token=YOUR_GATEWAY_TOKEN
+https://moltbot.kentymyty.com/?token=YOUR_GATEWAY_TOKEN
 ```
 
-Replace the example hostname with the deployed `workers.dev` hostname and `YOUR_GATEWAY_TOKEN` with the token you generated above. If deployment reports a different hostname, update the `WORKER_URL` secret and deploy again.
+Replace `YOUR_GATEWAY_TOKEN` with the token you generated above. Keep `WORKER_URL` set to `https://moltbot.kentymyty.com` so the proxy and CDP endpoints use the same production origin.
 
 **Note:** The first request may take 1-2 minutes while the container starts.
 
@@ -99,35 +99,44 @@ Replace the example hostname with the deployed `workers.dev` hostname and `YOUR_
 
 The required `moltbot-data` bucket was created before deployment; see [Persistent Storage (R2)](#persistent-storage-r2) for how snapshot persistence works.
 
+## Custom-Domain Cutover
+
+Phase 1 retains `workers_dev: true` while Wrangler provisions the custom domain route for `https://moltbot.kentymyty.com`. Keep the existing workers.dev origin available during this staged period so the custom hostname can be validated without interrupting the current deployment. The checked-in Phase 1 configuration intentionally omits `preview_urls`.
+
+After the custom hostname and Access policies pass the acceptance checks below, Phase 2 retires the staged origin by setting both `workers_dev: false` and `preview_urls: false` in `wrangler.jsonc`, then redeploying. Do not make that Phase 2 change until the custom hostname is serving the Worker and the rollback path has been confirmed.
+
+Acceptance checks:
+
+- `https://moltbot.kentymyty.com/` serves the Control UI, and the gateway token is required.
+- `wss://moltbot.kentymyty.com/ws?token=YOUR_GATEWAY_TOKEN` establishes the Control UI WebSocket.
+- The host-wide Access Allow application protects `/_admin/*`, `/api/*`, and `/debug/*`; there is no host-wide Bypass.
+- `/internal/ai/*` bypasses interactive Access but still returns `401` without `AI_PROXY_TOKEN`, and a protected smoke test succeeds with the expected AI Gateway log entry.
+- The exact `/cdp` path and `/cdp/*` paths bypass interactive Access but still require `CDP_SECRET`.
+- R2 persistence and device pairing continue to work through the custom hostname.
+
+Rollback: if any check fails, leave Phase 1 enabled and use the retained workers.dev origin while correcting the custom-domain or Access configuration. If Phase 2 has already been applied, restore `workers_dev: true`, remove `preview_urls: false`, redeploy, and verify the retained origin before retrying the cutover. Do not remove the host-wide Allow application or replace the path-specific exceptions with a host-wide Bypass.
+
 ## Setting Up the Admin UI
 
 To use the admin UI at `/_admin/` for device management, you need to:
-1. Enable Cloudflare Access on your worker
+1. Create the host-wide Cloudflare Access application and its narrowly scoped exceptions
 2. Set the Access secrets so the worker can validate JWTs
 
-### 1. Enable Cloudflare Access on workers.dev
+### 1. Create the host-wide Access application
 
-The easiest way to protect your worker is using the built-in Cloudflare Access integration for workers.dev:
-
-1. Go to the [Workers & Pages dashboard](https://dash.cloudflare.com/?to=/:account/workers-and-pages)
-2. Select your Worker (e.g., `moltbot-sandbox`)
-3. In **Settings**, under **Domains & Routes**, in the `workers.dev` row, click the meatballs menu (`...`)
-4. Click **Enable Cloudflare Access**
-5. Copy the values shown in the dialog (you'll need the AUD tag later). **Note:** The "Manage Cloudflare Access" link in the dialog may 404 — ignore it.
-6. To configure who can access, go to **Zero Trust** in the Cloudflare dashboard sidebar → **Access** → **Applications**, and find your worker's application:
-   - Add your email address to the allow list
-   - Or configure other identity providers (Google, GitHub, etc.)
-7. Copy the **Application Audience (AUD)** tag from the Access application settings. This will be your `CF_ACCESS_AUD` in Step 2 below
+In **Zero Trust** → **Access** → **Applications**, create one self-hosted application for `https://moltbot.kentymyty.com`. Configure an **Allow** policy for the identities that may use the Control UI and administrative routes (`/_admin/*`, `/api/*`, and `/debug/*`). Copy the application audience tag for `CF_ACCESS_AUD` below and keep the team domain for `CF_ACCESS_TEAM_DOMAIN`.
 
 ### Required Access Exception for the AI Proxy
 
-OpenClaw runs inside the container and cannot complete an interactive Access login. Create a second, more-specific Access application for:
+OpenClaw runs inside the container and cannot complete an interactive Access login. Create a more-specific Access application for:
 
 ```
-https://moltbot-sandbox.example.workers.dev/internal/ai/*
+https://moltbot.kentymyty.com/internal/ai/*
 ```
 
-Give only that path a **Bypass / Everyone** policy. Keep the host-wide Access application in place for the Control UI and administrative routes. Cloudflare Access path specificity makes the proxy application take precedence, while the Worker still protects `POST /internal/ai/v1/chat/completions` with the independent, fail-closed `AI_PROXY_TOKEN` Bearer check. Never apply the bypass policy to the whole hostname.
+Give only that path a **Bypass / Everyone** policy. The Worker still protects `POST /internal/ai/v1/chat/completions` with the independent, fail-closed `AI_PROXY_TOKEN` Bearer check, so AI still requires `AI_PROXY_TOKEN` even though the request bypasses interactive Access login.
+
+Create two additional, narrowly scoped **Bypass / Everyone** applications for the CDP shim: one for the exact path `https://moltbot.kentymyty.com/cdp` and one for `https://moltbot.kentymyty.com/cdp/*`. CDP still requires `CDP_SECRET`. Keep the host-wide Allow application in place; no host-wide Bypass policy is permitted.
 
 ### 2. Set Access Secrets
 
@@ -150,19 +159,6 @@ npm run deploy
 ```
 
 Now visit `/_admin/` and you'll be prompted to authenticate via Cloudflare Access before accessing the admin UI.
-
-### Alternative: Manual Access Application
-
-If you prefer more control, you can manually create an Access application:
-
-1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
-2. Navigate to **Access** > **Applications**
-3. Create a new **Self-hosted** application
-4. Set the application domain to your Worker URL (e.g., `moltbot-sandbox.your-subdomain.workers.dev`)
-5. Protect the Worker hostname, including `/_admin/*`, `/api/*`, and `/debug/*`
-6. Configure your desired identity providers (e.g., email OTP, Google, GitHub)
-7. Copy the **Application Audience (AUD)** tag and set the secrets as shown above
-8. Add the separate `/internal/ai/*` application and narrowly scoped bypass described above
 
 ### Local Development
 
@@ -191,8 +187,8 @@ This is the most secure option as it requires explicit approval for each device.
 A gateway token is required to access the Control UI when hosted remotely. Pass it as a query parameter:
 
 ```
-https://moltbot-sandbox.example.workers.dev/?token=YOUR_TOKEN
-wss://moltbot-sandbox.example.workers.dev/ws?token=YOUR_TOKEN
+https://moltbot.kentymyty.com/?token=YOUR_TOKEN
+wss://moltbot.kentymyty.com/ws?token=YOUR_TOKEN
 ```
 
 **Note:** Even with a valid token, new devices still require approval via the admin UI at `/_admin/` (see Device Pairing above).
@@ -399,7 +395,7 @@ npx wrangler secret put CDP_SECRET
 
 ```bash
 npx wrangler secret put WORKER_URL
-# Enter: https://moltbot-sandbox.example.workers.dev
+# Enter: https://moltbot.kentymyty.com
 ```
 
 3. Redeploy:
@@ -465,6 +461,8 @@ The upstream direct Anthropic, direct OpenAI, native Cloudflare AI Gateway, and 
 
 ## Production Proxy Smoke Test
 
+After deployment and Access configuration, load `AI_PROXY_TOKEN` from your secret manager into a protected process environment without printing it. Use an HTTP client that constructs the `Authorization: Bearer ...` header in memory rather than placing the secret in command arguments or shell history. Send one small JSON chat-completions request to `https://moltbot.kentymyty.com/internal/ai/v1/chat/completions` with model `@cf/zai-org/glm-4.7-flash`, verify a successful OpenAI-compatible response, and confirm the matching entry appears in the `moltworker` AI Gateway logs. Do not intentionally exhaust rate or spend limits.
+
 The checked-in smoke runner performs six structural checks: authenticated model listing, unknown-model rejection, Qwen non-streaming text, Qwen streaming, one tool call, and parallel tool calls. The tool cases send `tool_choice: "required"` and prompts asking for each named tool exactly once, but tool selection remains model output: a parallel response with fewer than two calls is reported as a structural failure even when the proxy is healthy. It reads `WORKER_URL` and `AI_PROXY_TOKEN` only from the process environment, constructs the Bearer header in memory, and prints only case names, statuses, request IDs, selected models, and structural counts. It never prints or writes response content, request headers, Access JWTs, tool arguments, or the proxy token.
 
 Run it only after separate approval for the deployment and any paid inference. Use a secret manager to inject the token, do not paste it into shell history, and do not capture command output as an artifact:
@@ -484,7 +482,7 @@ The runner is intentionally not a deployment command and does not authorize prod
 | `AI` | Binding | Yes* | Workers AI binding used by the authenticated inference proxy; configured in `wrangler.jsonc` |
 | `AI_PROXY_TOKEN` | Secret | Yes* | Dedicated random 256-bit Bearer token shared only with the OpenClaw container |
 | `AI_GATEWAY_ID` | Secret/variable | Yes* | AI Gateway ID used by `env.AI.run()`; recommended value: `moltworker` |
-| `WORKER_URL` | Secret/variable | Yes* | Public Worker origin, such as `https://moltbot-sandbox.example.workers.dev`; required by the proxy and CDP |
+| `WORKER_URL` | Secret/variable | Yes* | Public Worker origin, `https://moltbot.kentymyty.com`; required by the proxy and CDP |
 | `BACKUP_BUCKET` | Binding | Yes* | R2 binding used for Sandbox SDK snapshot persistence; defaults to bucket `moltbot-data` |
 | `CLOUDFLARE_AI_GATEWAY_API_KEY` | Secret | Alternative | Upstream native-provider credential; not used by the default Workers AI proxy deployment |
 | `CF_AI_GATEWAY_ACCOUNT_ID` | Secret/variable | Alternative | Upstream native-provider account ID |

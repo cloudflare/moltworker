@@ -81,6 +81,12 @@ function loadWorkersAiModels() {
 
 const workersAiModels = loadWorkersAiModels();
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function slackEnum(name, value, allowedValues, defaultValue) {
   const resolvedValue = value === undefined ? defaultValue : value;
   if (!allowedValues.includes(resolvedValue)) {
@@ -172,6 +178,11 @@ try {
 
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
+config.messages = isPlainObject(config.messages) ? config.messages : {};
+config.messages.groupChat = isPlainObject(config.messages.groupChat)
+  ? config.messages.groupChat
+  : {};
+config.messages.groupChat.visibleReplies = 'automatic';
 
 // Gateway configuration
 config.gateway.port = 18789;

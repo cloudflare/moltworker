@@ -64,6 +64,7 @@ fi
 # ============================================================
 # openclaw onboard handles initial config, then the patcher adds:
 # - Channel config (Telegram, Discord, Slack)
+# - Group-chat visible reply defaults
 # - Gateway token auth
 # - Trusted proxies for sandbox networking
 # - Legacy AI Gateway compatibility and the Worker AI proxy provider

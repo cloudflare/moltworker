@@ -18,6 +18,13 @@ interface OpenClawConfig {
   };
   channels?: Record<string, unknown>;
   gateway?: Record<string, unknown>;
+  messages?: {
+    groupChat?: {
+      historyLimit?: number;
+      unmentionedInbound?: string;
+      visibleReplies?: string;
+    };
+  };
   models?: {
     providers?: Record<string, unknown>;
   };
@@ -76,6 +83,50 @@ afterEach(() => {
 });
 
 describe('OpenClaw config patcher', () => {
+  it('configures automatic visible replies for an empty config', () => {
+    const { config } = patchConfig({}, {});
+
+    expect(config.messages?.groupChat?.visibleReplies).toBe('automatic');
+  });
+
+  it('replaces stale visibleReplies without clobbering sibling settings', () => {
+    const { config } = patchConfig(
+      {
+        messages: {
+          groupChat: {
+            historyLimit: 42,
+            unmentionedInbound: 'room_event',
+            visibleReplies: 'message_tool',
+          },
+        },
+      },
+      {},
+    );
+
+    expect(config.messages?.groupChat).toMatchObject({
+      historyLimit: 42,
+      unmentionedInbound: 'room_event',
+      visibleReplies: 'automatic',
+    });
+  });
+
+  it.each([
+    ['messages array', { messages: [] }],
+    ['messages string', { messages: 'stale' }],
+    ['messages null', { messages: null }],
+    ['groupChat array', { messages: { groupChat: [] } }],
+    ['groupChat string', { messages: { groupChat: 'stale' } }],
+    ['groupChat null', { messages: { groupChat: null } }],
+  ])('normalizes malformed %s config before setting visible replies', (_name, initialConfig) => {
+    const { config, serialized } = patchConfig(
+      initialConfig as OpenClawConfig,
+      {},
+    );
+
+    expect(config.messages?.groupChat).toEqual({ visibleReplies: 'automatic' });
+    expect(JSON.parse(serialized).messages.groupChat.visibleReplies).toBe('automatic');
+  });
+
   it('registers the exact Workers AI proxy models and selects GLM as primary', () => {
     const { config } = patchConfig(
       {},

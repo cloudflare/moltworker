@@ -5,7 +5,7 @@
 # The AI binding itself is configured as "AI" in wrangler.jsonc.
 AI_PROXY_TOKEN=replace-with-random-64-hex
 AI_GATEWAY_ID=moltworker
-WORKER_URL=https://moltbot-sandbox.example.workers.dev
+WORKER_URL=https://moltbot.kentymyty.com
 SANDBOX_SLEEP_AFTER=10m
 
 # Backward-compatible upstream alternatives (not the default deployment)
