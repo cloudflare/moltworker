@@ -18,6 +18,14 @@ interface OpenClawConfig {
   };
   channels?: Record<string, unknown>;
   gateway?: Record<string, unknown>;
+  messages?: {
+    groupChat?: {
+      historyLimit?: number;
+      message_tool?: unknown;
+      unmentionedInbound?: unknown;
+      visibleReplies?: string;
+    };
+  };
   models?: {
     providers?: Record<string, unknown>;
   };
@@ -76,6 +84,38 @@ afterEach(() => {
 });
 
 describe('OpenClaw config patcher', () => {
+  it('configures automatic visible replies for an empty config', () => {
+    const { config } = patchConfig({}, {});
+
+    expect(config.messages?.groupChat?.visibleReplies).toBe('automatic');
+  });
+
+  it('replaces stale group-chat message_tool without clobbering sibling settings', () => {
+    const { config } = patchConfig(
+      {
+        messages: {
+          groupChat: {
+            historyLimit: 42,
+            message_tool: 'stale',
+          },
+        },
+      },
+      {},
+    );
+
+    expect(config.messages?.groupChat).toMatchObject({
+      historyLimit: 42,
+      visibleReplies: 'automatic',
+    });
+    expect(config.messages?.groupChat).not.toHaveProperty('message_tool');
+  });
+
+  it('does not enable unmentioned inbound group-chat messages', () => {
+    const { config } = patchConfig({}, {});
+
+    expect(config.messages?.groupChat ?? {}).not.toHaveProperty('unmentionedInbound');
+  });
+
   it('registers the exact Workers AI proxy models and selects GLM as primary', () => {
     const { config } = patchConfig(
       {},

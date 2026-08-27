@@ -93,6 +93,10 @@ try {
 
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
+config.messages = config.messages || {};
+config.messages.groupChat = config.messages.groupChat || {};
+delete config.messages.groupChat.message_tool;
+config.messages.groupChat.visibleReplies = 'automatic';
 
 // Gateway configuration
 config.gateway.port = 18789;
