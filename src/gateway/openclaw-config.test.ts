@@ -21,8 +21,7 @@ interface OpenClawConfig {
   messages?: {
     groupChat?: {
       historyLimit?: number;
-      message_tool?: unknown;
-      unmentionedInbound?: unknown;
+      unmentionedInbound?: string;
       visibleReplies?: string;
     };
   };
@@ -90,13 +89,14 @@ describe('OpenClaw config patcher', () => {
     expect(config.messages?.groupChat?.visibleReplies).toBe('automatic');
   });
 
-  it('replaces stale group-chat message_tool without clobbering sibling settings', () => {
+  it('replaces stale visibleReplies without clobbering sibling settings', () => {
     const { config } = patchConfig(
       {
         messages: {
           groupChat: {
             historyLimit: 42,
-            message_tool: 'stale',
+            unmentionedInbound: 'room_event',
+            visibleReplies: 'message_tool',
           },
         },
       },
@@ -105,15 +105,26 @@ describe('OpenClaw config patcher', () => {
 
     expect(config.messages?.groupChat).toMatchObject({
       historyLimit: 42,
+      unmentionedInbound: 'room_event',
       visibleReplies: 'automatic',
     });
-    expect(config.messages?.groupChat).not.toHaveProperty('message_tool');
   });
 
-  it('does not enable unmentioned inbound group-chat messages', () => {
-    const { config } = patchConfig({}, {});
+  it.each([
+    ['messages array', { messages: [] }],
+    ['messages string', { messages: 'stale' }],
+    ['messages null', { messages: null }],
+    ['groupChat array', { messages: { groupChat: [] } }],
+    ['groupChat string', { messages: { groupChat: 'stale' } }],
+    ['groupChat null', { messages: { groupChat: null } }],
+  ])('normalizes malformed %s config before setting visible replies', (_name, initialConfig) => {
+    const { config, serialized } = patchConfig(
+      initialConfig as OpenClawConfig,
+      {},
+    );
 
-    expect(config.messages?.groupChat ?? {}).not.toHaveProperty('unmentionedInbound');
+    expect(config.messages?.groupChat).toEqual({ visibleReplies: 'automatic' });
+    expect(JSON.parse(serialized).messages.groupChat.visibleReplies).toBe('automatic');
   });
 
   it('registers the exact Workers AI proxy models and selects GLM as primary', () => {

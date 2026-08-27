@@ -2,6 +2,12 @@ const fs = require('fs');
 
 const configPath = process.env.OPENCLAW_CONFIG_PATH || '/root/.openclaw/openclaw.json';
 
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function slackEnum(name, value, allowedValues, defaultValue) {
   const resolvedValue = value === undefined ? defaultValue : value;
   if (!allowedValues.includes(resolvedValue)) {
@@ -93,9 +99,10 @@ try {
 
 config.gateway = config.gateway || {};
 config.channels = config.channels || {};
-config.messages = config.messages || {};
-config.messages.groupChat = config.messages.groupChat || {};
-delete config.messages.groupChat.message_tool;
+config.messages = isPlainObject(config.messages) ? config.messages : {};
+config.messages.groupChat = isPlainObject(config.messages.groupChat)
+  ? config.messages.groupChat
+  : {};
 config.messages.groupChat.visibleReplies = 'automatic';
 
 // Gateway configuration
