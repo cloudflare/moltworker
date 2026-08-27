@@ -1,4 +1,5 @@
 import type { AllowedModel } from './types';
+import { QWEN_MODEL } from './constants';
 
 export interface ChatCompletionContext {
   id: string;
@@ -31,6 +32,7 @@ export interface OpenAIChatCompletionResponse {
     message: {
       role: 'assistant';
       content: string | null;
+      reasoning_content?: string;
       tool_calls?: OpenAIToolCall[];
     };
     finish_reason: 'stop' | 'tool_calls';
@@ -48,6 +50,7 @@ interface OpenAIChatCompletionChunk {
     delta: {
       role?: 'assistant';
       content?: string;
+      reasoning_content?: string;
       tool_calls?: OpenAIStreamToolCall[];
     };
     finish_reason: 'stop' | 'tool_calls' | null;
@@ -184,6 +187,18 @@ function normalizeUsage(value: unknown): OpenAIUsage | undefined {
   return { prompt_tokens, completion_tokens, total_tokens };
 }
 
+function normalizeReasoning(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (typeof value.reasoning_content === 'string') {
+    return value.reasoning_content;
+  }
+
+  return typeof value.reasoning === 'string' ? value.reasoning : undefined;
+}
+
 export function toOpenAIChatCompletion(
   result: unknown,
   context: ChatCompletionContext,
@@ -192,6 +207,7 @@ export function toOpenAIChatCompletion(
   const choice = firstChoice(unwrapped);
   const message = choice !== undefined && isRecord(choice.message) ? choice.message : undefined;
   const toolCalls = normalizeToolCalls(message?.tool_calls ?? unwrapped.tool_calls);
+  const reasoning = context.model === QWEN_MODEL ? normalizeReasoning(message) : undefined;
   const usage = normalizeUsage(unwrapped.usage);
   const response: OpenAIChatCompletionResponse = {
     id: context.id,
@@ -209,6 +225,7 @@ export function toOpenAIChatCompletion(
               : typeof unwrapped.response === 'string'
                 ? unwrapped.response
                 : null,
+          ...(reasoning === undefined ? {} : { reasoning_content: reasoning }),
           ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
         },
         finish_reason:
@@ -295,6 +312,7 @@ export function createOpenAIChatCompletionStream(
             : typeof parsed.response === 'string'
               ? parsed.response
               : undefined;
+        const reasoning = context.model === QWEN_MODEL ? normalizeReasoning(delta) : undefined;
         const toolCalls: OpenAIStreamToolCall[] =
           delta === undefined
             ? normalizeToolCalls(parsed.tool_calls).map((toolCall, index) =>
@@ -306,12 +324,13 @@ export function createOpenAIChatCompletionStream(
           usage = parsedUsage;
         }
 
-        if (text !== undefined || toolCalls.length > 0) {
+        if (text !== undefined || reasoning !== undefined || toolCalls.length > 0) {
           const outputDelta: OpenAIChatCompletionChunk['choices'][number]['delta'] = {
             ...(!sentFirstChunk || delta?.role === 'assistant'
               ? { role: 'assistant' as const }
               : {}),
             ...(text === undefined ? {} : { content: text }),
+            ...(reasoning === undefined ? {} : { reasoning_content: reasoning }),
             ...(toolCalls.length === 0
               ? {}
               : {

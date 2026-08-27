@@ -443,10 +443,13 @@ See `skills/cloudflare-browser/SKILL.md` for full documentation.
 
 The checked-in Wrangler configuration exposes the Cloudflare Workers AI binding as `AI`. OpenClaw does not call that binding directly from the container. Instead, it sends OpenAI-compatible requests to `POST /internal/ai/v1/chat/completions`; the Worker authenticates the request with `AI_PROXY_TOKEN`, allowlists the model, and invokes `env.AI.run()` through the `AI_GATEWAY_ID` gateway.
 
-The default deployment registers exactly two OpenClaw models:
+The default deployment registers exactly three OpenClaw models. The model policy is fixed:
 
 - `cf-workers-ai/@cf/zai-org/glm-4.7-flash` (`GLM 4.7 Flash`) is the primary model.
 - `cf-workers-ai/@cf/moonshotai/kimi-k2.7-code` (`Kimi K2.7 Code (manual)`) is available only when explicitly selected. It is never an automatic fallback.
+- `cf-workers-ai/@cf/qwen/qwen3.8-27b` (`Qwen 3.8 27B (manual)`) is available only when explicitly selected. It is never an automatic fallback.
+
+The authenticated `GET /internal/ai/v1/models` endpoint lists these three registered models and their selection metadata. It requires the same `AI_PROXY_TOKEN` Bearer credential as chat completions. Qwen is enabled for text, reasoning, and function/tool calling through this proxy. Cloudflare documents upstream vision support for Qwen, but vision input is deferred until a separate reviewed contract covers image validation, size limits, remote-fetch boundaries, and production evidence; this deployment advertises text input only.
 
 The container receives the public proxy base URL and a dedicated Bearer secret. It does not receive a Cloudflare API token, AI Gateway management token, Workers AI token, or external-provider key. Keep `AI_PROXY_TOKEN` separate from `MOLTBOT_GATEWAY_TOKEN`.
 
@@ -460,7 +463,17 @@ The upstream direct Anthropic, direct OpenAI, native Cloudflare AI Gateway, and 
 
 After deployment and Access configuration, load `AI_PROXY_TOKEN` from your secret manager into a protected process environment without printing it. Use an HTTP client that constructs the `Authorization: Bearer ...` header in memory rather than placing the secret in command arguments or shell history. Send one small JSON chat-completions request to `https://moltbot.kentymyty.com/internal/ai/v1/chat/completions` with model `@cf/zai-org/glm-4.7-flash`, verify a successful OpenAI-compatible response, and confirm the matching entry appears in the `moltworker` AI Gateway logs. Do not intentionally exhaust rate or spend limits.
 
-Also verify that a request without the Bearer credential returns `401`, an unknown model returns `400`, and neither request starts the container or creates an AI Gateway inference log. Never record request headers or the proxy token in test output.
+The checked-in smoke runner performs six structural checks: authenticated model listing, unknown-model rejection, Qwen non-streaming text, Qwen streaming, one tool call, and parallel tool calls. The tool cases send `tool_choice: "required"` and prompts asking for each named tool exactly once, but tool selection remains model output: a parallel response with fewer than two calls is reported as a structural failure even when the proxy is healthy. It reads `WORKER_URL` and `AI_PROXY_TOKEN` only from the process environment, constructs the Bearer header in memory, and prints only case names, statuses, request IDs, selected models, and structural counts. It never prints or writes response content, request headers, Access JWTs, tool arguments, or the proxy token.
+
+Run it only after separate approval for the deployment and any paid inference. Use a secret manager to inject the token, do not paste it into shell history, and do not capture command output as an artifact:
+
+```bash
+WORKER_URL=https://moltbot-sandbox.example.workers.dev \
+AI_PROXY_TOKEN="$(read-secret-with-your-secret-manager)" \
+npm run smoke:workers-ai-model
+```
+
+The runner is intentionally not a deployment command and does not authorize production inference by itself. Do not intentionally exhaust rate or spend limits. For a manual negative check, a request without the Bearer credential should return `401`, an unknown model should return `400`, and neither request should start the container or create an AI Gateway inference log. Never record request headers or the proxy token in test output.
 
 ## Configuration Reference
 

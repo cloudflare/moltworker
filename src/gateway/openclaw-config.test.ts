@@ -148,7 +148,11 @@ describe('OpenClaw config patcher', () => {
       'cf-workers-ai/@cf/moonshotai/kimi-k2.7-code': {
         alias: 'Kimi K2.7 Code (manual)',
       },
+      'cf-workers-ai/@cf/qwen/qwen3.8-27b': {
+        alias: 'Qwen 3.8 27B (manual)',
+      },
     });
+    expect(config.agents?.defaults?.model).not.toHaveProperty('fallbacks');
     expect(config.models?.providers?.['cf-workers-ai']).toEqual({
       baseUrl: 'https://moltworker.example.workers.dev/internal/ai/v1',
       apiKey: '${OPENCLAW_AI_PROXY_TOKEN}',
@@ -166,6 +170,15 @@ describe('OpenClaw config patcher', () => {
         {
           id: '@cf/moonshotai/kimi-k2.7-code',
           name: 'Kimi K2.7 Code',
+          reasoning: true,
+          input: ['text'],
+          contextWindow: 262144,
+          maxTokens: 8192,
+          compat: { supportsTools: true },
+        },
+        {
+          id: '@cf/qwen/qwen3.8-27b',
+          name: 'Qwen 3.8 27B',
           reasoning: true,
           input: ['text'],
           contextWindow: 262144,

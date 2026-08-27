@@ -1,6 +1,6 @@
-import type { ALLOWED_MODELS } from './constants';
+import type { AllowedModel } from './models';
 
-export type AllowedModel = (typeof ALLOWED_MODELS)[number];
+export type { AllowedModel } from './models';
 
 export interface OpenAIChatCompletionRequest {
   model: AllowedModel;

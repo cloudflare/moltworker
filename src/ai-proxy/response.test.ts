@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MODEL } from './constants';
+import { DEFAULT_MODEL, KIMI_MODEL, QWEN_MODEL } from './constants';
 import { createOpenAIChatCompletionStream, toOpenAIChatCompletion } from './response';
 
 const context = {
   id: 'chatcmpl-test',
   created: 1_786_723_200,
   model: DEFAULT_MODEL,
+};
+
+const qwenContext = {
+  id: 'chatcmpl-qwen',
+  created: 1_786_723_202,
+  model: '@cf/qwen/qwen3.8-27b' as typeof QWEN_MODEL,
+};
+
+const kimiContext = {
+  id: 'chatcmpl-kimi',
+  created: 1_786_723_203,
+  model: KIMI_MODEL,
 };
 
 describe('toOpenAIChatCompletion', () => {
@@ -168,6 +180,123 @@ describe('toOpenAIChatCompletion', () => {
       finish_reason: 'tool_calls',
     });
     expect(response.usage).toEqual({ prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 });
+  });
+
+  // Catches dropping Qwen's private reasoning field, or leaking adjacent upstream data.
+  it('normalizes Qwen reasoning_content while preserving usage and the requested model', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        id: 'workers-ai-upstream-id',
+        model: '@cf/zai-org/glm-4.7-flash',
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'final answer',
+              reasoning_content: 'private chain summary',
+              reasoning: 'lower-priority alias summary',
+              diagnostic: 'upstream diagnostic',
+            },
+          },
+        ],
+        usage: { prompt_tokens: 13, completion_tokens: 5, total_tokens: 18 },
+      },
+      qwenContext,
+    );
+
+    expect(response.choices[0].message).toEqual({
+      role: 'assistant',
+      content: 'final answer',
+      reasoning_content: 'private chain summary',
+    });
+    expect(response.usage).toEqual({ prompt_tokens: 13, completion_tokens: 5, total_tokens: 18 });
+    expect(response.model).toBe('@cf/qwen/qwen3.8-27b');
+    expect(JSON.stringify(response)).not.toContain('upstream diagnostic');
+  });
+
+  // Catches forwarding Qwen's alias verbatim or serializing arbitrary reasoning objects.
+  it('normalizes Qwen reasoning aliases only when they are strings', () => {
+    const aliased = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'alias answer',
+              reasoning: 'alias chain summary',
+              reasoning_content: { ignored: 'object' },
+            },
+          },
+        ],
+      },
+      qwenContext,
+    );
+    const malformed = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'plain answer',
+              reasoning: { ignored: 'object' },
+            },
+          },
+        ],
+      },
+      qwenContext,
+    );
+
+    expect(aliased.choices[0].message).toEqual({
+      role: 'assistant',
+      content: 'alias answer',
+      reasoning_content: 'alias chain summary',
+    });
+    expect(malformed.choices[0].message).toEqual({
+      role: 'assistant',
+      content: 'plain answer',
+    });
+  });
+
+  // Catches exposing Qwen-only reasoning fields from GLM responses.
+  it('omits reasoning fields from GLM completions', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'GLM-OK',
+              reasoning_content: 'GLM private chain',
+              reasoning: 'GLM alias chain',
+            },
+          },
+        ],
+      },
+      context,
+    );
+
+    expect(response.choices[0].message).toEqual({ role: 'assistant', content: 'GLM-OK' });
+  });
+
+  // Catches exposing Qwen-only reasoning fields from Kimi responses.
+  it('omits reasoning fields from Kimi completions', () => {
+    const response = toOpenAIChatCompletion(
+      {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'Kimi-OK',
+              reasoning_content: 'Kimi private chain',
+              reasoning: 'Kimi alias chain',
+            },
+          },
+        ],
+      },
+      kimiContext,
+    );
+
+    expect(response.choices[0].message).toEqual({ role: 'assistant', content: 'Kimi-OK' });
   });
 });
 
@@ -431,5 +560,234 @@ describe('createOpenAIChatCompletionStream', () => {
       },
     ]);
     expect(records.filter((record) => record === '[DONE]')).toHaveLength(1);
+  });
+
+  // Catches discarding Qwen reasoning deltas, which must retain their original ordering.
+  it('emits Qwen reasoning_content before text and preserves terminal usage', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"id":"upstream-qwen","model":"unexpected-upstream-model","choices":[{"delta":{"role":"assistant","reasoning_content":"private chain summary","diagnostic":"sentinel reasoning diagnostic","tool_results":"sentinel tool result content"},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"content":"final answer"},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"completion_tokens":5,"total_tokens":18}}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, qwenContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"private chain summary"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"content":"final answer"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":13,"completion_tokens":5,"total_tokens":18}}',
+      '[DONE]',
+    ]);
+    expect(JSON.stringify(records)).not.toContain('sentinel reasoning diagnostic');
+    expect(JSON.stringify(records)).not.toContain('sentinel tool result content');
+    expect(records.filter((record) => record === '[DONE]')).toHaveLength(1);
+  });
+
+  // Catches emitting Qwen's `reasoning` alias instead of the OpenAI-compatible field name.
+  it('normalizes Qwen reasoning stream aliases to reasoning_content', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"reasoning":"alias chain summary","reasoning_content":{"ignored":true}},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, qwenContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"alias chain summary"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ]);
+  });
+
+  // Catches dropping a continuation fragment for a single Qwen tool call.
+  it('preserves a Qwen tool call split across stream events', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\""}}]},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Tokyo\\"}"}}]},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, qwenContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\""}}]},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Tokyo\\"}"}}]},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
+      '[DONE]',
+    ]);
+  });
+
+  // Catches changing Qwen's index-based routing when tool calls interleave across events.
+  it('preserves two interleaved Qwen tool calls across stream events', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\""}},{"index":1,"id":"call_time","type":"function","function":{"name":"get_time","arguments":"{\\"timezone\\":\\""}}]},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"arguments":"Asia/Tokyo\\"}"}},{"index":0,"function":{"arguments":"Tokyo\\"}"}}]},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, qwenContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_weather","type":"function","function":{"name":"get_weather","arguments":"{\\"city\\":\\""}},{"index":1,"id":"call_time","type":"function","function":{"name":"get_time","arguments":"{\\"timezone\\":\\""}}]},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"arguments":"Asia/Tokyo\\"}"}},{"index":0,"function":{"arguments":"Tokyo\\"}"}}]},"finish_reason":null}]}',
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}',
+      '[DONE]',
+    ]);
+  });
+
+  // Catches duplicate terminal records when an upstream terminal event is followed by stream close.
+  it('emits one terminal chunk and one done record after a Qwen terminal event and stream close', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, qwenContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-qwen","object":"chat.completion.chunk","created":1786723202,"model":"@cf/qwen/qwen3.8-27b","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ]);
+    expect(records.filter((record) => record === '[DONE]')).toHaveLength(1);
+    expect(records.filter((record) => record !== '[DONE]')).toHaveLength(1);
+  });
+
+  // Catches emitting Qwen-only reasoning deltas for GLM streams.
+  it('omits reasoning fields from GLM stream deltas', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"reasoning_content":"GLM private chain"},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"content":"GLM-OK"},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, context, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1786723200,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{"role":"assistant","content":"GLM-OK"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-test","object":"chat.completion.chunk","created":1786723200,"model":"@cf/zai-org/glm-4.7-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ]);
+  });
+
+  // Catches emitting Qwen-only reasoning aliases for Kimi streams.
+  it('omits reasoning fields from Kimi stream deltas', async () => {
+    const source = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(
+          new TextEncoder().encode(
+            [
+              'data: {"choices":[{"delta":{"reasoning":"Kimi alias chain"},"finish_reason":null}]}',
+              '',
+              'data: {"choices":[{"delta":{"content":"Kimi-OK"},"finish_reason":null}]}',
+              '',
+              'data: [DONE]',
+              '',
+            ].join('\n'),
+          ),
+        );
+        controller.close();
+      },
+    });
+
+    const records = dataRecords(
+      await readStream(
+        createOpenAIChatCompletionStream(source, kimiContext, new AbortController().signal),
+      ),
+    );
+
+    expect(records).toEqual([
+      '{"id":"chatcmpl-kimi","object":"chat.completion.chunk","created":1786723203,"model":"@cf/moonshotai/kimi-k2.7-code","choices":[{"index":0,"delta":{"role":"assistant","content":"Kimi-OK"},"finish_reason":null}]}',
+      '{"id":"chatcmpl-kimi","object":"chat.completion.chunk","created":1786723203,"model":"@cf/moonshotai/kimi-k2.7-code","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+      '[DONE]',
+    ]);
   });
 });

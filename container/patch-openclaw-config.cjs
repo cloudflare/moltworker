@@ -1,6 +1,85 @@
 const fs = require('fs');
+const path = require('path');
 
 const configPath = process.env.OPENCLAW_CONFIG_PATH || '/root/.openclaw/openclaw.json';
+const workersAiModelsPath = path.resolve(__dirname, '../config/workers-ai-models.json');
+
+function workersAiRegistryError() {
+  throw new Error('Invalid Workers AI model registry');
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isPositiveInteger(value) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function loadWorkersAiModels() {
+  const rawModels = JSON.parse(fs.readFileSync(workersAiModelsPath, 'utf8'));
+  if (!Array.isArray(rawModels) || rawModels.length === 0) workersAiRegistryError();
+
+  const models = rawModels.map((rawModel) => {
+    if (!isRecord(rawModel)) workersAiRegistryError();
+
+    const {
+      id,
+      name,
+      alias,
+      selection,
+      contextWindow,
+      maxTokens,
+      documentedCapabilities,
+      input,
+      compat,
+    } = rawModel;
+    if (
+      !isNonEmptyString(id) ||
+      !isNonEmptyString(name) ||
+      !isNonEmptyString(alias) ||
+      (selection !== 'primary' && selection !== 'manual') ||
+      !isPositiveInteger(contextWindow) ||
+      !isPositiveInteger(maxTokens) ||
+      !isRecord(documentedCapabilities) ||
+      typeof documentedCapabilities.reasoning !== 'boolean' ||
+      !Array.isArray(input) ||
+      input.length === 0 ||
+      input.some((mode) => mode !== 'text' && mode !== 'image') ||
+      !isRecord(compat) ||
+      typeof compat.supportsTools !== 'boolean'
+    ) {
+      workersAiRegistryError();
+    }
+
+    return {
+      id,
+      name,
+      alias,
+      selection,
+      contextWindow,
+      maxTokens,
+      reasoning: documentedCapabilities.reasoning,
+      input: [...input],
+      compat: { supportsTools: compat.supportsTools },
+    };
+  });
+
+  const ids = new Set(models.map((model) => model.id));
+  const aliases = new Set(models.map((model) => model.alias));
+  const primaryModels = models.filter((model) => model.selection === 'primary');
+  if (ids.size !== models.length || aliases.size !== models.length || primaryModels.length !== 1) {
+    workersAiRegistryError();
+  }
+
+  return models;
+}
+
+const workersAiModels = loadWorkersAiModels();
 
 function isPlainObject(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -187,46 +266,33 @@ if (process.env.CF_AI_GATEWAY_MODEL) {
 // both runtime values are present. Keep the token as an environment reference
 // so the secret is never persisted to openclaw.json or its R2 snapshots.
 if (process.env.OPENCLAW_AI_PROXY_TOKEN && process.env.OPENCLAW_AI_PROXY_URL) {
-  const glmModel = {
-    id: '@cf/zai-org/glm-4.7-flash',
-    name: 'GLM 4.7 Flash',
-    reasoning: true,
-    input: ['text'],
-    contextWindow: 131072,
-    maxTokens: 8192,
-    compat: { supportsTools: true },
-  };
-  const kimiModel = {
-    id: '@cf/moonshotai/kimi-k2.7-code',
-    name: 'Kimi K2.7 Code',
-    reasoning: true,
-    input: ['text'],
-    contextWindow: 262144,
-    maxTokens: 8192,
-    compat: { supportsTools: true },
-  };
-
   config.models = config.models || {};
   config.models.providers = config.models.providers || {};
   config.models.providers['cf-workers-ai'] = {
     baseUrl: process.env.OPENCLAW_AI_PROXY_URL,
     apiKey: '${OPENCLAW_AI_PROXY_TOKEN}',
     api: 'openai-completions',
-    models: [glmModel, kimiModel],
+    models: workersAiModels.map((model) => ({
+      id: model.id,
+      name: model.name,
+      reasoning: model.reasoning,
+      input: model.input,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      compat: model.compat,
+    })),
   };
 
   config.agents = config.agents || {};
   config.agents.defaults = config.agents.defaults || {};
+  const primaryModel = workersAiModels.find((model) => model.selection === 'primary');
   config.agents.defaults.model = {
-    primary: 'cf-workers-ai/@cf/zai-org/glm-4.7-flash',
+    primary: 'cf-workers-ai/' + primaryModel.id,
   };
   config.agents.defaults.models = config.agents.defaults.models || {};
-  config.agents.defaults.models['cf-workers-ai/@cf/zai-org/glm-4.7-flash'] = {
-    alias: 'GLM 4.7 Flash',
-  };
-  config.agents.defaults.models['cf-workers-ai/@cf/moonshotai/kimi-k2.7-code'] = {
-    alias: 'Kimi K2.7 Code (manual)',
-  };
+  for (const model of workersAiModels) {
+    config.agents.defaults.models['cf-workers-ai/' + model.id] = { alias: model.alias };
+  }
 }
 
 // Overwrite channel objects to remove stale keys from restored configs that
