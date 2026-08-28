@@ -9,6 +9,10 @@ import { handleScheduled } from '../cron/handler';
  * when mounted in the main app
  */
 const debug = new Hono<AppEnv>();
+const ALLOWED_CLI_COMMANDS: ReadonlySet<string> = new Set([
+  'openclaw --help',
+  'openclaw --version',
+]);
 
 // GET /debug/version - Returns version info from inside the container
 debug.get('/version', async (c) => {
@@ -130,6 +134,10 @@ debug.get('/gateway-api', async (c) => {
 debug.get('/cli', async (c) => {
   const sandbox = c.get('sandbox');
   const cmd = c.req.query('cmd') || 'openclaw --help';
+
+  if (!ALLOWED_CLI_COMMANDS.has(cmd)) {
+    return c.json({ error: 'Unsupported debug CLI command' }, 400);
+  }
 
   try {
     const proc = await sandbox.startProcess(cmd);

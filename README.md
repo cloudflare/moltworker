@@ -261,6 +261,7 @@ Debug endpoints are available at `/debug/*` when enabled (requires `DEBUG_ROUTES
 - `GET /debug/processes` - List all container processes
 - `GET /debug/logs?id=<process_id>` - Get logs for a specific process
 - `GET /debug/version` - Get container and moltbot version info
+- `GET /debug/cli?cmd=<command>` - Run only `openclaw --help` or `openclaw --version`; defaults to help and returns 400 for other commands
 
 ## Optional: Chat Channels
 
