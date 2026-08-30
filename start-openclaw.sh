@@ -60,7 +60,12 @@ else
 fi
 
 # ============================================================
-# PATCH CONFIG (channels, gateway auth, trusted proxies)
+# INSTALL MANAGED HOOK (after restore, before config patching)
+# ============================================================
+node /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
+
+# ============================================================
+# PATCH CONFIG (channels, gateway auth, trusted proxies, managed hooks)
 # ============================================================
 # openclaw onboard handles initial config, then the patcher adds:
 # - Channel config (Telegram, Discord, Slack)

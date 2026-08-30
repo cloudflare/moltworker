@@ -41,6 +41,7 @@ MOLTBOT_GATEWAY_TOKEN=replace-with-a-different-random-64-hex
 # DISCORD_BOT_TOKEN=optional
 # SLACK_BOT_TOKEN=xoxb-optional
 # SLACK_APP_TOKEN=xapp-optional
+# SLACK_READY_CHANNEL_ID=C12345678 # stable C... or G... channel ID; omit to disable ready notification
 # SLACK_GROUP_POLICY=allowlist    # allowlist (default) | open | disabled
 # SLACK_ALLOWED_CHANNELS=C123,G456 # stable Slack channel IDs for allowlist
 # Slack threading overrides (used when both Slack tokens are set)

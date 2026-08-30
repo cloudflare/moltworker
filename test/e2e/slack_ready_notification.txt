@@ -1,0 +1,483 @@
+===
+check Issue #18 production verification prerequisites and record baseline
+%require
+===
+set -eu
+
+# This fixture is intentionally opt-in. The ordinary disposable E2E setup does
+# not provision Slack credentials or a ready channel. Set ISSUE18_RUN_PRODUCTION=1
+# only after the worker, Slack app, and Access service-token files are ready.
+# Prerequisites: DEBUG_ROUTES=true on the deployed worker; the worker has both
+# Slack tokens and a valid SLACK_READY_CHANNEL_ID; the bot is in that channel
+# with chat:write; and jq, curl, node, cctr, and Wrangler are installed.
+# cctr must have created worker-url.txt, gateway-token.txt, and the two Access
+# service-token files in CCTR_FIXTURE_DIR. Set ISSUE18_WORKER_URL and
+# ISSUE18_WORKER_NAME when the target is not the worker created by cctr.
+# Counts below paginate conversations.history so they represent the full
+# target-channel count. Copy every emitted evidence line into Issue #18.
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true,"reason":"set ISSUE18_RUN_PRODUCTION=1 to run the Slack production verification"}'
+    exit 0
+fi
+
+: "${CCTR_FIXTURE_DIR:?CCTR_FIXTURE_DIR is required}"
+: "${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN must be injected without printing it}"
+: "${SLACK_READY_CHANNEL_ID:?SLACK_READY_CHANNEL_ID must be the configured stable target channel ID}"
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required for the redeploy step}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required for the redeploy step}"
+: "${ISSUE18_REPO_ROOT:?ISSUE18_REPO_ROOT must point to the repository root}"
+case "$ISSUE18_REPO_ROOT" in
+    /*) ;;
+    *) echo 'ISSUE18_REPO_ROOT must be an absolute path' >&2; exit 1 ;;
+esac
+test -d "$ISSUE18_REPO_ROOT"
+test -f "$ISSUE18_REPO_ROOT/wrangler.jsonc"
+test -f "$ISSUE18_REPO_ROOT/package.json"
+test -f "$ISSUE18_REPO_ROOT/Dockerfile"
+test -x ./curl-auth
+test -f "$CCTR_FIXTURE_DIR/worker-url.txt"
+test -f "$CCTR_FIXTURE_DIR/gateway-token.txt"
+test -f "$CCTR_FIXTURE_DIR/cf-access-client-id.txt"
+test -f "$CCTR_FIXTURE_DIR/cf-access-client-secret.txt"
+
+WORKER_URL="${ISSUE18_WORKER_URL:-$(cat "$CCTR_FIXTURE_DIR/worker-url.txt")}"
+WORKER_NAME="${ISSUE18_WORKER_NAME:-$(cat "$CCTR_FIXTURE_DIR/worker-name.txt")}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+
+slack_message_count() {
+    cursor=""
+    total=0
+    while :; do
+        if [ -n "$cursor" ]; then
+            response=$(curl -sS --fail-with-body \
+                -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+                --get "https://slack.com/api/conversations.history" \
+                --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" \
+                --data-urlencode "limit=100" \
+                --data-urlencode "cursor=${cursor}")
+        else
+            response=$(curl -sS --fail-with-body \
+                -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+                --get "https://slack.com/api/conversations.history" \
+                --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" \
+                --data-urlencode "limit=100")
+        fi
+        page_count=$(printf '%s' "$response" | jq -er 'if .ok == true then (.messages | length) else error(.error // "Slack API failure") end')
+        total=$((total + page_count))
+        cursor=$(printf '%s' "$response" | jq -r '.response_metadata.next_cursor // ""')
+        [ -z "$cursor" ] && break
+    done
+    printf '%s\n' "$total"
+}
+
+record() {
+    printf '%s\n' "$1" | tee -a "$EVIDENCE_FILE"
+}
+
+mkdir -p "$(dirname "$EVIDENCE_FILE")"
+: > "$EVIDENCE_FILE"
+: > "$STATE_FILE"
+BASELINE_COUNT=$(slack_message_count)
+BASELINE_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf 'WORKER_URL=%s\nWORKER_NAME=%s\nBASELINE_COUNT=%s\n' \
+    "$WORKER_URL" "$WORKER_NAME" "$BASELINE_COUNT" > "$STATE_FILE"
+record "baseline_at=${BASELINE_AT} target_channel=${SLACK_READY_CHANNEL_ID} message_count=${BASELINE_COUNT}"
+echo '{"ready":true,"baseline_recorded":true}'
+---
+
+===
+force and confirm the cold container state
+%require
+===
+set -eu
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true}'
+    exit 0
+fi
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+. "$STATE_FILE"
+GATEWAY_TOKEN="${ISSUE18_GATEWAY_TOKEN:-$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")}"
+
+PRE_DESTROY_PROCESSES=$(./curl-auth -sS "$WORKER_URL/debug/processes")
+PRE_DESTROY_RUNNING=$(printf '%s' "$PRE_DESTROY_PROCESSES" | jq '[.processes[] | select(.status == "running" or .status == "starting")] | length')
+test "$PRE_DESTROY_RUNNING" -gt 0
+BOOT_ID_BEFORE=$(./curl-auth -sS "$WORKER_URL/debug/cli?cmd=cat%20%2Fproc%2Fsys%2Fkernel%2Frandom%2Fboot_id" | jq -er 'select(.exitCode == 0) | .stdout | gsub("\\s+"; "") | select(test("^[0-9a-f-]{36}$"))')
+DESTROYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+./curl-auth -sS -X POST "$WORKER_URL/debug/destroy-container" | jq .
+printf 'WORKER_URL=%s\nWORKER_NAME=%s\nBASELINE_COUNT=%s\nBOOT_ID_BEFORE=%s\n' "$WORKER_URL" "$WORKER_NAME" "$BASELINE_COUNT" "$BOOT_ID_BEFORE" > "$STATE_FILE"
+printf 'cold_destroy_at=%s pre_destroy_running_processes=%s boot_id_before=%s post_destroy_process_check=deferred_until_after_wake\n' "$DESTROYED_AT" "$PRE_DESTROY_RUNNING" "$BOOT_ID_BEFORE" | tee -a "$EVIDENCE_FILE"
+echo "{\"ready\":true,\"pre_destroy_running_processes\":${PRE_DESTROY_RUNNING},\"wake_request\":\"next_step\"}"
+---
+
+===
+cold browser-equivalent GET reaches a ready gateway and sends one message
+%require
+===
+set -eu
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true}'
+    exit 0
+fi
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+. "$STATE_FILE"
+GATEWAY_TOKEN="${ISSUE18_GATEWAY_TOKEN:-$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")}"
+
+slack_message_count() {
+    cursor=""
+    total=0
+    while :; do
+        if [ -n "$cursor" ]; then
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100" --data-urlencode "cursor=${cursor}")
+        else
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100")
+        fi
+        page_count=$(printf '%s' "$response" | jq -er 'if .ok == true then (.messages | length) else error(.error // "Slack API failure") end')
+        total=$((total + page_count))
+        cursor=$(printf '%s' "$response" | jq -r '.response_metadata.next_cursor // ""')
+        [ -z "$cursor" ] && break
+    done
+    printf '%s\n' "$total"
+}
+
+REQUEST_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+HTTP_STATUS=$(./curl-auth -sS -o /dev/null -w '%{http_code}' "$WORKER_URL/?token=$GATEWAY_TOKEN")
+REQUEST_DONE_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+test "$HTTP_STATUS" -ge 200
+test "$HTTP_STATUS" -lt 500
+
+READY=false
+for attempt in $(seq 1 36); do
+    STATUS=$(./curl-auth -sS "$WORKER_URL/api/status")
+    if printf '%s' "$STATUS" | jq -e '.ok == true and .status == "running"' > /dev/null; then
+        READY=true
+        GATEWAY_READY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        break
+    fi
+    sleep 5
+done
+test "$READY" = "true"
+BOOT_ID_AFTER=$(./curl-auth -sS "$WORKER_URL/debug/cli?cmd=cat%20%2Fproc%2Fsys%2Fkernel%2Frandom%2Fboot_id" | jq -er 'select(.exitCode == 0) | .stdout | gsub("\\s+"; "") | select(test("^[0-9a-f-]{36}$"))')
+test "$BOOT_ID_AFTER" != "$BOOT_ID_BEFORE"
+POST_WAKE_PROCESSES=$(./curl-auth -sS "$WORKER_URL/debug/processes")
+POST_WAKE_RUNNING=$(printf '%s' "$POST_WAKE_PROCESSES" | jq '[.processes[] | select(.status == "running" or .status == "starting")] | length')
+test "$POST_WAKE_RUNNING" -gt 0
+
+slack_latest_ready_ts() {
+    curl -sS --fail-with-body \
+        -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+        --get "https://slack.com/api/conversations.history" \
+        --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" \
+        --data-urlencode "limit=100" |
+        jq -er '[.messages[] | select((.text // "") | startswith("OpenClaw is ready ·"))][0].ts'
+}
+
+AFTER_COUNT=0
+for attempt in $(seq 1 12); do
+    AFTER_COUNT=$(slack_message_count)
+    if [ "$AFTER_COUNT" = "$((BASELINE_COUNT + 1))" ]; then
+        break
+    fi
+    sleep 5
+done
+test "$AFTER_COUNT" = "$((BASELINE_COUNT + 1))"
+SLACK_TS=$(slack_latest_ready_ts)
+SLACK_RECEIVED_AT=$(node -e 'console.log(new Date(Number(process.argv[1]) * 1000).toISOString())' "$SLACK_TS")
+printf 'cold_request_at=%s cold_request_done_at=%s http_status=%s gateway_ready_at=%s slack_receipt_at=%s slack_ts=%s message_count_before=%s message_count_after=%s delta=%s\n' \
+    "$REQUEST_AT" "$REQUEST_DONE_AT" "$HTTP_STATUS" "$GATEWAY_READY_AT" "$SLACK_RECEIVED_AT" "$SLACK_TS" "$BASELINE_COUNT" "$AFTER_COUNT" "$((AFTER_COUNT - BASELINE_COUNT))" | tee -a "$EVIDENCE_FILE"
+printf 'BASELINE_COUNT=%s\nCOLD_COUNT=%s\nBOOT_ID_BEFORE=%s\nBOOT_ID_AFTER=%s\n' "$BASELINE_COUNT" "$AFTER_COUNT" "$BOOT_ID_BEFORE" "$BOOT_ID_AFTER" >> "$STATE_FILE"
+printf 'cold_boot_id_before=%s cold_boot_id_after=%s post_wake_running_processes=%s\n' "$BOOT_ID_BEFORE" "$BOOT_ID_AFTER" "$POST_WAKE_RUNNING" | tee -a "$EVIDENCE_FILE"
+echo "{\"ready\":true,\"cold_message_delta\":$((AFTER_COUNT - BASELINE_COUNT))}"
+---
+
+===
+warm browser GET does not send a duplicate
+%require
+===
+set -eu
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true}'
+    exit 0
+fi
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+. "$STATE_FILE"
+GATEWAY_TOKEN="${ISSUE18_GATEWAY_TOKEN:-$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")}"
+
+slack_message_count() {
+    cursor=""
+    total=0
+    while :; do
+        if [ -n "$cursor" ]; then
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100" --data-urlencode "cursor=${cursor}")
+        else
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100")
+        fi
+        page_count=$(printf '%s' "$response" | jq -er 'if .ok == true then (.messages | length) else error(.error // "Slack API failure") end')
+        total=$((total + page_count))
+        cursor=$(printf '%s' "$response" | jq -r '.response_metadata.next_cursor // ""')
+        [ -z "$cursor" ] && break
+    done
+    printf '%s\n' "$total"
+}
+
+WARM_BEFORE=$(slack_message_count)
+WARM_REQUEST_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+WARM_STATUS=$(./curl-auth -sS -o /dev/null -w '%{http_code}' "$WORKER_URL/?token=$GATEWAY_TOKEN")
+WARM_DONE_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+WARM_AFTER=$(slack_message_count)
+test "$WARM_STATUS" -ge 200
+test "$WARM_STATUS" -lt 500
+test "$WARM_AFTER" = "$WARM_BEFORE"
+printf 'warm_request_at=%s warm_request_done_at=%s http_status=%s message_count_before=%s message_count_after=%s delta=%s\n' \
+    "$WARM_REQUEST_AT" "$WARM_DONE_AT" "$WARM_STATUS" "$WARM_BEFORE" "$WARM_AFTER" "$((WARM_AFTER - WARM_BEFORE))" | tee -a "$EVIDENCE_FILE"
+echo "{\"ready\":true,\"warm_message_delta\":$((WARM_AFTER - WARM_BEFORE))}"
+---
+
+===
+same-generation gateway restart does not send a duplicate
+%require
+===
+set -eu
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true}'
+    exit 0
+fi
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+. "$STATE_FILE"
+GATEWAY_TOKEN="${ISSUE18_GATEWAY_TOKEN:-$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")}"
+
+slack_message_count() {
+    cursor=""
+    total=0
+    while :; do
+        if [ -n "$cursor" ]; then
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100" --data-urlencode "cursor=${cursor}")
+        else
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100")
+        fi
+        page_count=$(printf '%s' "$response" | jq -er 'if .ok == true then (.messages | length) else error(.error // "Slack API failure") end')
+        total=$((total + page_count))
+        cursor=$(printf '%s' "$response" | jq -r '.response_metadata.next_cursor // ""')
+        [ -z "$cursor" ] && break
+    done
+    printf '%s\n' "$total"
+}
+
+RESTART_BEFORE=$(slack_message_count)
+OLD_GATEWAY=$(./curl-auth -sS "$WORKER_URL/debug/processes" | jq -er '[.processes[] | select((.command | contains("start-openclaw.sh")) and (.status == "running" or .status == "starting"))][0] | {id, startTime}')
+OLD_GATEWAY_ID=$(printf '%s' "$OLD_GATEWAY" | jq -r '.id')
+BOOT_ID_BEFORE=$(./curl-auth -sS "$WORKER_URL/debug/cli?cmd=cat%20%2Fproc%2Fsys%2Fkernel%2Frandom%2Fboot_id" | jq -er 'select(.exitCode == 0) | .stdout | gsub("\\s+"; "") | select(test("^[0-9a-f-]{36}$"))')
+RESTART_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+./curl-auth -sS -X POST "$WORKER_URL/debug/stop-gateway" | jq .
+for attempt in $(seq 1 20); do
+    RUNNING=$(./curl-auth -sS "$WORKER_URL/debug/processes" | jq '[.processes[] | select((.command | contains("start-openclaw.sh")) and (.status == "running" or .status == "starting"))] | length')
+    if [ "$RUNNING" = "0" ]; then
+        break
+    fi
+    sleep 3
+done
+test "$RUNNING" = "0"
+
+for attempt in $(seq 1 36); do
+    STATUS=$(./curl-auth -sS "$WORKER_URL/api/status")
+    if printf '%s' "$STATUS" | jq -e '.ok == true and .status == "running"' > /dev/null; then
+        break
+    fi
+    sleep 5
+done
+test "$(printf '%s' "$STATUS" | jq -r '.ok')" = "true"
+BOOT_ID_AFTER=$(./curl-auth -sS "$WORKER_URL/debug/cli?cmd=cat%20%2Fproc%2Fsys%2Fkernel%2Frandom%2Fboot_id" | jq -er 'select(.exitCode == 0) | .stdout | gsub("\\s+"; "") | select(test("^[0-9a-f-]{36}$"))')
+test "$BOOT_ID_AFTER" = "$BOOT_ID_BEFORE"
+NEW_GATEWAY=$(./curl-auth -sS "$WORKER_URL/debug/processes" | jq -er '[.processes[] | select((.command | contains("start-openclaw.sh")) and (.status == "running" or .status == "starting"))][0] | {id, startTime}')
+NEW_GATEWAY_ID=$(printf '%s' "$NEW_GATEWAY" | jq -r '.id')
+RESTART_AFTER=$(slack_message_count)
+test "$RESTART_AFTER" = "$RESTART_BEFORE"
+test "$NEW_GATEWAY_ID" != "$OLD_GATEWAY_ID"
+printf 'gateway_restart_at=%s old_gateway=%s new_gateway=%s gateway_healthy=true message_count_before=%s message_count_after=%s delta=%s\n' \
+    "$RESTART_AT" "$OLD_GATEWAY" "$NEW_GATEWAY" "$RESTART_BEFORE" "$RESTART_AFTER" "$((RESTART_AFTER - RESTART_BEFORE))" | tee -a "$EVIDENCE_FILE"
+printf 'gateway_restart_boot_id_before=%s gateway_restart_boot_id_after=%s boot_id_unchanged=true\n' "$BOOT_ID_BEFORE" "$BOOT_ID_AFTER" | tee -a "$EVIDENCE_FILE"
+echo "{\"ready\":true,\"gateway_restart_message_delta\":$((RESTART_AFTER - RESTART_BEFORE))}"
+---
+
+===
+new container generation sends exactly one new message
+%require
+===
+set -eu
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true}'
+    exit 0
+fi
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+. "$STATE_FILE"
+GATEWAY_TOKEN="${ISSUE18_GATEWAY_TOKEN:-$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")}"
+
+slack_message_count() {
+    cursor=""
+    total=0
+    while :; do
+        if [ -n "$cursor" ]; then
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100" --data-urlencode "cursor=${cursor}")
+        else
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100")
+        fi
+        page_count=$(printf '%s' "$response" | jq -er 'if .ok == true then (.messages | length) else error(.error // "Slack API failure") end')
+        total=$((total + page_count))
+        cursor=$(printf '%s' "$response" | jq -r '.response_metadata.next_cursor // ""')
+        [ -z "$cursor" ] && break
+    done
+    printf '%s\n' "$total"
+}
+
+GATEWAY_BEFORE=$(./curl-auth -sS "$WORKER_URL/debug/processes" | jq -er '[.processes[] | select((.command | contains("start-openclaw.sh")) and (.status == "running" or .status == "starting"))][0] | {id, startTime}')
+GENERATION_COUNT_BEFORE=$(slack_message_count)
+BOOT_ID_BEFORE=$(./curl-auth -sS "$WORKER_URL/debug/cli?cmd=cat%20%2Fproc%2Fsys%2Fkernel%2Frandom%2Fboot_id" | jq -er 'select(.exitCode == 0) | .stdout | gsub("\\s+"; "") | select(test("^[0-9a-f-]{36}$"))')
+GENERATION_REQUEST_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+./curl-auth -sS -X POST "$WORKER_URL/debug/destroy-container" | jq .
+
+NEW_HTTP_STATUS=$(./curl-auth -sS -o /dev/null -w '%{http_code}' "$WORKER_URL/?token=$GATEWAY_TOKEN")
+for attempt in $(seq 1 36); do
+    STATUS=$(./curl-auth -sS "$WORKER_URL/api/status")
+    if printf '%s' "$STATUS" | jq -e '.ok == true and .status == "running"' > /dev/null; then
+        GENERATION_READY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        break
+    fi
+    sleep 5
+done
+test "$(printf '%s' "$STATUS" | jq -r '.ok')" = "true"
+BOOT_ID_AFTER=$(./curl-auth -sS "$WORKER_URL/debug/cli?cmd=cat%20%2Fproc%2Fsys%2Fkernel%2Frandom%2Fboot_id" | jq -er 'select(.exitCode == 0) | .stdout | gsub("\\s+"; "") | select(test("^[0-9a-f-]{36}$"))')
+test "$BOOT_ID_AFTER" != "$BOOT_ID_BEFORE"
+GATEWAY_AFTER=$(./curl-auth -sS "$WORKER_URL/debug/processes" | jq -er '[.processes[] | select((.command | contains("start-openclaw.sh")) and (.status == "running" or .status == "starting"))][0] | {id, startTime}')
+GATEWAY_BEFORE_ID=$(printf '%s' "$GATEWAY_BEFORE" | jq -r '.id')
+GATEWAY_AFTER_ID=$(printf '%s' "$GATEWAY_AFTER" | jq -r '.id')
+test "$GATEWAY_AFTER_ID" != "$GATEWAY_BEFORE_ID"
+
+GENERATION_COUNT_AFTER=0
+for attempt in $(seq 1 12); do
+    GENERATION_COUNT_AFTER=$(slack_message_count)
+    if [ "$GENERATION_COUNT_AFTER" = "$((GENERATION_COUNT_BEFORE + 1))" ]; then
+        break
+    fi
+    sleep 5
+done
+test "$GENERATION_COUNT_AFTER" = "$((GENERATION_COUNT_BEFORE + 1))"
+printf 'new_generation_request_at=%s browser_http_status=%s gateway_ready_at=%s gateway_before=%s gateway_after=%s message_count_before=%s message_count_after=%s delta=%s\n' \
+    "$GENERATION_REQUEST_AT" "$NEW_HTTP_STATUS" "$GENERATION_READY_AT" "$GATEWAY_BEFORE" "$GATEWAY_AFTER" "$GENERATION_COUNT_BEFORE" "$GENERATION_COUNT_AFTER" "$((GENERATION_COUNT_AFTER - GENERATION_COUNT_BEFORE))" | tee -a "$EVIDENCE_FILE"
+printf 'new_generation_boot_id_before=%s new_generation_boot_id_after=%s generation_changed=true\n' "$BOOT_ID_BEFORE" "$BOOT_ID_AFTER" | tee -a "$EVIDENCE_FILE"
+echo "{\"ready\":true,\"new_generation_message_delta\":$((GENERATION_COUNT_AFTER - GENERATION_COUNT_BEFORE))}"
+---
+
+===
+invalid ready channel leaves the gateway healthy and sends no message
+%require
+===
+set -eu
+if [ "${ISSUE18_RUN_PRODUCTION:-}" != "1" ]; then
+    echo '{"skipped":true}'
+    exit 0
+fi
+STATE_FILE="${ISSUE18_STATE_FILE:-/tmp/moltworker-issue18-slack-ready.state}"
+EVIDENCE_FILE="${ISSUE18_EVIDENCE_FILE:-/tmp/moltworker-issue18-slack-ready-evidence.log}"
+. "$STATE_FILE"
+GATEWAY_TOKEN="${ISSUE18_GATEWAY_TOKEN:-$(cat "$CCTR_FIXTURE_DIR/gateway-token.txt")}"
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
+: "${ISSUE18_REPO_ROOT:?ISSUE18_REPO_ROOT must point to the repository root}"
+case "$ISSUE18_REPO_ROOT" in
+    /*) ;;
+    *) echo 'ISSUE18_REPO_ROOT must be an absolute path' >&2; exit 1 ;;
+esac
+test -d "$ISSUE18_REPO_ROOT"
+test -f "$ISSUE18_REPO_ROOT/wrangler.jsonc"
+test -f "$ISSUE18_REPO_ROOT/package.json"
+test -f "$ISSUE18_REPO_ROOT/Dockerfile"
+
+slack_message_count() {
+    cursor=""
+    total=0
+    while :; do
+        if [ -n "$cursor" ]; then
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100" --data-urlencode "cursor=${cursor}")
+        else
+            response=$(curl -sS --fail-with-body -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" --get "https://slack.com/api/conversations.history" --data-urlencode "channel=${SLACK_READY_CHANNEL_ID}" --data-urlencode "limit=100")
+        fi
+        page_count=$(printf '%s' "$response" | jq -er 'if .ok == true then (.messages | length) else error(.error // "Slack API failure") end')
+        total=$((total + page_count))
+        cursor=$(printf '%s' "$response" | jq -r '.response_metadata.next_cursor // ""')
+        [ -z "$cursor" ] && break
+    done
+    printf '%s\n' "$total"
+}
+
+FAILURE_BEFORE=$(slack_message_count)
+PRE_FAILURE_PROCESSES=$(./curl-auth -sS "$WORKER_URL/debug/processes")
+PRE_FAILURE_RUNNING=$(printf '%s' "$PRE_FAILURE_PROCESSES" | jq '[.processes[] | select(.status == "running" or .status == "starting")] | length')
+test "$PRE_FAILURE_RUNNING" -gt 0
+FAILURE_CONFIG_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+ORIGINAL_READY_CHANNEL_ID="$SLACK_READY_CHANNEL_ID"
+RESTORE_STATUS=0
+restore_ready_channel() {
+    set +e
+    (
+        cd "$ISSUE18_REPO_ROOT"
+        printf '%s' "$ORIGINAL_READY_CHANNEL_ID" | npx wrangler secret put SLACK_READY_CHANNEL_ID --config "$ISSUE18_REPO_ROOT/wrangler.jsonc" --name "$WORKER_NAME" > /dev/null 2>&1
+    )
+    if [ "$?" -ne 0 ]; then
+        RESTORE_STATUS=1
+    fi
+    (
+        cd "$ISSUE18_REPO_ROOT"
+        npx wrangler deploy --config "$ISSUE18_REPO_ROOT/wrangler.jsonc" --name "$WORKER_NAME" > /dev/null 2>&1
+    )
+    if [ "$?" -ne 0 ]; then
+        RESTORE_STATUS=1
+    fi
+}
+restore_on_exit() {
+    ORIGINAL_STATUS=$?
+    trap - EXIT
+    restore_ready_channel
+    if [ "$RESTORE_STATUS" -eq 0 ]; then
+        printf 'channel_restore=success\n' | tee -a "$EVIDENCE_FILE" >&2
+    else
+        printf 'channel_restore=failure\n' | tee -a "$EVIDENCE_FILE" >&2
+    fi
+    if [ "$ORIGINAL_STATUS" -eq 0 ] && [ "$RESTORE_STATUS" -ne 0 ]; then
+        ORIGINAL_STATUS=1
+    fi
+    exit "$ORIGINAL_STATUS"
+}
+trap restore_on_exit EXIT
+(
+    cd "$ISSUE18_REPO_ROOT"
+    printf '%s' 'invalid-channel-id' | npx wrangler secret put SLACK_READY_CHANNEL_ID --config "$ISSUE18_REPO_ROOT/wrangler.jsonc" --name "$WORKER_NAME"
+)
+(
+    cd "$ISSUE18_REPO_ROOT"
+    npx wrangler deploy --config "$ISSUE18_REPO_ROOT/wrangler.jsonc" --name "$WORKER_NAME"
+)
+DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+./curl-auth -sS -X POST "$WORKER_URL/debug/destroy-container" | jq .
+FAILURE_HTTP_STATUS=$(./curl-auth -sS -o /dev/null -w '%{http_code}' "$WORKER_URL/?token=$GATEWAY_TOKEN")
+for attempt in $(seq 1 36); do
+    STATUS=$(./curl-auth -sS "$WORKER_URL/api/status")
+    if printf '%s' "$STATUS" | jq -e '.ok == true and .status == "running"' > /dev/null; then
+        FAILURE_READY_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        break
+    fi
+    sleep 5
+done
+test "$(printf '%s' "$STATUS" | jq -r '.ok')" = "true"
+FAILURE_AFTER=$(slack_message_count)
+test "$FAILURE_AFTER" = "$FAILURE_BEFORE"
+printf 'invalid_channel_config_at=%s deployed_at=%s browser_http_status=%s gateway_ready_at=%s gateway_healthy=true message_count_before=%s message_count_after=%s delta=%s\n' \
+    "$FAILURE_CONFIG_AT" "$DEPLOYED_AT" "$FAILURE_HTTP_STATUS" "$FAILURE_READY_AT" "$FAILURE_BEFORE" "$FAILURE_AFTER" "$((FAILURE_AFTER - FAILURE_BEFORE))" | tee -a "$EVIDENCE_FILE"
+printf 'invalid_channel_pre_destroy_running_processes=%s\n' "$PRE_FAILURE_RUNNING" | tee -a "$EVIDENCE_FILE"
+
+echo "{\"ready\":true,\"gateway_healthy\":true,\"invalid_channel_message_delta\":$((FAILURE_AFTER - FAILURE_BEFORE))}"
+---

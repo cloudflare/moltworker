@@ -243,6 +243,26 @@ printf '%s' '10m' | npx wrangler secret put SANDBOX_SLEEP_AFTER
 
 When the container sleeps, the next request will trigger a cold start. If you have R2 storage configured, your paired devices and data will persist across restarts.
 
+### Waking a sleeping container
+
+Moltworker's Slack integration uses Socket Mode, which requires an outbound
+WebSocket from the OpenClaw process. When the container is sleeping, it has no
+live Socket Mode connection, so an ordinary Slack message cannot wake it.
+
+Use an authenticated browser request as the default wake action: open the
+Control UI URL with the gateway token, for example
+`https://moltbot.kentymyty.com/?token=YOUR_GATEWAY_TOKEN`. A configured Cron
+job or another external request to the Worker can also wake it. Wait for the
+gateway to finish its cold start before sending a Slack mention.
+
+When `SLACK_READY_CHANNEL_ID` is configured together with both Slack tokens,
+the managed `moltworker-slack-ready` hook posts one message in that channel
+after the new gateway generation is ready:
+`OpenClaw is ready · <ISO-8601 UTC timestamp>`. Seeing that message confirms
+that the gateway and Slack channel path are available. It is a readiness
+signal, not a Slack wake endpoint. Omit `SLACK_READY_CHANNEL_ID` to disable
+the notification.
+
 ## Admin UI
 
 ![admin ui](./assets/adminui.png)
@@ -306,6 +326,10 @@ npx wrangler secret put SLACK_BOT_TOKEN
 # Enter the xapp- token at the second prompt.
 npx wrangler secret put SLACK_APP_TOKEN
 
+# Optional: enter the stable target channel ID (C... or G...) at the prompt.
+# Omit this secret to disable the one-per-container-generation ready message.
+npx wrangler secret put SLACK_READY_CHANNEL_ID
+
 # Recommended: enter one or more comma-separated stable channel IDs (C... or G...).
 # In Slack, open the channel details and copy the Channel ID from the About tab.
 npx wrangler secret put SLACK_ALLOWED_CHANNELS
@@ -319,6 +343,13 @@ messages are blocked. The command above stores the allowlist as an encrypted
 Worker secret; it may instead be configured as a regular Worker variable in the
 Cloudflare dashboard. To allow every channel the app joins, omit the allowlist
 command and explicitly opt in before deployment:
+
+`SLACK_READY_CHANNEL_ID` is a stable Slack channel ID copied from the channel's
+About tab. It must be a channel or group-channel ID beginning with `C` or `G`;
+the managed hook trims and validates the value. The ready notification is
+enabled only when this ID and both Slack tokens are present. Omitting it (or
+using an invalid value) disables only the ready notification; it does not stop
+the gateway or the normal Slack integration.
 
 ```bash
 npx wrangler secret put SLACK_GROUP_POLICY
@@ -347,6 +378,16 @@ If the bot does not reply, confirm that it is a member of the channel, both
 secrets are present, and the Slack app was reinstalled after its manifest was
 changed. Then recreate the container from `/_admin/` or redeploy so the gateway
 restarts with the current secrets.
+
+#### Cold-start ready verification
+
+For a reproducible production check covering cold wake, warm requests,
+gateway-only restarts, a new container generation, and Slack failures, run
+[`test/e2e/slack_ready_notification.txt`](./test/e2e/slack_ready_notification.txt)
+with the prerequisites documented at the top of that fixture. Copy its
+timestamp, count, process, version, and deployment outputs into the Issue #18
+evidence comment; do not report a production result until those steps have
+actually been run.
 
 #### Slack threading configuration
 
@@ -505,6 +546,7 @@ The runner is intentionally not a deployment command and does not authorize prod
 | `DISCORD_DM_POLICY` | Variable | No | Discord DM policy: `pairing` (default) or `open` |
 | `SLACK_BOT_TOKEN` | Secret | No | Slack Bot User OAuth Token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Secret | No | Slack App-Level Token (`xapp-...`) with `connections:write` |
+| `SLACK_READY_CHANNEL_ID` | Secret/variable | No | Stable `C...` or `G...` channel ID for one ready message per container generation; omit to disable |
 | `SLACK_GROUP_POLICY` | Variable | No | Channel policy: `allowlist` (default), `open` (explicit opt-in), or `disabled` |
 | `SLACK_ALLOWED_CHANNELS` | Variable | No | Comma-separated stable Slack channel IDs used by the `allowlist` policy |
 | `SLACK_CHANNEL_REPLY_TO_MODE` | Variable | No | Channel reply mode: `off`, `first`, `all` (default), or `batched` |
@@ -535,6 +577,14 @@ OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 **`npm run dev` fails with an `Unauthorized` error:** You need to enable Cloudflare Containers in the [Containers dashboard](https://dash.cloudflare.com/?to=/:account/workers/containers)
 
 **Gateway fails to start:** Check `npx wrangler secret list` and `npx wrangler tail`
+
+**Gateway is healthy but no Slack ready message appears:** Confirm that
+`SLACK_READY_CHANNEL_ID` is a stable `C...` or `G...` channel ID, the bot is a
+member of that channel, and the app has `chat:write`. An omitted or invalid
+channel ID intentionally disables only the ready hook. A missing Slack scope,
+invalid destination, or other Slack API failure is nonfatal; verify gateway
+health with `GET /api/status`, then inspect the relevant deployment/container
+logs without recording tokens or full Slack responses.
 
 **Config changes not working:** Edit the `# Build cache bust:` comment in `Dockerfile` and redeploy
 

@@ -40,11 +40,19 @@ RUN mkdir -p /home/openclaw/.openclaw \
     && ln -s /home/openclaw/clawd /root/clawd
 
 # Copy startup configuration files
-# Build cache bust: 2026-08-28-v37-qwen-registry-and-group-chat-visible-replies
+# Build cache bust: 2026-08-29-v38-slack-ready-hook
 COPY container/patch-openclaw-config.cjs /usr/local/lib/openclaw/patch-openclaw-config.cjs
+COPY container/install-moltworker-slack-ready-hook.cjs /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
+COPY container/hooks/moltworker-slack-ready/HOOK.md /usr/local/lib/openclaw/hooks/moltworker-slack-ready/HOOK.md
+COPY container/hooks/moltworker-slack-ready/handler.js /usr/local/lib/openclaw/hooks/moltworker-slack-ready/handler.js
 COPY config/workers-ai-models.json /usr/local/lib/config/workers-ai-models.json
 COPY start-openclaw.sh /usr/local/bin/start-openclaw.sh
-RUN chmod +x /usr/local/bin/start-openclaw.sh
+RUN chmod +x /usr/local/bin/start-openclaw.sh \
+    && test -f /usr/local/lib/openclaw/hooks/moltworker-slack-ready/HOOK.md \
+    && test -f /usr/local/lib/openclaw/hooks/moltworker-slack-ready/handler.js \
+    && test -f /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs \
+    && node --check /usr/local/lib/openclaw/hooks/moltworker-slack-ready/handler.js \
+    && node --check /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
 
 # Copy custom skills
 COPY skills/ /home/openclaw/clawd/skills/

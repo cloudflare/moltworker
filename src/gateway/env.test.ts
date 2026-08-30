@@ -182,6 +182,20 @@ describe('buildEnvVars', () => {
     });
   });
 
+  it('forwards the Slack ready channel ID unchanged when configured', () => {
+    const env = createMockEnv() as OpenClawEnv & { SLACK_READY_CHANNEL_ID: string };
+    env.SLACK_READY_CHANNEL_ID = ' C012READY ';
+
+    expect(buildEnvVars(env).SLACK_READY_CHANNEL_ID).toBe(' C012READY ');
+  });
+
+  it('omits the Slack ready channel ID when it is undefined', () => {
+    const env = createMockEnv() as OpenClawEnv & { SLACK_READY_CHANNEL_ID?: string };
+    env.SLACK_READY_CHANNEL_ID = undefined;
+
+    expect(buildEnvVars(env).SLACK_READY_CHANNEL_ID).toBeUndefined();
+  });
+
   it('maps DEV_MODE to OPENCLAW_DEV_MODE for container', () => {
     const env = createMockEnv({
       DEV_MODE: 'true',

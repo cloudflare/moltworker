@@ -18,6 +18,7 @@ interface OpenClawConfig {
   };
   channels?: Record<string, unknown>;
   gateway?: Record<string, unknown>;
+  hooks?: Record<string, unknown>;
   messages?: {
     groupChat?: {
       historyLimit?: number;
@@ -118,10 +119,7 @@ describe('OpenClaw config patcher', () => {
     ['groupChat string', { messages: { groupChat: 'stale' } }],
     ['groupChat null', { messages: { groupChat: null } }],
   ])('normalizes malformed %s config before setting visible replies', (_name, initialConfig) => {
-    const { config, serialized } = patchConfig(
-      initialConfig as OpenClawConfig,
-      {},
-    );
+    const { config, serialized } = patchConfig(initialConfig as OpenClawConfig, {});
 
     expect(config.messages?.groupChat).toEqual({ visibleReplies: 'automatic' });
     expect(JSON.parse(serialized).messages.groupChat.visibleReplies).toBe('automatic');
@@ -566,6 +564,132 @@ describe('OpenClaw config patcher', () => {
     expect(failure.status).not.toBe(0);
     expect(failure.stderr).toContain(variable);
   });
+
+  it('enables the managed Slack ready hook with all required Slack values', () => {
+    const botToken = 'slack-bot-token-that-must-not-be-serialized';
+    const appToken = 'slack-app-token-that-must-not-be-serialized';
+    const { config, serialized } = patchConfig(
+      {
+        hooks: {
+          internal: {
+            enabled: false,
+            retainedSetting: 'keep',
+            entries: {
+              unrelated: { enabled: true, retainedSetting: 'keep' },
+              'moltworker-slack-ready': { enabled: false, retainedSetting: 'keep' },
+            },
+          },
+        },
+      },
+      {
+        SLACK_BOT_TOKEN: botToken,
+        SLACK_APP_TOKEN: appToken,
+        SLACK_READY_CHANNEL_ID: ' G012READY ',
+      },
+    );
+
+    const internal = (config.hooks?.internal ?? {}) as {
+      enabled?: boolean;
+      retainedSetting?: string;
+      entries?: Record<string, Record<string, unknown>>;
+    };
+    expect(internal.enabled).toBe(true);
+    expect(internal.retainedSetting).toBe('keep');
+    expect(internal.entries?.unrelated).toEqual({ enabled: true, retainedSetting: 'keep' });
+    expect(internal.entries?.['moltworker-slack-ready']).toEqual({
+      enabled: true,
+      retainedSetting: 'keep',
+    });
+    expect(serialized).not.toContain(botToken);
+    expect(serialized).not.toContain(appToken);
+  });
+
+  it.each([
+    [
+      'missing bot token',
+      { SLACK_APP_TOKEN: 'slack-app-token', SLACK_READY_CHANNEL_ID: 'C012READY' },
+    ],
+    [
+      'missing app token',
+      { SLACK_BOT_TOKEN: 'slack-bot-token', SLACK_READY_CHANNEL_ID: 'C012READY' },
+    ],
+    [
+      'missing channel ID',
+      { SLACK_BOT_TOKEN: 'slack-bot-token', SLACK_APP_TOKEN: 'slack-app-token' },
+    ],
+    [
+      'blank channel ID',
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_READY_CHANNEL_ID: '',
+      },
+    ],
+    [
+      'whitespace channel ID',
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_READY_CHANNEL_ID: '   ',
+      },
+    ],
+    [
+      'lowercase channel ID',
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_READY_CHANNEL_ID: 'c012ready',
+      },
+    ],
+    [
+      'direct-message ID',
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_READY_CHANNEL_ID: 'D012READY',
+      },
+    ],
+    [
+      'malformed channel ID',
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        SLACK_READY_CHANNEL_ID: 'C012-READY',
+      },
+    ],
+  ] as Array<[string, Record<string, string>]>)(
+    'disables only the stale Slack ready entry for %s',
+    (_name, environment) => {
+      const { config } = patchConfig(
+        {
+          hooks: {
+            internal: {
+              enabled: false,
+              retainedSetting: 'keep',
+              entries: {
+                unrelated: { enabled: true, retainedSetting: 'keep' },
+                'moltworker-slack-ready': { enabled: true, retainedSetting: 'keep' },
+              },
+            },
+          },
+        },
+        environment,
+      );
+
+      const internal = (config.hooks?.internal ?? {}) as {
+        enabled?: boolean;
+        retainedSetting?: string;
+        entries?: Record<string, Record<string, unknown>>;
+      };
+      expect(internal.enabled).toBe(false);
+      expect(internal.retainedSetting).toBe('keep');
+      expect(internal.entries?.unrelated).toEqual({ enabled: true, retainedSetting: 'keep' });
+      expect(internal.entries?.['moltworker-slack-ready']).toEqual({
+        enabled: false,
+        retainedSetting: 'keep',
+      });
+    },
+  );
 });
 
 describe('OpenClaw image config path assembly', () => {
@@ -586,5 +710,35 @@ describe('OpenClaw image config path assembly', () => {
 
     expect(startupScript).toContain('CONFIG_DIR="/home/openclaw/.openclaw"');
     expect(startupScript).not.toContain('CONFIG_DIR="/root/.openclaw"');
+  });
+
+  it('ships only the reviewed Slack ready hook files and checks them during the image build', () => {
+    const dockerfile = readFileSync(dockerfilePath, 'utf8');
+
+    expect(dockerfile).toContain(
+      'COPY container/hooks/moltworker-slack-ready/HOOK.md /usr/local/lib/openclaw/hooks/moltworker-slack-ready/HOOK.md',
+    );
+    expect(dockerfile).toContain(
+      'COPY container/hooks/moltworker-slack-ready/handler.js /usr/local/lib/openclaw/hooks/moltworker-slack-ready/handler.js',
+    );
+    expect(dockerfile).not.toContain('COPY container/hooks/moltworker-slack-ready/ /usr/local/');
+    expect(dockerfile).not.toContain('handler.test.ts');
+    expect(dockerfile).toContain(
+      'node --check /usr/local/lib/openclaw/hooks/moltworker-slack-ready/handler.js',
+    );
+    expect(dockerfile).toContain(
+      'node --check /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs',
+    );
+  });
+
+  it('installs the managed hook before patching the restored OpenClaw config', () => {
+    const startupScript = readFileSync(startupScriptPath, 'utf8');
+    const installer = startupScript.indexOf(
+      'node /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs',
+    );
+    const patcher = startupScript.indexOf('node /usr/local/lib/openclaw/patch-openclaw-config.cjs');
+
+    expect(installer).toBeGreaterThan(-1);
+    expect(patcher).toBeGreaterThan(installer);
   });
 });

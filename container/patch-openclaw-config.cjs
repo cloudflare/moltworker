@@ -16,6 +16,10 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.length > 0;
 }
 
+function isNonBlankString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
 function isPositiveInteger(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 }
@@ -167,6 +171,23 @@ function disableSlackPlugin(config) {
   }
 }
 
+function configureSlackReadyHook(config, enabled) {
+  config.hooks = isPlainObject(config.hooks) ? config.hooks : {};
+  config.hooks.internal = isPlainObject(config.hooks.internal) ? config.hooks.internal : {};
+  config.hooks.internal.entries = isPlainObject(config.hooks.internal.entries)
+    ? config.hooks.internal.entries
+    : {};
+  const entry = isPlainObject(config.hooks.internal.entries['moltworker-slack-ready'])
+    ? config.hooks.internal.entries['moltworker-slack-ready']
+    : {};
+
+  entry.enabled = enabled;
+  config.hooks.internal.entries['moltworker-slack-ready'] = entry;
+  if (enabled) {
+    config.hooks.internal.enabled = true;
+  }
+}
+
 console.log('Patching config at:', configPath);
 let config = {};
 
@@ -196,10 +217,16 @@ config.gateway.controlUi.allowedOrigins = ['*'];
 // current runtime has enough secrets to manage Slack. This runs even when one
 // or both current secrets are missing so an R2 snapshot cannot re-enable Slack.
 scrubSlackCredentials(config.channels.slack);
-if (!(process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN)) {
+const hasSlackCredentials =
+  isNonBlankString(process.env.SLACK_BOT_TOKEN) && isNonBlankString(process.env.SLACK_APP_TOKEN);
+if (!hasSlackCredentials) {
   disableSlackIntegration(config.channels.slack);
   disableSlackPlugin(config);
 }
+
+const slackReadyChannelId = process.env.SLACK_READY_CHANNEL_ID?.trim();
+const slackReadyEnabled = hasSlackCredentials && /^[CG][A-Z0-9]+$/.test(slackReadyChannelId || '');
+configureSlackReadyHook(config, slackReadyEnabled);
 
 if (process.env.OPENCLAW_GATEWAY_TOKEN) {
   config.gateway.auth = config.gateway.auth || {};
@@ -324,7 +351,7 @@ if (process.env.DISCORD_BOT_TOKEN) {
   };
 }
 
-if (process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN) {
+if (hasSlackCredentials) {
   const slackGroupPolicy = slackEnum(
     'SLACK_GROUP_POLICY',
     process.env.SLACK_GROUP_POLICY,
