@@ -124,7 +124,18 @@ To use the admin UI at `/_admin/` for device management, you need to:
 
 ### 1. Create the host-wide Access application
 
-In **Zero Trust** → **Access** → **Applications**, create one self-hosted application for `https://moltbot.kentymyty.com`. Configure an **Allow** policy for the identities that may use the Control UI and administrative routes (`/_admin/*`, `/api/*`, and `/debug/*`). Copy the application audience tag for `CF_ACCESS_AUD` below and keep the team domain for `CF_ACCESS_TEAM_DOMAIN`.
+Configure the host-wide Cloudflare Access applications for the retained `workers.dev` origin and for `https://moltbot.kentymyty.com`. Validate the `workers.dev` application first, then apply the same settings to the custom-domain application. For the host-wide applications:
+
+1. Turn off **Accept all available identity providers**.
+2. Select only the existing Auth0-backed **Library OpenID Connect** provider.
+3. Turn on **Instant Auth** so users go directly to Auth0 without a One-time PIN choice.
+4. Create or attach the reusable Allow policy **moltworker Auth0 administrator**:
+   - **Include** → **Emails** → cold.tent0355@fastmail.com
+   - **Require** → **Login Methods** → **Library OpenID Connect**
+   - **Session duration** → same as the application session duration
+5. Keep each application session duration at 24 hours and keep each application's **Application Audience (AUD)** tag unchanged.
+
+Application-level IdP selection removes One-time PIN, while the policy-level Login Methods requirement prevents authorization through a different IdP if application settings drift. Keep the host-wide Allow applications in place while the more-specific AI and CDP exceptions are configured below.
 
 ### Required Access Exception for the AI Proxy
 
@@ -146,11 +157,13 @@ After enabling Cloudflare Access, set the secrets so the worker can validate JWT
 # Your Cloudflare Access team domain (e.g., "myteam.cloudflareaccess.com")
 npx wrangler secret put CF_ACCESS_TEAM_DOMAIN
 
-# The Application Audience (AUD) tag from your Access application that you copied in the step above
+# One unchanged Application Audience (AUD) tag, or the comma-separated unchanged tags for both host-wide applications
 npx wrangler secret put CF_ACCESS_AUD
 ```
 
 You can find your team domain in the [Zero Trust Dashboard](https://one.dash.cloudflare.com/) under **Settings** > **Custom Pages** (it's the subdomain before `.cloudflareaccess.com`).
+
+`CF_ACCESS_AUD` accepts either one audience tag or a comma-separated list of the unchanged audience tags for the host-wide applications. The Worker trims each value, rejects empty elements, duplicates, and control characters, and validates the JWT against every configured audience. Do not record live audience values in source, documentation, issues, or logs.
 
 ### 3. Redeploy
 
@@ -159,6 +172,17 @@ npm run deploy
 ```
 
 Now visit `/_admin/` and you'll be prompted to authenticate via Cloudflare Access before accessing the admin UI.
+
+### Access SSO and Logout
+
+Cloudflare Access maintains a global team-domain session and a separate application session for each protected host. A valid global session can provide SSO between the library and both moltworker hosts without another Auth0 prompt, while each application is still evaluated against its own Auth0-only policy. Each application session remains 24 hours.
+
+To end the current application session, visit the logout path on the host you want to sign out:
+
+- `https://<workers-dev-host>/cdn-cgi/access/logout`
+- `https://moltbot.kentymyty.com/cdn-cgi/access/logout`
+
+Replace `<workers-dev-host>` with the deployed `workers.dev` hostname. After logout, the next protected request on that host should redirect directly to Auth0.
 
 ### Local Development
 
@@ -564,7 +588,7 @@ The runner is intentionally not a deployment command and does not authorize prod
 
 OpenClaw in Cloudflare Sandbox uses multiple authentication layers:
 
-1. **Cloudflare Access** - Protects the production hostname and administrative routes. The more-specific `/internal/ai/*` application is the only bypass and is protected independently by the proxy token.
+1. **Cloudflare Access with Auth0** - Protects both production hostnames and administrative routes. Host-wide applications accept only Library OpenID Connect, enable Instant Auth, and authorize only the `moltworker Auth0 administrator` policy. More-specific `/internal/ai/*` and optional CDP bypass applications remain protected independently by Worker-level secrets.
 
 2. **AI Proxy Token** - Required by the internal inference route and checked before request parsing. It is independent from the gateway token and is never serialized into `openclaw.json` or its R2 snapshots.
 
@@ -596,7 +620,7 @@ logs without recording tokens or full Slack responses.
 
 **Proxy inference fails closed:** Confirm `AI_GATEWAY_ID` names an existing AI Gateway, `WORKER_URL` exactly matches the deployed Worker origin, and the `AI` binding is present in the deployed Worker configuration.
 
-**Access denied on admin routes:** Ensure `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` are set, and that your Cloudflare Access application is configured correctly.
+**Access denied on admin routes:** Check that `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` remain set, each host-wide application still selects only Library OpenID Connect with Instant Auth, and `moltworker Auth0 administrator` contains the exact email and Login Methods requirement. When both host-wide applications are active, keep their unchanged audience tags in `CF_ACCESS_AUD` as a comma-separated list with no empty, duplicate, or control-character values.
 
 **Devices not appearing in admin UI:** Device list commands take 10-15 seconds due to WebSocket connection overhead. Wait and refresh.
 

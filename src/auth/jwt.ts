@@ -9,14 +9,14 @@ import type { JWTPayload } from '../types';
  *
  * @param token - The JWT token string
  * @param teamDomain - The Cloudflare Access team domain (e.g., 'myteam.cloudflareaccess.com')
- * @param expectedAud - The expected audience (Application AUD tag)
+ * @param expectedAud - The expected audience or audiences (Application AUD tag)
  * @returns The decoded JWT payload if valid
  * @throws Error if the token is invalid, expired, or doesn't match expected values
  */
 export async function verifyAccessJWT(
   token: string,
   teamDomain: string,
-  expectedAud: string,
+  expectedAud: string | string[],
 ): Promise<JWTPayload> {
   // Ensure teamDomain has https:// prefix for issuer check
   const issuer = teamDomain.startsWith('https://') ? teamDomain : `https://${teamDomain}`;

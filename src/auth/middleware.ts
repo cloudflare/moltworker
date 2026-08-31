@@ -41,6 +41,37 @@ export function extractJWT(c: Context<AppEnv>): string | null {
 }
 
 /**
+ * Parse the configured Cloudflare Access application audience values.
+ *
+ * A missing or malformed value returns null so callers can fail closed without
+ * logging the configured audience values.
+ */
+export function parseAccessAudiences(value: string | undefined): string | string[] | null {
+  const hasControlCharacter = value
+    ? Array.from(value).some((character) => {
+        const code = character.charCodeAt(0);
+        return code <= 0x1f || code === 0x7f;
+      })
+    : false;
+
+  if (!value || hasControlCharacter) {
+    return null;
+  }
+
+  const audiences = value.split(',').map((audience) => audience.trim());
+
+  if (audiences.some((audience) => !audience)) {
+    return null;
+  }
+
+  if (new Set(audiences).size !== audiences.length) {
+    return null;
+  }
+
+  return audiences.length === 1 ? audiences[0] : audiences;
+}
+
+/**
  * Create a Cloudflare Access authentication middleware
  *
  * @param options - Middleware options
@@ -57,7 +88,7 @@ export function createAccessMiddleware(options: AccessMiddlewareOptions) {
     }
 
     const teamDomain = c.env.CF_ACCESS_TEAM_DOMAIN;
-    const expectedAud = c.env.CF_ACCESS_AUD;
+    const expectedAud = parseAccessAudiences(c.env.CF_ACCESS_AUD);
 
     // Check if CF Access is configured
     if (!teamDomain || !expectedAud) {

@@ -4,6 +4,11 @@ import type { OpenClawEnv } from '../types';
 import type { Context } from 'hono';
 import type { AppEnv } from '../types';
 import { createMockEnv } from '../test-utils';
+import { verifyAccessJWT } from './jwt';
+
+vi.mock('./jwt', () => ({
+  verifyAccessJWT: vi.fn(),
+}));
 
 describe('isDevMode', () => {
   it('returns true when DEV_MODE is "true"', () => {
@@ -128,6 +133,7 @@ describe('createAccessMiddleware', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    vi.mocked(verifyAccessJWT).mockReset();
     const module = await import('./middleware');
     createAccessMiddleware = module.createAccessMiddleware;
   });
@@ -262,5 +268,86 @@ describe('createAccessMiddleware', () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(redirectMock).toHaveBeenCalledWith('https://team.cloudflareaccess.com', 302);
+  });
+
+  it('passes a single configured audience to JWT verification', async () => {
+    vi.mocked(verifyAccessJWT).mockResolvedValue({
+      email: 'test@example.com',
+      aud: ['aud-one'],
+      exp: 0,
+      iat: 0,
+      iss: 'https://team.cloudflareaccess.com',
+      sub: 'user-id',
+      type: 'app',
+    });
+    const { c } = createFullMockContext({
+      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: 'aud-one' },
+      jwtHeader: 'test.jwt.token',
+    });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(verifyAccessJWT).toHaveBeenCalledWith(
+      'test.jwt.token',
+      'team.cloudflareaccess.com',
+      'aud-one',
+    );
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('passes comma-separated configured audiences to JWT verification', async () => {
+    vi.mocked(verifyAccessJWT).mockResolvedValue({
+      email: 'test@example.com',
+      aud: ['aud-two'],
+      exp: 0,
+      iat: 0,
+      iss: 'https://team.cloudflareaccess.com',
+      sub: 'user-id',
+      type: 'app',
+    });
+    const { c } = createFullMockContext({
+      env: {
+        CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com',
+        CF_ACCESS_AUD: ' aud-one , aud-two ',
+      },
+      jwtHeader: 'test.jwt.token',
+    });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(verifyAccessJWT).toHaveBeenCalledWith(
+      'test.jwt.token',
+      'team.cloudflareaccess.com',
+      ['aud-one', 'aud-two'],
+    );
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['blank', '   '],
+    ['empty element', 'aud-one,,aud-two'],
+    ['trailing empty element', 'aud-one,'],
+    ['duplicate after trimming', 'aud-one, aud-one '],
+    ['control character', 'aud-one,\naud-two'],
+  ])('fails closed for %s audience configuration before JWT verification', async (_name, audience) => {
+    const { c, jsonMock } = createFullMockContext({
+      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: audience },
+      jwtHeader: 'test.jwt.token',
+    });
+    const middleware = createAccessMiddleware({ type: 'json' });
+    const next = vi.fn();
+
+    await middleware(c, next);
+
+    expect(verifyAccessJWT).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+    expect(jsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'Cloudflare Access not configured' }),
+      500,
+    );
   });
 });
