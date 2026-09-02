@@ -1,0 +1,42 @@
+name: Plan
+description: Track one approved implementation plan
+title: "[Plan] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sub-issues are created by the Codex harness after plan approval.
+        The hidden harness marker is managed by Codex.
+  - type: input
+    id: plan-id
+    attributes:
+      label: Plan ID
+      description: Immutable Plan ID.
+    validations:
+      required: true
+  - type: input
+    id: plan-path
+    attributes:
+      label: Plan path
+      description: Repository-relative docs/superpowers/plans/... path.
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Optional implementation constraints.
+    validations:
+      required: false

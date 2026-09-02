@@ -8,6 +8,13 @@ We welcome contributions, but with a few short rules:
 
 - **Demonstrate that you've tested your work** - whether via manual testing, automated tests, or a mix of both. You may be quizzed here.
 
+## Implementation-ready Issues
+
+Multi-task AI-assisted implementation may begin only from a parent Issue that
+is `Ready` after repository research, reviewed design and written plan, and
+approved Sub-issues. The parent and its Sub-issues must remain the verified
+source of the implementation work.
+
 ## AI Contributions
 
 > Heavily inspired and influenced by [Ghostty's AI policy](https://github.com/ghostty-org/ghostty/blob/main/AI_POLICY.md)

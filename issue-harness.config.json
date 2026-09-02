@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "repository": "kyoneken/moltworker",
+  "project": {
+    "owner": "kyoneken",
+    "ownerType": "user",
+    "number": 0,
+    "url": ""
+  },
+  "status": {
+    "todo": "Todo",
+    "inProgress": "In Progress",
+    "done": "Done"
+  },
+  "refinement": {
+    "priorityField": "Priority",
+    "priorityOrder": ["P0", "P1", "P2", "P3"],
+    "statusField": "Status",
+    "unstartedValues": ["Todo", "Backlog"],
+    "readyValue": "Ready",
+    "excludedValues": ["Not planned"],
+    "excludedLabels": ["no-refinement", "wontfix"]
+  }
+}

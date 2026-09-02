@@ -2,6 +2,50 @@
 
 Guidelines for AI agents working on this codebase.
 
+## Issue Preparation and Implementation
+
+Use `prepare-issue-for-implementation` to select or refine one Project Issue.
+It requires repository research before `superpowers:brainstorming`, explicit
+brainstorming/spec approval, `superpowers:writing-plans` and plan approval,
+then Sub-issue proposal approval before publication writes. The only GitHub
+write allowed at each corresponding approval gate is the append-only, exact
+approval checkpoint comment required by the preparation Skill; it records an
+approval already given in conversation and does not publish, alter Project
+state, or create/link a Sub-issue. Publish only through
+the GitHub MCP, verify the records, and transition the parent to `Ready` only
+after verification. Do not use `issue-driven-development` until the parent is
+verified `Ready`.
+
+For non-trivial implementation, use `subagent-driven-implementation`: the
+main agent orchestrates, reviews, integrates, and verifies bounded Worker
+tasks rather than performing substantive implementation directly. Do not
+duplicate Skill procedures here; follow the selected Skill's complete contract.
+
+### GitHub Operations
+
+Every GitHub operation in the preparation workflow is GitHub MCP-only. This
+includes authentication and capability preflight, Project and Issue selection,
+all repository and Issue read and write operations, related Issue/PR reads,
+Sub-issue creation and linking, comments, Project item/field updates, and all
+post-write verification reads. Do not use `gh`, `curl`, GitHub REST or GraphQL
+APIs, or a local or other
+fallback when an MCP operation is unavailable; stop and report the missing
+capability instead. This restriction applies equally to scheduled and resumed
+runs.
+
+### Project Codex Hook
+
+The project-local Hook is defined in `.codex/hooks.json`; review and trust it
+through `/hooks` before relying on it. A changed definition is skipped until
+it is re-reviewed and re-trusted.
+
+The Hook blocks forbidden Bash GitHub paths, Cloudflare Issue/PR lookups, and
+non-canonical GitHub MCP mutations. It deliberately permits Cloudflare
+code/repository research and other allowed read operations.
+
+AGENTS.md remains authoritative if the Hook is disabled, untrusted,
+unavailable, or unable to parse a shell construct.
+
 ## Project Overview
 
 This is a Cloudflare Worker that runs [OpenClaw](https://github.com/openclaw/openclaw) (formerly Moltbot/Clawdbot) in a Cloudflare Sandbox container. It provides:

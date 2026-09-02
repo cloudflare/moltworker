@@ -1,0 +1,18 @@
+{
+  "description": "Guard moltworker GitHub operations before tool execution.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$|^mcp__github__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env node \"$(git rev-parse --show-toplevel)/.codex/hooks/github-policy.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking repository GitHub policy"
+          }
+        ]
+      }
+    ]
+  }
+}

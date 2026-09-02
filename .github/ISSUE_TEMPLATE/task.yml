@@ -1,0 +1,49 @@
+name: Task
+description: Track one task from an approved implementation plan
+title: "[Task] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The parent relationship and hidden harness marker are managed by Codex through GitHub MCP.
+  - type: input
+    id: plan-id
+    attributes:
+      label: Plan ID
+      description: Immutable Plan ID.
+    validations:
+      required: true
+  - type: input
+    id: task-id
+    attributes:
+      label: Task ID
+      description: Immutable Task ID.
+    validations:
+      required: true
+  - type: input
+    id: parent
+    attributes:
+      label: Parent Issue
+      description: Parent Issue URL or number.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: Task deliverable.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: Exact validation commands/evidence.
+    validations:
+      required: true

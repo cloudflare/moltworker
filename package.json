@@ -18,7 +18,9 @@
     "smoke:workers-ai-model": "node scripts/smoke-workers-ai-model.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:issue-harness": "node --test test/issue-harness/*.test.mjs",
+    "test:codex-hooks": "node --test test/codex-hooks/*.test.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.3.0",
