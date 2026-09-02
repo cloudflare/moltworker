@@ -2,6 +2,25 @@
 
 Guidelines for AI agents working on this codebase.
 
+## Fork Boundary
+
+This repository is a fork. The only writable canonical GitHub target is
+`kyoneken/moltworker` (the `origin` remote). `cloudflare/moltworker` (the
+`upstream` remote) is reference-only.
+
+Do not perform GitHub mutations against `cloudflare/moltworker`, including
+Issue, pull request, review, comment, branch, tag, release, repository-content,
+or any other write operation. This prohibition applies when using the GitHub
+MCP Server as well as any other interface, and includes pushing to the
+upstream remote. Fetch and read-only operations are allowed. If an upstream
+mutation is requested, stop and explain this boundary instead of performing
+it.
+
+This boundary is enforced via multiple layers of defense:
+- **Git pre-push hook**: `.githooks/pre-push` (enable via `git config core.hooksPath .githooks`)
+- **Codex PreToolUse hooks**: `.codex/hooks.json`
+- **Antigravity PreToolUse hooks**: `.agents/hooks.json`
+
 ## Issue Preparation and Implementation
 
 Use `prepare-issue-for-implementation` to select or refine one Project Issue.

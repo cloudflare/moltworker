@@ -21,7 +21,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:issue-harness": "node --test test/issue-harness/*.test.mjs",
-    "test:codex-hooks": "node --test test/codex-hooks/*.test.mjs"
+    "test:codex-hooks": "node --test test/codex-hooks/*.test.mjs",
+    "test:agy-hooks": "node --test test/agy-hooks/*.test.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.3.0",

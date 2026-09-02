@@ -1,0 +1,37 @@
+#!/bin/sh
+
+remote_name=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+remote_url=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
+
+while [ "${remote_url%/}" != "$remote_url" ]; do
+  remote_url=${remote_url%/}
+done
+
+case "$remote_url" in
+  *.git) remote_url=${remote_url%.git} ;;
+esac
+
+case "$remote_name" in
+  upstream)
+    printf '%s\n' \
+      'ERROR: push blocked: the upstream repository cloudflare/moltworker is read-only.' \
+      >&2
+    exit 1
+    ;;
+esac
+
+case "$remote_url" in
+  https://github.com/cloudflare/moltworker \
+  |git@github.com:cloudflare/moltworker \
+  |ssh://github.com/cloudflare/moltworker \
+  |ssh://*@github.com/cloudflare/moltworker \
+  |ssh://github.com:*/cloudflare/moltworker \
+  |ssh://*@github.com:*/cloudflare/moltworker)
+    printf '%s\n' \
+      'ERROR: push blocked: the upstream repository cloudflare/moltworker is read-only.' \
+      >&2
+    exit 1
+    ;;
+esac
+
+exit 0

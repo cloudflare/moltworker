@@ -1,0 +1,17 @@
+{
+  "description": "Guard moltworker upstream repository and GitHub operations before tool execution in Antigravity.",
+  "moltworker-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|call_mcp_tool|mcp_.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/env node \"$(git rev-parse --show-toplevel)/.agents/hooks/agy-policy-guard.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
