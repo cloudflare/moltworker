@@ -21,6 +21,18 @@ This boundary is enforced via multiple layers of defense:
 - **Codex PreToolUse hooks**: `.codex/hooks.json`
 - **Antigravity PreToolUse hooks**: `.agents/hooks.json`
 
+## Issue-Driven Development & Visibility
+
+All development in this repository is issue-driven. GitHub Issues are the authoritative tracking record and communication hub:
+
+1. **Easy & Single-Issue Tasks**: Use the `easy-issue-workflow` skill.
+   - Discover and select an issue via GitHub MCP (`list_issues` / `search_issues`).
+   - Post branch creation to the Issue.
+   - **Post the technical design summary** (Goal, Approach, Files Touched, Test Plan) as an Issue comment before starting code changes.
+   - **Post and maintain a subtask checklist** (`- [ ] Task 1`, `- [ ] Task 2`, ...) on the Issue, checking off items as they complete to provide real-time progress visibility.
+   - Post the Pull Request link and verification evidence to the Issue upon PR creation.
+2. **Multi-Task & Architectural Features**: Use `prepare-issue-for-implementation` for refinement, spec approval, plan approval, and sub-issue generation, followed by `issue-driven-development`.
+
 ## Issue Preparation and Implementation
 
 Use `prepare-issue-for-implementation` to select or refine one Project Issue.
