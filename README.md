@@ -147,7 +147,12 @@ https://moltbot.kentymyty.com/internal/ai/*
 
 Give only that path a **Bypass / Everyone** policy. The Worker still protects `POST /internal/ai/v1/chat/completions` with the independent, fail-closed `AI_PROXY_TOKEN` Bearer check, so AI still requires `AI_PROXY_TOKEN` even though the request bypasses interactive Access login.
 
-Create two additional, narrowly scoped **Bypass / Everyone** applications for the CDP shim: one for the exact path `https://moltbot.kentymyty.com/cdp` and one for `https://moltbot.kentymyty.com/cdp/*`. CDP still requires `CDP_SECRET`. Keep the host-wide Allow application in place; no host-wide Bypass policy is permitted.
+Create or extend two additional, narrowly scoped **Bypass / Everyone** applications for the CDP shim. Configure each application with both production hostnames:
+
+- Exact-path application: `https://moltbot.kentymyty.com/cdp` and `https://<workers-dev-host>/cdp`
+- Wildcard-path application: `https://moltbot.kentymyty.com/cdp/*` and `https://<workers-dev-host>/cdp/*`
+
+The wildcard path does not match the parent `/cdp` path, so both applications are required. CDP still requires `CDP_SECRET`. Keep both host-wide Allow applications in place; no host-wide Bypass policy is permitted.
 
 ### 2. Set Access Secrets
 
