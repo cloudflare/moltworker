@@ -122,7 +122,7 @@ GitHub Issues serve as the authoritative tracking record and communication hub f
 
 ---
 
-### Step 6: Pull Request & Issue Link
+### Step 6: Pull Request, Issue Link & Review Gate
 
 1. Commit changes with a conventional commit message referencing the Issue:
    ```bash
@@ -150,19 +150,27 @@ GitHub Issues serve as the authoritative tracking record and communication hub f
    - [x] Hook & script tests — passed
    ```
 
+<HARD-GATE>
+**STOP HERE.**
+After creating the Pull Request and posting the link to the Issue and chat, STOP IMMEDIATELY.
+DO NOT autonomously call `merge_pull_request`.
+The merge and integration decision belongs solely to your human partner.
+Wait for explicit review feedback or an explicit instruction from the user to merge.
+</HARD-GATE>
+
 ---
 
-### Step 7: Review, Squash Merge & Finalize
+### Step 7: Finalize (ONLY After Explicit User Merge Instruction)
 
-1. Wait for user review and approval (or review comments).
-2. Once approved, merge the PR using GitHub MCP `merge_pull_request` (`merge_method: "squash"`).
-3. Verify that the GitHub Issue is closed as `completed` (automated by `Closes #<issue>`).
-4. Sync local `main` with `origin/main`:
+This step executes ONLY when your human partner has explicitly reviewed and approved the PR and instructed you to merge:
+1. Merge the PR using GitHub MCP `merge_pull_request` (`merge_method: "squash"`).
+2. Verify that the GitHub Issue is closed as `completed` (automated by `Closes #<issue>`).
+3. Sync local `main` with `origin/main`:
    ```bash
    git checkout main && git pull origin main
    ```
-5. Clean up the feature branch (both locally and on `origin`).
-6. Report final completion to the user with links to the merged PR and closed Issue.
+4. Clean up the feature branch (both locally and on `origin`).
+5. Report final completion to the user with links to the merged PR and closed Issue.
 
 ---
 
@@ -171,12 +179,14 @@ GitHub Issues serve as the authoritative tracking record and communication hub f
 1. **GitHub MCP Only**: All GitHub operations (search, read, comment, PR creation, merge) MUST be performed via GitHub MCP tools. Never use `gh` CLI, `curl`, or direct APIs.
 2. **Fork Boundary**: Mutations are permitted ONLY against `kyoneken/moltworker`. `cloudflare/moltworker` is strictly read-only.
 3. **Continuous Visibility**: Never proceed to implementation without posting the design and task checklist to the GitHub Issue.
-4. **Evidence Before Claims**: Never claim a task or test is complete without fresh terminal command output.
+4. **No Autonomous Merges**: NEVER call `merge_pull_request` without explicit human instruction in conversation. Creating a PR is the end of the implementation loop; merging is an independent, human-gated action.
+5. **Evidence Before Claims**: Never claim a task or test is complete without fresh terminal command output.
 
 ## Rationalization Prevention
 
 | Excuse | Reality |
 |---|---|
+| "The PR tests passed, so I'll just merge it now" | STOP. Integration is strictly a human decision. Present the PR and wait. |
 | "This issue is too easy to comment on GitHub" | Visibility ensures transparency, avoids duplicate work, and creates a clear audit trail. Always post the design and checklist. |
 | "I'll update the Issue after finishing everything" | Updating in real-time allows your human partner and team to follow along and course-correct early. |
 | "PR description is enough; Issue doesn't need updates" | The Issue is the central root of the work. Cross-linking PRs and evidence on the Issue keeps history coherent. |

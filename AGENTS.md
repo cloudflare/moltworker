@@ -30,7 +30,7 @@ All development in this repository is issue-driven. GitHub Issues are the author
    - Post branch creation to the Issue.
    - **Post the technical design summary** (Goal, Approach, Files Touched, Test Plan) as an Issue comment before starting code changes.
    - **Post and maintain a subtask checklist** (`- [ ] Task 1`, `- [ ] Task 2`, ...) on the Issue, checking off items as they complete to provide real-time progress visibility.
-   - Post the Pull Request link and verification evidence to the Issue upon PR creation.
+   - **PR Review & Merge Gate**: Post the Pull Request link and verification evidence to the Issue and chat upon PR creation, then **STOP**. Never autonomously call `merge_pull_request`. PR merges require explicit human review and approval.
 2. **Multi-Task & Architectural Features**: Use `prepare-issue-for-implementation` for refinement, spec approval, plan approval, and sub-issue generation, followed by `issue-driven-development`.
 
 ## Issue Preparation and Implementation

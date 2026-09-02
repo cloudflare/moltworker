@@ -20,8 +20,8 @@ test('easy-issue-workflow defines end-to-end 7-step lifecycle', async () => {
   assert.match(content, /Step 3: Investigate & Post Design/i);
   assert.match(content, /Step 4: Subtask Decomposition & Checklist Tracking/i);
   assert.match(content, /Step 5: TDD Implementation & Verification/i);
-  assert.match(content, /Step 6: Pull Request & Issue Link/i);
-  assert.match(content, /Step 7: Review, Squash Merge & Finalize/i);
+  assert.match(content, /Step 6: Pull Request, Issue Link & Review Gate/i);
+  assert.match(content, /Step 7: Finalize/i);
 });
 
 test('easy-issue-workflow requires continuous visibility on GitHub Issues', async () => {
@@ -33,6 +33,15 @@ test('easy-issue-workflow requires continuous visibility on GitHub Issues', asyn
   assert.match(content, /Task Breakdown & Progress/i);
   assert.match(content, /Pull Request Created/i);
   assert.match(content, /Verification Evidence/i);
+});
+
+test('easy-issue-workflow enforces strict PR review hard-gate and forbids autonomous merges', async () => {
+  const content = await read('skills/easy-issue-workflow/SKILL.md');
+
+  assert.match(content, /<HARD-GATE>/);
+  assert.match(content, /DO NOT autonomously call `merge_pull_request`/i);
+  assert.match(content, /No Autonomous Merges/i);
+  assert.match(content, /STOP IMMEDIATELY/i);
 });
 
 test('easy-issue-workflow enforces MCP-only and Fork Boundary rules', async () => {

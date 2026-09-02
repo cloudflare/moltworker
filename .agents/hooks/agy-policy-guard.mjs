@@ -132,6 +132,10 @@ export function evaluateGitHubMcpCall(toolName, toolInput) {
     return { allowed: true };
   }
 
+  if (toolName === 'merge_pull_request') {
+    return { decision: 'force_ask', reason: 'Merging a Pull Request requires explicit human confirmation.' };
+  }
+
   if (ALWAYS_DENIED_GITHUB_MUTATIONS.has(toolName)) {
     return deny('GitHub mutation is forbidden');
   }
@@ -186,7 +190,12 @@ export async function main() {
     const event = JSON.parse(input);
     const result = evaluateAgyEvent(event);
 
-    if (!result.allowed) {
+    if (result.decision) {
+      process.stdout.write(JSON.stringify({
+        decision: result.decision,
+        reason: result.reason || 'Requires confirmation',
+      }) + '\n');
+    } else if (!result.allowed) {
       process.stdout.write(JSON.stringify({
         decision: 'deny',
         reason: `Blocked by moltworker repository policy: ${result.reason}`,

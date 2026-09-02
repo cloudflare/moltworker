@@ -120,6 +120,22 @@ test('AGY CLI hook process stdout outputs correct decision JSON format', () => {
   assert.match(parsed.reason, /Blocked by moltworker repository policy/);
 });
 
+test('AGY hook requires explicit human confirmation (force_ask) for merge_pull_request', () => {
+  const event = agyEventFor('call_mcp_tool', {
+    ServerName: 'github',
+    ToolName: 'merge_pull_request',
+    Arguments: { owner: 'kyoneken', repo: 'moltworker', pullNumber: 1 },
+  });
+  const result = evaluateAgyEvent(event);
+  assert.equal(result.decision, 'force_ask');
+  assert.match(result.reason, /human confirmation/i);
+
+  const cliRes = runHook(JSON.stringify(event));
+  assert.equal(cliRes.status, 0);
+  const parsed = JSON.parse(cliRes.stdout);
+  assert.equal(parsed.decision, 'force_ask');
+});
+
 test('AGY hooks configuration is valid and matches specification', () => {
   assert.ok(existsSync('.agents/hooks.json'), '.agents/hooks.json must exist');
   const config = JSON.parse(readFileSync('.agents/hooks.json', 'utf8'));
