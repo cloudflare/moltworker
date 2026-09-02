@@ -10,6 +10,12 @@
             "command": "/usr/bin/env node \"$(git rev-parse --show-toplevel)/.codex/hooks/github-policy.mjs\"",
             "timeout": 10,
             "statusMessage": "Checking repository GitHub policy"
+          },
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/upstream_write_guard.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking the upstream read-only boundary"
           }
         ]
       }

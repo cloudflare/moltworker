@@ -17,6 +17,7 @@
     "format:check": "oxfmt --check src/",
     "smoke:workers-ai-model": "node scripts/smoke-workers-ai-model.mjs",
     "test": "vitest run",
+    "test:hooks": "python3 .codex/hooks/test_upstream_write_guard.py",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:issue-harness": "node --test test/issue-harness/*.test.mjs",

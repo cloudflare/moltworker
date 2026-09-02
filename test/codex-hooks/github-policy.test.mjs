@@ -134,26 +134,38 @@ test('CLI adapter reports GitHub mutations without an owner with one fixed secre
   assert.doesNotMatch(result.stderr, /test-secret/);
 });
 
-test('project Hook configuration invokes the checked-in policy script once', () => {
+test('project Hook configuration invokes both checked-in policy scripts', () => {
   const config = JSON.parse(readFileSync('.codex/hooks.json', 'utf8'));
   const groups = config.hooks.PreToolUse;
   const topLevel = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 
   assert.equal(groups.length, 1);
   assert.equal(groups[0].matcher, '^Bash$|^mcp__github__.*');
-  assert.equal(groups[0].hooks.length, 1);
+  assert.equal(groups[0].hooks.length, 2);
   assert.deepEqual(groups[0].hooks[0], {
     type: 'command',
     command: '/usr/bin/env node "$(git rev-parse --show-toplevel)/.codex/hooks/github-policy.mjs"',
     timeout: 10,
     statusMessage: 'Checking repository GitHub policy',
   });
+  assert.deepEqual(groups[0].hooks[1], {
+    type: 'command',
+    command: '/usr/bin/python3 "$(git rev-parse --show-toplevel)/.codex/hooks/upstream_write_guard.py"',
+    timeout: 10,
+    statusMessage: 'Checking the upstream read-only boundary',
+  });
   assert.equal(
     groups[0].hooks[0].command.replace('$(git rev-parse --show-toplevel)', topLevel),
     `/usr/bin/env node "${topLevel}/.codex/hooks/github-policy.mjs"`,
   );
-  assert.equal(typeof groups[0].hooks[0].timeout, 'number');
-  assert.ok(groups[0].hooks[0].timeout > 0 && groups[0].hooks[0].timeout <= 10);
+  assert.equal(
+    groups[0].hooks[1].command.replace('$(git rev-parse --show-toplevel)', topLevel),
+    `/usr/bin/python3 "${topLevel}/.codex/hooks/upstream_write_guard.py"`,
+  );
+  for (const hook of groups[0].hooks) {
+    assert.equal(typeof hook.timeout, 'number');
+    assert.ok(hook.timeout > 0 && hook.timeout <= 10);
+  }
   assert.equal(existsSync('.codex/config.toml'), false);
 });
 
