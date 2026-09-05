@@ -137,3 +137,65 @@ export async function triggerSync(): Promise<SyncResponse> {
     method: 'POST',
   });
 }
+
+export interface AdminModelRecord {
+  id: string;
+  name: string;
+  alias: string;
+  selection: 'primary' | 'manual';
+  primary: boolean;
+  manual_only: boolean;
+  context_window: number;
+  supports_tools: boolean;
+}
+
+export interface AdminModelListResponse {
+  object: 'list';
+  data: AdminModelRecord[];
+}
+
+export interface SessionModelResponse {
+  model: string;
+  source: 'stored' | 'default';
+  updatedAt: string | null;
+}
+
+export type UsageLimitState = 'ok' | 'near' | 'limited' | 'unknown';
+
+export interface UsageWindow {
+  window: '24h' | '30d';
+  usedCostUsd: number | null;
+  limitCostUsd: number | null;
+  remainingCostUsd: number | null;
+  usedTokens: number | null;
+  limitTokens: number | null;
+  remainingTokens: number | null;
+  resetAt: string | null;
+  state: UsageLimitState;
+}
+
+export interface UsageSnapshotResponse {
+  configured: boolean;
+  source: 'gateway' | 'env-limits' | 'unconfigured';
+  message: string;
+  windows: UsageWindow[];
+}
+
+export async function listAdminModels(): Promise<AdminModelListResponse> {
+  return apiRequest<AdminModelListResponse>('/models');
+}
+
+export async function getSessionModel(): Promise<SessionModelResponse> {
+  return apiRequest<SessionModelResponse>('/session-model');
+}
+
+export async function setSessionModel(model: string): Promise<SessionModelResponse> {
+  return apiRequest<SessionModelResponse>('/session-model', {
+    method: 'PUT',
+    body: JSON.stringify({ model }),
+  });
+}
+
+export async function getUsageSnapshot(): Promise<UsageSnapshotResponse> {
+  return apiRequest<UsageSnapshotResponse>('/usage');
+}
