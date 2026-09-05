@@ -298,7 +298,7 @@ describe('OpenClaw config patcher', () => {
     expect(config.agents?.defaults?.model?.primary).toBeUndefined();
   });
 
-  it('registers the image-baked Slack plugin without replacing existing plugin policy', () => {
+  it('registers image-baked plugins without replacing existing plugin policy', () => {
     const pluginDirectory = mkdtempSync(resolve(tmpdir(), 'moltworker-slack-plugin-'));
     temporaryDirectories.push(pluginDirectory);
     writeFileSync(resolve(pluginDirectory, 'openclaw.plugin.json'), '{}');
@@ -319,13 +319,18 @@ describe('OpenClaw config patcher', () => {
     );
 
     expect(config.plugins).toEqual({
-      allow: ['existing-plugin', 'slack'],
+      allow: ['existing-plugin', 'duckduckgo', 'slack'],
       entries: {
         'existing-plugin': { enabled: true },
+        duckduckgo: { enabled: true },
         slack: { enabled: true },
       },
       load: {
-        paths: ['/opt/existing-plugin', pluginDirectory],
+        paths: [
+          '/opt/existing-plugin',
+          '/usr/local/lib/node_modules/@openclaw/duckduckgo-plugin',
+          pluginDirectory,
+        ],
       },
     });
   });
@@ -355,9 +360,11 @@ describe('OpenClaw config patcher', () => {
 
     expect(config.channels?.slack).toMatchObject({ enabled: false });
     expect(config.plugins).toMatchObject({
-      allow: ['existing-plugin', 'slack'],
-      entries: { slack: { enabled: false } },
-      load: { paths: ['/opt/existing-plugin'] },
+      allow: ['existing-plugin', 'slack', 'duckduckgo'],
+      entries: { slack: { enabled: false }, duckduckgo: { enabled: true } },
+      load: {
+        paths: ['/opt/existing-plugin', '/usr/local/lib/node_modules/@openclaw/duckduckgo-plugin'],
+      },
     });
     expect(serialized).not.toContain('slack-bot-token-that-must-not-appear-in-output');
     expect(serialized).not.toContain('slack-app-token-that-must-not-appear-in-output');
@@ -816,7 +823,6 @@ describe('OpenClaw config patcher', () => {
     });
     expect(config.tools?.web?.search).toMatchObject({
       enabled: true,
-      provider: 'duckduckgo',
       maxResults: 5,
       timeoutSeconds: 30,
     });
@@ -828,6 +834,30 @@ describe('OpenClaw config patcher', () => {
     expect(serialized).not.toContain('slack-app-token');
     expect(serialized).not.toContain(browserToken);
     expect(serialized).not.toContain(browserUrl);
+  });
+
+  it('configures the installed DuckDuckGo plugin as the key-free web search provider', () => {
+    const { config } = patchConfig(
+      {
+        tools: {
+          web: {
+            search: { provider: 'duckduckgo' },
+          },
+        },
+      },
+      {},
+    );
+
+    expect(config.tools?.web?.search).toMatchObject({
+      enabled: true,
+      maxResults: 5,
+      timeoutSeconds: 30,
+      provider: 'duckduckgo',
+    });
+    expect(config.plugins?.load?.paths).toContain(
+      '/usr/local/lib/node_modules/@openclaw/duckduckgo-plugin',
+    );
+    expect(config.plugins?.entries?.duckduckgo).toEqual({ enabled: true });
   });
 
   it('removes the unsupported private-network SSRF key from restored config', () => {

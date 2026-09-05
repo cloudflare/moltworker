@@ -4,6 +4,7 @@ const path = require('path');
 const configPath = process.env.OPENCLAW_CONFIG_PATH || '/root/.openclaw/openclaw.json';
 const workersAiModelsPath = path.resolve(__dirname, '../config/workers-ai-models.json');
 const defaultSlackPluginPath = '/usr/local/lib/node_modules/@openclaw/slack';
+const duckDuckGoPluginPath = '/usr/local/lib/node_modules/@openclaw/duckduckgo-plugin';
 // This test-only override lets the unit suite model the image's immutable
 // plugin filesystem without making the runtime plugin location configurable.
 const slackPluginPath =
@@ -230,11 +231,28 @@ config.messages.groupChat = isPlainObject(config.messages.groupChat)
   : {};
 config.messages.groupChat.visibleReplies = 'automatic';
 
-// Native web tools use bounded HTTP retrieval and a key-free search provider.
+// Native web tools use bounded HTTP retrieval. DuckDuckGo is an optional
+// OpenClaw plugin, installed in this image's immutable global prefix.
 // Keep this additive so restored tool configuration remains intact. Runtime
 // browser-fetch credentials are intentionally not part of the persisted config.
 config.tools = config.tools || {};
 config.tools.web = config.tools.web || {};
+config.plugins = isPlainObject(config.plugins) ? config.plugins : {};
+config.plugins.load = isPlainObject(config.plugins.load) ? config.plugins.load : {};
+config.plugins.load.paths = Array.isArray(config.plugins.load.paths)
+  ? config.plugins.load.paths
+  : [];
+if (!config.plugins.load.paths.includes(duckDuckGoPluginPath)) {
+  config.plugins.load.paths.push(duckDuckGoPluginPath);
+}
+config.plugins.entries = isPlainObject(config.plugins.entries) ? config.plugins.entries : {};
+config.plugins.entries.duckduckgo = {
+  ...(isPlainObject(config.plugins.entries.duckduckgo) ? config.plugins.entries.duckduckgo : {}),
+  enabled: true,
+};
+if (Array.isArray(config.plugins.allow) && !config.plugins.allow.includes('duckduckgo')) {
+  config.plugins.allow.push('duckduckgo');
+}
 const existingFetchConfig = isPlainObject(config.tools.web.fetch) ? config.tools.web.fetch : {};
 const existingSsrfPolicy = isPlainObject(existingFetchConfig.ssrfPolicy)
   ? { ...existingFetchConfig.ssrfPolicy }
@@ -261,9 +279,9 @@ config.tools.web.fetch = {
 config.tools.web.search = {
   ...config.tools.web.search,
   enabled: true,
-  provider: 'duckduckgo',
   maxResults: 5,
   timeoutSeconds: 30,
+  provider: 'duckduckgo',
 };
 
 // Gateway configuration

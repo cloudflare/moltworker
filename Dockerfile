@@ -20,12 +20,16 @@ RUN ARCH="$(dpkg --print-architecture)" \
     && node --version \
     && npm --version
 
-# Install OpenClaw and its externalized Slack plugin. Keep both pinned to
-# compatible releases for reproducible builds. The plugin is installed in the
-# immutable global prefix so restoring /home/openclaw cannot remove it.
-RUN npm install -g openclaw@2026.7.1-2 @openclaw/slack@2026.7.1 \
+# Install OpenClaw and its externalized Slack and DuckDuckGo plugins. Keep the
+# compatible release set pinned for reproducible builds. The plugins are in
+# the immutable global prefix so restoring /home/openclaw cannot remove them.
+RUN npm install -g openclaw@2026.9.1 @openclaw/slack@2026.9.1 @openclaw/duckduckgo-plugin@2026.9.1 \
+    && test "$(node -p 'require("/usr/local/lib/node_modules/openclaw/package.json").version')" = "2026.9.1" \
+    && test "$(node -p 'require("/usr/local/lib/node_modules/@openclaw/slack/package.json").version')" = "2026.9.1" \
+    && test "$(node -p 'require("/usr/local/lib/node_modules/@openclaw/duckduckgo-plugin/package.json").version')" = "2026.9.1" \
     && openclaw --version \
-    && test -f /usr/local/lib/node_modules/@openclaw/slack/openclaw.plugin.json
+    && test -f /usr/local/lib/node_modules/@openclaw/slack/openclaw.plugin.json \
+    && test -f /usr/local/lib/node_modules/@openclaw/duckduckgo-plugin/openclaw.plugin.json
 
 # Use /home/openclaw as the home directory instead of /root.
 # The Sandbox SDK backup API only allows directories under /home, /workspace,
@@ -40,7 +44,7 @@ RUN mkdir -p /home/openclaw/.openclaw \
     && ln -s /home/openclaw/clawd /root/clawd
 
 # Copy startup configuration files
-# Build cache bust: 2026-09-05-v41-web-fetch-ssrf-schema
+# Build cache bust: 2026-09-06-v39-openclaw-session-eviction-fix
 COPY container/patch-openclaw-config.cjs /usr/local/lib/openclaw/patch-openclaw-config.cjs
 COPY container/install-moltworker-slack-ready-hook.cjs /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
 COPY container/hooks/moltworker-slack-ready/HOOK.md /usr/local/lib/openclaw/hooks/moltworker-slack-ready/HOOK.md
