@@ -810,7 +810,6 @@ describe('OpenClaw config patcher', () => {
       maxRedirects: 3,
       readability: true,
       ssrfPolicy: {
-        dangerouslyAllowPrivateNetwork: false,
         allowRfc2544BenchmarkRange: false,
         allowIpv6UniqueLocalRange: false,
       },
@@ -829,6 +828,30 @@ describe('OpenClaw config patcher', () => {
     expect(serialized).not.toContain('slack-app-token');
     expect(serialized).not.toContain(browserToken);
     expect(serialized).not.toContain(browserUrl);
+  });
+
+  it('removes the unsupported private-network SSRF key from restored config', () => {
+    const { config } = patchConfig(
+      {
+        tools: {
+          web: {
+            fetch: {
+              ssrfPolicy: {
+                dangerouslyAllowPrivateNetwork: true,
+                allowRfc2544BenchmarkRange: true,
+                allowIpv6UniqueLocalRange: true,
+              },
+            },
+          },
+        },
+      },
+      {},
+    );
+
+    expect(config.tools?.web?.fetch?.ssrfPolicy).toEqual({
+      allowRfc2544BenchmarkRange: false,
+      allowIpv6UniqueLocalRange: false,
+    });
   });
 });
 

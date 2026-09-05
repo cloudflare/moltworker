@@ -235,8 +235,16 @@ config.messages.groupChat.visibleReplies = 'automatic';
 // browser-fetch credentials are intentionally not part of the persisted config.
 config.tools = config.tools || {};
 config.tools.web = config.tools.web || {};
+const existingFetchConfig = isPlainObject(config.tools.web.fetch) ? config.tools.web.fetch : {};
+const existingSsrfPolicy = isPlainObject(existingFetchConfig.ssrfPolicy)
+  ? { ...existingFetchConfig.ssrfPolicy }
+  : {};
+// `dangerouslyAllowPrivateNetwork` is not a valid key in OpenClaw's
+// web.fetch.ssrfPolicy schema. Remove it from restored snapshots as well as
+// omitting it from the managed configuration below.
+delete existingSsrfPolicy.dangerouslyAllowPrivateNetwork;
 config.tools.web.fetch = {
-  ...config.tools.web.fetch,
+  ...existingFetchConfig,
   enabled: true,
   maxChars: 20000,
   maxCharsCap: 20000,
@@ -245,8 +253,7 @@ config.tools.web.fetch = {
   maxRedirects: 3,
   readability: true,
   ssrfPolicy: {
-    ...config.tools.web.fetch?.ssrfPolicy,
-    dangerouslyAllowPrivateNetwork: false,
+    ...existingSsrfPolicy,
     allowRfc2544BenchmarkRange: false,
     allowIpv6UniqueLocalRange: false,
   },
