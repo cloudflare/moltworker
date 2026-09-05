@@ -13,6 +13,41 @@ These tests run against actual Cloudflare infrastructure—the same environment 
 
 The Workers AI proxy—including `AI_PROXY_TOKEN`, `AI_GATEWAY_ID`, `WORKER_URL`, and its narrow `/internal/ai/*` Access bypass—is the production target architecture, not coverage provided by the current disposable browser fixture. That fixture deploys legacy provider configuration with `E2E_TEST_MODE`; it does not provision those proxy variables or the proxy bypass, and it does not test proxy inference.
 
+`web_access.txt` is an optional host-side production diagnostic corpus. It runs
+only when `WEB_ACCESS_WORKER_URL`, `WEB_ACCESS_CLIENT_ID`, and
+`WEB_ACCESS_CLIENT_SECRET` are present in the runner environment. It calls the
+Access-protected diagnostic matrix and prints only its redacted metadata; it
+does not receive container-only `BROWSER_FETCH_*` values and does not run
+OpenClaw commands.
+
+## Container-side manual web smoke
+
+There is no supported production endpoint for arbitrary remote container
+execution. Do not use the debug-only `/debug/cli` route as a smoke-test command
+channel: it accepts arbitrary shell input and is not a production interface.
+
+After deployment, an operator must run the following through a paired OpenClaw
+Control UI conversation in an Access-authenticated browser:
+
+1. Open `/_admin/` and approve the operator device if pairing is pending.
+2. Open the Control UI with the gateway token from the operator's secret
+   manager, then start an agent turn in that paired session.
+3. Ask the agent to use native `web_fetch` for `https://example.com/` and
+   report source URL, final URL, fetched time, and extracted-text presence.
+4. Ask the agent to use native DuckDuckGo `web_search` only to discover
+   Kitasenju P-ARK/P-WORLD candidate URLs; it must not use Browser Run to
+   search.
+5. In the same paired session, ask the agent to load the `cloudflare-browser`
+   Skill and use its Browser Run client against the P-ARK and P-WORLD URLs.
+   Record `sourceUrl`, `finalUrl`, `status`, `category`, and `fetchedAt` from
+   the result. If evidence is missing, record source-backed `not_found` rather
+   than a guess.
+
+The agent turn runs in the deployed Sandbox, where its runtime
+`BROWSER_FETCH_URL` and `BROWSER_FETCH_TOKEN` are available. Do not copy those
+values, the gateway token, or Access credentials to the host-side corpus,
+prompts, logs, or artifacts.
+
 ## Architecture
 
 ```

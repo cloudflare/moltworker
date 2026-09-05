@@ -319,11 +319,10 @@ describe('createAccessMiddleware', () => {
 
     await middleware(c, next);
 
-    expect(verifyAccessJWT).toHaveBeenCalledWith(
-      'test.jwt.token',
-      'team.cloudflareaccess.com',
-      ['aud-one', 'aud-two'],
-    );
+    expect(verifyAccessJWT).toHaveBeenCalledWith('test.jwt.token', 'team.cloudflareaccess.com', [
+      'aud-one',
+      'aud-two',
+    ]);
     expect(next).toHaveBeenCalledOnce();
   });
 
@@ -333,21 +332,24 @@ describe('createAccessMiddleware', () => {
     ['trailing empty element', 'aud-one,'],
     ['duplicate after trimming', 'aud-one, aud-one '],
     ['control character', 'aud-one,\naud-two'],
-  ])('fails closed for %s audience configuration before JWT verification', async (_name, audience) => {
-    const { c, jsonMock } = createFullMockContext({
-      env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: audience },
-      jwtHeader: 'test.jwt.token',
-    });
-    const middleware = createAccessMiddleware({ type: 'json' });
-    const next = vi.fn();
+  ])(
+    'fails closed for %s audience configuration before JWT verification',
+    async (_name, audience) => {
+      const { c, jsonMock } = createFullMockContext({
+        env: { CF_ACCESS_TEAM_DOMAIN: 'team.cloudflareaccess.com', CF_ACCESS_AUD: audience },
+        jwtHeader: 'test.jwt.token',
+      });
+      const middleware = createAccessMiddleware({ type: 'json' });
+      const next = vi.fn();
 
-    await middleware(c, next);
+      await middleware(c, next);
 
-    expect(verifyAccessJWT).not.toHaveBeenCalled();
-    expect(next).not.toHaveBeenCalled();
-    expect(jsonMock).toHaveBeenCalledWith(
-      expect.objectContaining({ error: 'Cloudflare Access not configured' }),
-      500,
-    );
-  });
+      expect(verifyAccessJWT).not.toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+      expect(jsonMock).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'Cloudflare Access not configured' }),
+        500,
+      );
+    },
+  );
 });

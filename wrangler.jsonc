@@ -105,6 +105,8 @@
   //
   // Browser automation (optional):
   // - CDP_SECRET: Shared secret for /cdp endpoint authentication
+  // - BROWSER_FETCH_TOKEN: Dedicated secret for internal browser fetch
+  // - BROWSER_FETCH_URL: Derived internally from WORKER_URL; do not set directly
   // - WORKER_URL: Public URL of the worker
   //
   // R2 persistent storage (for data persistence across container restarts):

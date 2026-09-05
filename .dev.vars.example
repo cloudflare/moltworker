@@ -6,6 +6,8 @@
 AI_PROXY_TOKEN=replace-with-random-64-hex
 AI_GATEWAY_ID=moltworker
 WORKER_URL=https://moltbot.kentymyty.com
+# BROWSER_FETCH_TOKEN: Dedicated secret for internal browser fetch
+# BROWSER_FETCH_URL: Derived from WORKER_URL for the internal browser fetch client
 SANDBOX_SLEEP_AFTER=10m
 
 # Backward-compatible upstream alternatives (not the default deployment)

@@ -230,6 +230,35 @@ config.messages.groupChat = isPlainObject(config.messages.groupChat)
   : {};
 config.messages.groupChat.visibleReplies = 'automatic';
 
+// Native web tools use bounded HTTP retrieval and a key-free search provider.
+// Keep this additive so restored tool configuration remains intact. Runtime
+// browser-fetch credentials are intentionally not part of the persisted config.
+config.tools = config.tools || {};
+config.tools.web = config.tools.web || {};
+config.tools.web.fetch = {
+  ...config.tools.web.fetch,
+  enabled: true,
+  maxChars: 20000,
+  maxCharsCap: 20000,
+  maxResponseBytes: 750000,
+  timeoutSeconds: 30,
+  maxRedirects: 3,
+  readability: true,
+  ssrfPolicy: {
+    ...config.tools.web.fetch?.ssrfPolicy,
+    dangerouslyAllowPrivateNetwork: false,
+    allowRfc2544BenchmarkRange: false,
+    allowIpv6UniqueLocalRange: false,
+  },
+};
+config.tools.web.search = {
+  ...config.tools.web.search,
+  enabled: true,
+  provider: 'duckduckgo',
+  maxResults: 5,
+  timeoutSeconds: 30,
+};
+
 // Gateway configuration
 config.gateway.port = 18789;
 config.gateway.mode = 'local';

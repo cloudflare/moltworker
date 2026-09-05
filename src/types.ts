@@ -51,6 +51,8 @@ export interface OpenClawEnv {
   BACKUP_BUCKET_NAME?: string; // R2 bucket name for backup storage
   // Browser Rendering binding for CDP shim
   BROWSER?: Fetcher;
+  BROWSER_FETCH_TOKEN?: string; // Dedicated Bearer secret for the internal browser fetch route
+  BROWSER_FETCH_URL?: string; // Internal browser fetch endpoint URL passed to OpenClaw at runtime
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication
   WORKER_URL?: string; // Public URL of the worker (for CDP endpoint)
 

@@ -36,6 +36,34 @@ describe('buildEnvVars', () => {
     );
   });
 
+  it('passes the browser fetch token and derives its normalized internal URL', () => {
+    const result = buildEnvVars(
+      createMockEnv({
+        BROWSER_FETCH_TOKEN: 'browser-fetch-runtime-secret',
+        WORKER_URL: 'https://moltworker.example.workers.dev///',
+      }),
+    );
+
+    expect(result.BROWSER_FETCH_TOKEN).toBe('browser-fetch-runtime-secret');
+    expect(result.BROWSER_FETCH_URL).toBe(
+      'https://moltworker.example.workers.dev/internal/browser/fetch',
+    );
+  });
+
+  it('omits each browser fetch value when its Worker-side prerequisite is absent', () => {
+    const tokenOnly = buildEnvVars(createMockEnv({ BROWSER_FETCH_TOKEN: 'browser-fetch-secret' }));
+    const urlOnly = buildEnvVars(
+      createMockEnv({ WORKER_URL: 'https://moltworker.example.workers.dev' }),
+    );
+
+    expect(tokenOnly.BROWSER_FETCH_TOKEN).toBe('browser-fetch-secret');
+    expect(tokenOnly.BROWSER_FETCH_URL).toBeUndefined();
+    expect(urlOnly.BROWSER_FETCH_TOKEN).toBeUndefined();
+    expect(urlOnly.BROWSER_FETCH_URL).toBe(
+      'https://moltworker.example.workers.dev/internal/browser/fetch',
+    );
+  });
+
   it('does not pass Worker-side AI management configuration to the container', () => {
     const env = createMockEnv({
       AI_PROXY_TOKEN: 'proxy-runtime-secret',

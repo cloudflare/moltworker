@@ -50,43 +50,38 @@ describe('verifyAccessJWT', () => {
   it.each([
     ['token.for.aud-one', 'aud-one'],
     ['token.for.aud-two', 'aud-two'],
-  ])('passes a token for %s to jose with every configured audience', async (token, tokenAudience) => {
-    const { jwtVerify } = await import('jose');
-    vi.mocked(jwtVerify).mockResolvedValue({
-      payload: {
-        email: 'test@example.com',
-        aud: [tokenAudience],
-        iss: 'https://myteam.cloudflareaccess.com',
-        exp: Math.floor(Date.now() / 1000) + 3600,
-        iat: Math.floor(Date.now() / 1000),
-        sub: 'user-id',
-        type: 'app',
-      },
-      protectedHeader: { alg: 'RS256' },
-    } as never);
+  ])(
+    'passes a token for %s to jose with every configured audience',
+    async (token, tokenAudience) => {
+      const { jwtVerify } = await import('jose');
+      vi.mocked(jwtVerify).mockResolvedValue({
+        payload: {
+          email: 'test@example.com',
+          aud: [tokenAudience],
+          iss: 'https://myteam.cloudflareaccess.com',
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          iat: Math.floor(Date.now() / 1000),
+          sub: 'user-id',
+          type: 'app',
+        },
+        protectedHeader: { alg: 'RS256' },
+      } as never);
 
-    await verifyAccessJWT(
-      token,
-      'myteam.cloudflareaccess.com',
-      ['aud-one', 'aud-two'],
-    );
+      await verifyAccessJWT(token, 'myteam.cloudflareaccess.com', ['aud-one', 'aud-two']);
 
-    expect(jwtVerify).toHaveBeenCalledWith(token, 'mock-jwks', {
-      issuer: 'https://myteam.cloudflareaccess.com',
-      audience: ['aud-one', 'aud-two'],
-    });
-  });
+      expect(jwtVerify).toHaveBeenCalledWith(token, 'mock-jwks', {
+        issuer: 'https://myteam.cloudflareaccess.com',
+        audience: ['aud-one', 'aud-two'],
+      });
+    },
+  );
 
   it('rejects a token whose audience is outside the configured audience list', async () => {
     const { jwtVerify } = await import('jose');
     vi.mocked(jwtVerify).mockRejectedValue(new Error('"aud" claim check failed'));
 
     await expect(
-      verifyAccessJWT(
-        'token.for.aud-three',
-        'myteam.cloudflareaccess.com',
-        ['aud-one', 'aud-two'],
-      ),
+      verifyAccessJWT('token.for.aud-three', 'myteam.cloudflareaccess.com', ['aud-one', 'aud-two']),
     ).rejects.toThrow('"aud" claim check failed');
 
     expect(jwtVerify).toHaveBeenCalledWith('token.for.aud-three', 'mock-jwks', {

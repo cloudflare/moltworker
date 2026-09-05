@@ -1,0 +1,39 @@
+%shell bash
+%skip(requires WEB_ACCESS_WORKER_URL, WEB_ACCESS_CLIENT_ID, and WEB_ACCESS_CLIENT_SECRET) if: test -z "${WEB_ACCESS_WORKER_URL:-}" || test -z "${WEB_ACCESS_CLIENT_ID:-}" || test -z "${WEB_ACCESS_CLIENT_SECRET:-}"
+
+===
+run the host-side Access-protected three-path diagnostic matrix
+%require
+===
+node - <<'NODE'
+const workerUrl = process.env.WEB_ACCESS_WORKER_URL;
+const clientId = process.env.WEB_ACCESS_CLIENT_ID;
+const clientSecret = process.env.WEB_ACCESS_CLIENT_SECRET;
+const response = await fetch(`${workerUrl.replace(/\/+$/, '')}/api/admin/web/diagnostics`, {
+  method: 'POST',
+  headers: {
+    'CF-Access-Client-Id': clientId,
+    'CF-Access-Client-Secret': clientSecret,
+    'content-type': 'application/json',
+  },
+  body: '{}',
+});
+if (!response.ok) process.exit(1);
+const matrix = await response.json();
+console.log(JSON.stringify({
+  generatedAt: matrix.generatedAt,
+  rows: matrix.rows.map(({ sourceUrl, results }) => ({
+    sourceUrl,
+    results: results.map(({ path, ok, status, finalUrl, category }) => ({ path, ok, status, finalUrl, category })),
+  })),
+}));
+NODE
+---
+{{ output }}
+---
+where
+* output contains "\"rows\""
+
+# Container-side web_fetch, web_search, and Browser Run Skill smoke is manual
+# post-deploy work. See test/e2e/README.md; this host corpus intentionally does
+# not claim to run /root/clawd scripts or OpenClaw commands inside the Sandbox.

@@ -34,6 +34,14 @@ interface OpenClawConfig {
     entries?: Record<string, { enabled?: boolean }>;
     load?: { paths?: string[] };
   };
+  tools?: {
+    existingTool?: unknown;
+    web?: {
+      existingWebSetting?: unknown;
+      fetch?: Record<string, unknown>;
+      search?: Record<string, unknown>;
+    };
+  };
 }
 
 function patchConfig(
@@ -772,6 +780,56 @@ describe('OpenClaw config patcher', () => {
       });
     },
   );
+
+  it('enables bounded native web tools without serializing browser runtime values', () => {
+    const browserToken = 'browser-fetch-runtime-secret';
+    const browserUrl = 'https://moltworker.example.workers.dev/internal/browser/fetch';
+    const { config, serialized } = patchConfig(
+      {
+        tools: {
+          existingTool: { enabled: true },
+          web: { existingWebSetting: 'retained' },
+        },
+      },
+      {
+        BROWSER_FETCH_TOKEN: browserToken,
+        BROWSER_FETCH_URL: browserUrl,
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+      },
+    );
+
+    expect(config.tools?.existingTool).toEqual({ enabled: true });
+    expect(config.tools?.web?.existingWebSetting).toBe('retained');
+    expect(config.tools?.web?.fetch).toMatchObject({
+      enabled: true,
+      maxChars: 20000,
+      maxCharsCap: 20000,
+      maxResponseBytes: 750000,
+      timeoutSeconds: 30,
+      maxRedirects: 3,
+      readability: true,
+      ssrfPolicy: {
+        dangerouslyAllowPrivateNetwork: false,
+        allowRfc2544BenchmarkRange: false,
+        allowIpv6UniqueLocalRange: false,
+      },
+    });
+    expect(config.tools?.web?.search).toMatchObject({
+      enabled: true,
+      provider: 'duckduckgo',
+      maxResults: 5,
+      timeoutSeconds: 30,
+    });
+    expect(config.channels?.slack).toMatchObject({
+      mode: 'socket',
+      enabled: true,
+    });
+    expect(serialized).not.toContain('slack-bot-token');
+    expect(serialized).not.toContain('slack-app-token');
+    expect(serialized).not.toContain(browserToken);
+    expect(serialized).not.toContain(browserUrl);
+  });
 });
 
 describe('OpenClaw image config path assembly', () => {

@@ -10,6 +10,11 @@ import {
   signalRestoreNeeded,
   withBackupOperationLease,
 } from '../persistence';
+import {
+  WebDiagnosticsRequestError,
+  parseWebDiagnosticsRequest,
+  runWebDiagnostics,
+} from '../web-diagnostics';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -247,6 +252,29 @@ adminApi.post('/storage/sync', async (c) => {
       },
       status,
     );
+  }
+});
+
+// POST /api/admin/web/diagnostics - compare Worker, Sandbox, and Browser paths
+adminApi.post('/web/diagnostics', async (c) => {
+  try {
+    const input = await parseWebDiagnosticsRequest(c.req.raw);
+    const matrix = await runWebDiagnostics(input, {
+      sandbox: c.get('sandbox'),
+      browserBinding: c.env.BROWSER,
+    });
+    return c.json(matrix);
+  } catch (error) {
+    if (error instanceof WebDiagnosticsRequestError) {
+      return c.json({ error: 'Invalid diagnostic request', message: error.message }, error.status);
+    }
+    if (error instanceof Error && error.name === 'BrowserFetchRequestError') {
+      return c.json(
+        { error: 'Invalid diagnostic request', message: 'The URL is not allowed' },
+        400,
+      );
+    }
+    return c.json({ error: 'Unable to complete web diagnostics' }, 500);
   }
 });
 

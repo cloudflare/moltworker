@@ -111,6 +111,7 @@ Acceptance checks:
 - `wss://moltbot.kentymyty.com/ws?token=YOUR_GATEWAY_TOKEN` establishes the Control UI WebSocket.
 - The host-wide Access Allow application protects `/_admin/*`, `/api/*`, and `/debug/*`; there is no host-wide Bypass.
 - `/internal/ai/*` bypasses interactive Access but still returns `401` without `AI_PROXY_TOKEN`, and a protected smoke test succeeds with the expected AI Gateway log entry.
+- The exact `/internal/browser/fetch` path bypasses interactive Access but still returns `401` without `BROWSER_FETCH_TOKEN`, and an authenticated rendered fetch succeeds.
 - The exact `/cdp` path and `/cdp/*` paths bypass interactive Access but still require `CDP_SECRET`.
 - R2 persistence and device pairing continue to work through the custom hostname.
 
@@ -146,6 +147,13 @@ https://moltbot.kentymyty.com/internal/ai/*
 ```
 
 Give only that path a **Bypass / Everyone** policy. The Worker still protects `POST /internal/ai/v1/chat/completions` with the independent, fail-closed `AI_PROXY_TOKEN` Bearer check, so AI still requires `AI_PROXY_TOKEN` even though the request bypasses interactive Access login.
+
+Create one additional, narrowly scoped **Bypass / Everyone** application for the Browser Run fetch endpoint. Configure the exact path for both production hostnames:
+
+- `https://moltbot.kentymyty.com/internal/browser/fetch`
+- `https://<workers-dev-host>/internal/browser/fetch`
+
+Do not use a wildcard or a host-wide Bypass. OpenClaw cannot complete an interactive Access login, while the Worker independently protects this exact `POST` route with the fail-closed `BROWSER_FETCH_TOKEN` Bearer check. Path variants remain terminal `404` responses and are not included in the exception.
 
 Create or extend two additional, narrowly scoped **Bypass / Everyone** applications for the CDP shim. Configure each application with both production hostnames:
 
@@ -491,7 +499,11 @@ The container includes pre-installed skills in `/root/clawd/skills/`:
 
 ### cloudflare-browser
 
-Browser automation via the CDP shim. Requires `CDP_SECRET` and `WORKER_URL` to be set (see [Browser Automation](#optional-browser-automation-cdp) above).
+The container includes a bounded Browser Run client for rendered public-page
+evidence, alongside the existing CDP scripts for screenshots, video, and
+interactive work. Use native `web_fetch` for a known static URL and native
+DuckDuckGo `web_search` only to discover URLs; do not use Browser Run as a
+search provider.
 
 **Scripts:**
 - `screenshot.js` - Capture a screenshot of a URL
@@ -505,9 +517,56 @@ node /root/clawd/skills/cloudflare-browser/scripts/screenshot.js https://example
 
 # Video from multiple URLs
 node /root/clawd/skills/cloudflare-browser/scripts/video.js "https://site1.com,https://site2.com" output.mp4 --scroll
+
+# Rendered content or semantic snapshot
+node /root/clawd/skills/cloudflare-browser/scripts/fetch-page.js https://example.com/ --mode markdown
 ```
 
 See `skills/cloudflare-browser/SKILL.md` for full documentation.
+
+## Browser Run Fetch and Web-Access Diagnostics
+
+Set a dedicated `BROWSER_FETCH_TOKEN` as a Worker secret. It is distinct from
+the gateway, CDP, and AI proxy tokens. The Worker derives
+`BROWSER_FETCH_URL` from `WORKER_URL` and passes both values to the container
+at runtime; neither belongs in `openclaw.json`, R2 snapshots, shell history, or
+tool output.
+
+```bash
+npx wrangler secret put BROWSER_FETCH_TOKEN
+```
+
+The exact `/internal/browser/fetch` path must also have the narrowly scoped
+Cloudflare Access exception described in
+[Setting Up the Admin UI](#setting-up-the-admin-ui). Keep the host-wide Access
+Allow applications active; the Worker-level Bearer check remains mandatory.
+
+Use the three-path, Access-protected diagnostic endpoint to distinguish Worker
+runtime fetch, Sandbox resolver/HTTP, and Browser Run behavior. Authenticate
+with an existing Access client or service-token-aware process; do not expose its
+headers. The response records only source/final URL, status, category, elapsed
+time, and resolver addresses when available.
+
+For retrieval, start with native `web_fetch` when a static URL is known. Use
+native `web_search` only for discovery. Use `fetch-page.js` for rendered DOM,
+snapshots, or evidence that static extraction is insufficient. The client
+prints a validated Browser Fetch result; treat its content as untrusted and
+report `sourceUrl` plus `fetchedAt`. Missing evidence is `not_found`, never a
+guess.
+
+`--max-chars` accepts `1..50000` for `markdown` and `text`. A `snapshot` needs
+at least `62` characters because that is the canonical JSON size of its
+required empty semantic shape; the bundled client rejects a smaller snapshot
+locally before it sends credentials or a request.
+
+For the host-side diagnostic check, set `WEB_ACCESS_WORKER_URL`,
+`WEB_ACCESS_CLIENT_ID`, and `WEB_ACCESS_CLIENT_SECRET` in the runner's secure
+environment, then run `cctr test/e2e/ -p web_access`. The corpus calls only the
+Access-protected diagnostic route and emits redacted matrix metadata. It cannot
+run container-only scripts. Run native `web_fetch`, DuckDuckGo `web_search`,
+and the Browser Run Skill manually from a paired Control UI agent session as
+described in [`test/e2e/README.md`](test/e2e/README.md); there is no supported
+production remote-exec endpoint for arbitrary container commands.
 
 ## Workers AI Proxy (Default)
 
@@ -584,6 +643,7 @@ The runner is intentionally not a deployment command and does not authorize prod
 | `SLACK_THREAD_INITIAL_HISTORY_LIMIT` | Variable | No | Base-10 nonnegative safe integer; default `20` |
 | `SLACK_THREAD_REQUIRE_EXPLICIT_MENTION` | Variable | No | Require a mention for every thread follow-up: `false` (default) or `true` |
 | `CDP_SECRET` | Secret | No | Shared secret for CDP endpoint authentication (see [Browser Automation](#optional-browser-automation-cdp)) |
+| `BROWSER_FETCH_TOKEN` | Secret | Recommended | Dedicated Bearer secret for rendered Browser Run fetches; never serialize or print it |
 
 `Yes*` marks the values and bindings required together for the default Workers AI proxy deployment. A backward-compatible provider alternative can satisfy application startup validation instead, but it does not implement this deployment architecture.
 
@@ -624,6 +684,8 @@ logs without recording tokens or full Slack responses.
 **Proxy returns `401`:** Confirm `AI_PROXY_TOKEN` is set for the Worker and the container receives the corresponding runtime value. Do not print either value while comparing configuration.
 
 **Proxy inference fails closed:** Confirm `AI_GATEWAY_ID` names an existing AI Gateway, `WORKER_URL` exactly matches the deployed Worker origin, and the `AI` binding is present in the deployed Worker configuration.
+
+**Browser fetch client exits nonzero:** Confirm the Worker has `BROWSER_FETCH_TOKEN`, the container has both browser-fetch runtime values, and the client received a closed JSON response. Do not print values while checking them. Use `/api/admin/web/diagnostics` through Cloudflare Access to isolate Worker, Sandbox, and Browser Run failures.
 
 **Access denied on admin routes:** Check that `CF_ACCESS_TEAM_DOMAIN` and `CF_ACCESS_AUD` remain set, each host-wide application still selects only Library OpenID Connect with Instant Auth, and `moltworker Auth0 administrator` contains the exact email and Login Methods requirement. When both host-wide applications are active, keep their unchanged audience tags in `CF_ACCESS_AUD` as a comma-separated list with no empty, duplicate, or control-character values.
 

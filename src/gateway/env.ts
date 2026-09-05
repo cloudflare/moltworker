@@ -44,6 +44,11 @@ export function buildEnvVars(env: OpenClawEnv): Record<string, string> {
     envVars.OPENCLAW_AI_PROXY_URL = `${env.WORKER_URL.replace(/\/+$/, '')}/internal/ai/v1`;
   }
 
+  if (env.BROWSER_FETCH_TOKEN) envVars.BROWSER_FETCH_TOKEN = env.BROWSER_FETCH_TOKEN;
+  if (env.WORKER_URL) {
+    envVars.BROWSER_FETCH_URL = `${env.WORKER_URL.replace(/\/+$/, '')}/internal/browser/fetch`;
+  }
+
   // Map MOLTBOT_GATEWAY_TOKEN to OPENCLAW_GATEWAY_TOKEN (container expects this name)
   if (env.MOLTBOT_GATEWAY_TOKEN) envVars.OPENCLAW_GATEWAY_TOKEN = env.MOLTBOT_GATEWAY_TOKEN;
   if (env.DEV_MODE) envVars.OPENCLAW_DEV_MODE = env.DEV_MODE;

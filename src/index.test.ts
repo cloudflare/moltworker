@@ -112,6 +112,67 @@ describe('AI proxy route ordering', () => {
   });
 });
 
+describe('browser fetch route ordering', () => {
+  it('rejects an unauthenticated browser fetch before sandbox initialization', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const response = await worker.fetch(
+      new Request('https://moltworker.example/internal/browser/fetch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: 'https://example.com/' }),
+      }),
+      createMockEnv({ BROWSER: {} as Fetcher, BROWSER_FETCH_TOKEN: 'browser-fetch-token' }),
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('x-request-id')).toEqual(expect.any(String));
+    expect(getSandbox).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '/internal/browser/fetch/',
+    '/internal/browser/fetch//',
+    '/internal/browser/fetch/extra',
+  ])('terminates reserved endpoint variant %s before sandbox initialization', async (pathname) => {
+    getSandbox.mockClear();
+    const response = await worker.fetch(
+      new Request(`https://moltworker.example${pathname}`, {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer browser-fetch-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ url: 'https://example.com/' }),
+      }),
+      createMockEnv({ BROWSER: {} as Fetcher, BROWSER_FETCH_TOKEN: 'browser-fetch-token' }),
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('x-request-id')).toEqual(expect.any(String));
+    expect(getSandbox).not.toHaveBeenCalled();
+  });
+
+  it('does not reserve a path with a non-slash prefix', async () => {
+    const containerFetch = vi.fn().mockResolvedValue(new Response('unrelated', { status: 200 }));
+    getSandbox.mockClear();
+    getSandbox.mockImplementationOnce(() => ({ containerFetch }));
+
+    const response = await worker.fetch(
+      new Request('https://moltworker.example/internal/browser/fetching', {
+        method: 'POST',
+      }),
+      createMockEnv({ DEV_MODE: 'true' }),
+      {} as ExecutionContext,
+    );
+
+    expect(response.status).toBe(200);
+    expect(getSandbox).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledOnce();
+  });
+});
+
 describe('WebSocket gateway preparation', () => {
   it('prepares persisted state before the initial WebSocket connection', async () => {
     const events: string[] = [];

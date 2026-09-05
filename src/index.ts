@@ -27,7 +27,17 @@ import type { AppEnv, OpenClawEnv } from './types';
 import { GATEWAY_PORT } from './config';
 import { createAccessMiddleware } from './auth';
 import { findExistingGatewayProcess, killGateway, prepareGateway } from './gateway';
-import { publicRoutes, api, adminUi, debug, cdp, aiProxy } from './routes';
+import {
+  publicRoutes,
+  api,
+  adminUi,
+  debug,
+  cdp,
+  aiProxy,
+  browserFetch,
+  browserFetchPathVariantResponse,
+  isBrowserFetchPathVariant,
+} from './routes';
 import { redactSensitiveParams } from './utils/logging';
 import { handleScheduled } from './cron/handler';
 import loadingPageHtml from './assets/loading.html';
@@ -155,6 +165,20 @@ app.use('*', async (c, next) => {
 // The container cannot complete an interactive Access login. This route uses
 // its own fail-closed Bearer authentication and must not initialize a sandbox.
 app.route('/', aiProxy);
+
+// The container cannot complete an interactive Access login. This route uses
+// its own fail-closed Bearer authentication and must not initialize a sandbox.
+app.route('/', browserFetch);
+
+// Hono intentionally uses strict path matching. Keep slash-prefixed variants
+// of the reserved internal endpoint terminal before sandbox/Access middleware.
+// The boundary check leaves similarly named paths such as /fetching unrelated.
+app.use('*', async (c, next) => {
+  if (isBrowserFetchPathVariant(new URL(c.req.url).pathname)) {
+    return browserFetchPathVariantResponse(c);
+  }
+  return next();
+});
 
 // Middleware: Initialize sandbox stub and restore backup if available.
 // Note: we intentionally do NOT call sandbox.start() here. The Sandbox SDK's
