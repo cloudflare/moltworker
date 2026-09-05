@@ -1,5 +1,10 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { findExistingGatewayProcess, isGatewayPortOpen, killGateway } from './process';
+import {
+  ensureGateway,
+  findExistingGatewayProcess,
+  isGatewayPortOpen,
+  killGateway,
+} from './process';
 import type { Sandbox, Process } from '@cloudflare/sandbox';
 import { createMockEnv, createMockSandbox, createMockExecResult } from '../test-utils';
 
@@ -20,6 +25,7 @@ function createFullMockProcess(overrides: Partial<Process> = {}): Process {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('killGateway', () => {
@@ -215,11 +221,189 @@ describe('ensureGateway', () => {
     const { sandbox, listProcessesMock } = createMockSandbox();
     listProcessesMock.mockResolvedValue([process]);
 
-    const { ensureGateway } = await import('./process');
     await expect(ensureGateway(sandbox, createMockEnv(), { waitForReady: false })).resolves.toBe(
       process,
     );
 
     expect(process.waitForPort).not.toHaveBeenCalled();
+  });
+
+  it('starts a replacement after a transient existing-process readiness failure', async () => {
+    const staleProcess = createFullMockProcess({
+      status: 'running',
+      waitForPort: vi.fn().mockRejectedValue(new Error('old process stopped responding')),
+    });
+    const replacement = createFullMockProcess({
+      status: 'starting',
+      waitForPort: vi.fn().mockResolvedValue(undefined),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox({
+      processes: [staleProcess],
+    });
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(replacement);
+
+    await expect(ensureGateway(sandbox, createMockEnv())).resolves.toBe(replacement);
+
+    expect(staleProcess.kill).toHaveBeenCalledOnce();
+    expect(startProcessMock).toHaveBeenCalledOnce();
+    expect(replacement.waitForPort).toHaveBeenCalledWith(18789, {
+      mode: 'tcp',
+      timeout: 180_000,
+    });
+  });
+
+  it('reports only allowlisted startup diagnostics and retains the readiness failure as cause', async () => {
+    const readinessFailure = new Error('TCP probe timed out');
+    const process = createFullMockProcess({
+      id: 'internal-process-id',
+      status: 'failed',
+      exitCode: undefined,
+      waitForPort: vi.fn().mockRejectedValue(readinessFailure),
+      getLogs: vi.fn().mockResolvedValue({
+        stdout: [
+          'MOLTWORKER_STARTUP_PHASE=patch_config',
+          'MOLTWORKER_STARTUP_FAILURE phase=patch_config exit_code=78',
+          'MOLTWORKER_STARTUP_PHASE=config-patch',
+          'MOLTWORKER_STARTUP_CONTEXT=slack-plugin-unavailable',
+          'untrusted output: api_key=raw-secret',
+        ].join('\n'),
+        stderr: 'Bearer eyJhbGciOiJIUzI1NiJ9.raw-claim.signature',
+      }),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(process);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const thrown = await ensureGateway(sandbox, createMockEnv()).catch((error: unknown) => error);
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).cause).toBe(readinessFailure);
+    expect((thrown as Error).message).toContain('180000ms');
+    expect((thrown as Error).message).toContain('phase: patch_config');
+    expect((thrown as Error).message).toContain('status: failed');
+    expect((thrown as Error).message).toContain('exit code: 78');
+    expect((thrown as Error).message).not.toContain('slack-plugin-unavailable');
+
+    const reported = [...errorSpy.mock.calls, ...logSpy.mock.calls].flat().join(' ');
+    expect(reported).not.toContain('raw-secret');
+    expect(reported).not.toContain('eyJhbGciOiJIUzI1NiJ9');
+    expect(reported).not.toContain('internal-process-id');
+  });
+
+  it('omits untrusted process status and non-safe exit codes from diagnostics', async () => {
+    const readinessFailure = new Error('TCP probe timed out');
+    const process = createFullMockProcess({
+      status: 'failed raw-secret' as Process['status'],
+      exitCode: Number.POSITIVE_INFINITY,
+      waitForPort: vi.fn().mockRejectedValue(readinessFailure),
+      getLogs: vi.fn().mockResolvedValue({
+        stdout: [
+          'MOLTWORKER_STARTUP_PHASE=gateway',
+          `MOLTWORKER_STARTUP_FAILURE phase=gateway exit_code=${'9'.repeat(400)}`,
+        ].join('\n'),
+        stderr: '',
+      }),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(process);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const thrown = await ensureGateway(sandbox, createMockEnv()).catch((error: unknown) => error);
+    const message = (thrown as Error).message;
+
+    expect((thrown as Error).cause).toBe(readinessFailure);
+    expect(message).toContain('phase: gateway');
+    expect(message).not.toContain('status:');
+    expect(message).not.toContain('exit code:');
+    expect(message).not.toContain('raw-secret');
+    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain('Infinity');
+    expect(logSpy.mock.calls.flat().join(' ')).not.toContain('raw-secret');
+  });
+
+  it('finds a valid failure marker at the bounded tail of diagnostic output', async () => {
+    const process = createFullMockProcess({
+      status: 'failed',
+      exitCode: undefined,
+      waitForPort: vi.fn().mockRejectedValue(new Error('TCP probe timed out')),
+      getLogs: vi.fn().mockResolvedValue({
+        stdout: `${'x'.repeat(20_000)}\nMOLTWORKER_STARTUP_FAILURE phase=patch_config exit_code=78`,
+        stderr: '',
+      }),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(process);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const thrown = await ensureGateway(sandbox, createMockEnv()).catch((error: unknown) => error);
+
+    expect((thrown as Error).message).toContain('phase: patch_config');
+    expect((thrown as Error).message).toContain('exit code: 78');
+  });
+
+  it('keeps a failure marker authoritative over later phase markers', async () => {
+    const process = createFullMockProcess({
+      status: 'failed',
+      exitCode: undefined,
+      waitForPort: vi.fn().mockRejectedValue(new Error('TCP probe timed out')),
+      getLogs: vi.fn().mockResolvedValue({
+        stdout: [
+          'MOLTWORKER_STARTUP_FAILURE phase=patch_config exit_code=78',
+          'MOLTWORKER_STARTUP_PHASE=gateway',
+        ].join('\n'),
+        stderr: '',
+      }),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(process);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const thrown = await ensureGateway(sandbox, createMockEnv()).catch((error: unknown) => error);
+
+    expect((thrown as Error).message).toContain('phase: patch_config');
+    expect((thrown as Error).message).toContain('exit code: 78');
+    expect((thrown as Error).message).not.toContain('phase: gateway');
+  });
+
+  it('keeps the readiness failure as the cause when diagnostic logs are unavailable', async () => {
+    const readinessFailure = new Error('TCP probe timed out');
+    const process = createFullMockProcess({
+      waitForPort: vi.fn().mockRejectedValue(readinessFailure),
+      getLogs: vi.fn().mockRejectedValue(new Error('diagnostic logs contained secret-value')),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(process);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const thrown = await ensureGateway(sandbox, createMockEnv()).catch((error: unknown) => error);
+
+    expect((thrown as Error).cause).toBe(readinessFailure);
+    expect((thrown as Error).message).toContain('diagnostics unavailable');
+    expect(errorSpy.mock.calls.flat().join(' ')).not.toContain('secret-value');
+  });
+
+  it('does not fetch or emit raw process logs after a successful readiness check', async () => {
+    const process = createFullMockProcess({
+      id: 'internal-process-id',
+      waitForPort: vi.fn().mockResolvedValue(undefined),
+      getLogs: vi.fn().mockResolvedValue({ stdout: 'access_token=raw-secret', stderr: '' }),
+    });
+    const { sandbox, execMock, startProcessMock } = createMockSandbox();
+    execMock.mockResolvedValue(createMockExecResult('', { exitCode: 1 }));
+    startProcessMock.mockResolvedValue(process);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(ensureGateway(sandbox, createMockEnv())).resolves.toBe(process);
+
+    expect(process.getLogs).not.toHaveBeenCalled();
+    expect(logSpy.mock.calls.flat().join(' ')).not.toContain('internal-process-id');
+    expect(logSpy.mock.calls.flat().join(' ')).not.toContain('raw-secret');
   });
 });

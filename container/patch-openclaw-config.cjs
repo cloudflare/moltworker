@@ -3,6 +3,16 @@ const path = require('path');
 
 const configPath = process.env.OPENCLAW_CONFIG_PATH || '/root/.openclaw/openclaw.json';
 const workersAiModelsPath = path.resolve(__dirname, '../config/workers-ai-models.json');
+const defaultSlackPluginPath = '/usr/local/lib/node_modules/@openclaw/slack';
+// This test-only override lets the unit suite model the image's immutable
+// plugin filesystem without making the runtime plugin location configurable.
+const slackPluginPath =
+  process.env.NODE_ENV === 'test' &&
+  process.env.MOLTWORKER_TEST_MODE === '1' &&
+  process.env.MOLTWORKER_TEST_SLACK_PLUGIN_PATH
+    ? process.env.MOLTWORKER_TEST_SLACK_PLUGIN_PATH
+    : defaultSlackPluginPath;
+const slackPluginManifestPath = path.join(slackPluginPath, 'openclaw.plugin.json');
 
 function workersAiRegistryError() {
   throw new Error('Invalid Workers AI model registry');
@@ -22,6 +32,14 @@ function isNonBlankString(value) {
 
 function isPositiveInteger(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isRegularFile(filePath) {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function loadWorkersAiModels() {
@@ -171,6 +189,13 @@ function disableSlackPlugin(config) {
   }
 }
 
+function removeManagedSlackPluginPath(config) {
+  const pluginPaths = config.plugins?.load?.paths;
+  if (Array.isArray(pluginPaths)) {
+    config.plugins.load.paths = pluginPaths.filter((pluginPath) => pluginPath !== slackPluginPath);
+  }
+}
+
 function configureSlackReadyHook(config, enabled) {
   config.hooks = isPlainObject(config.hooks) ? config.hooks : {};
   config.hooks.internal = isPlainObject(config.hooks.internal) ? config.hooks.internal : {};
@@ -219,13 +244,21 @@ config.gateway.controlUi.allowedOrigins = ['*'];
 scrubSlackCredentials(config.channels.slack);
 const hasSlackCredentials =
   isNonBlankString(process.env.SLACK_BOT_TOKEN) && isNonBlankString(process.env.SLACK_APP_TOKEN);
-if (!hasSlackCredentials) {
+const hasSlackPluginManifest = isRegularFile(slackPluginManifestPath);
+const slackIntegrationEnabled = hasSlackCredentials && hasSlackPluginManifest;
+if (!slackIntegrationEnabled) {
   disableSlackIntegration(config.channels.slack);
   disableSlackPlugin(config);
+  if (!hasSlackPluginManifest) {
+    removeManagedSlackPluginPath(config);
+    if (hasSlackCredentials) {
+      console.warn('Slack plugin manifest unavailable; disabling Slack integration');
+    }
+  }
 }
 
 const slackReadyChannelId = process.env.SLACK_READY_CHANNEL_ID?.trim();
-const slackReadyEnabled = hasSlackCredentials && /^[CG][A-Z0-9]+$/.test(slackReadyChannelId || '');
+const slackReadyEnabled = slackIntegrationEnabled && /^[CG][A-Z0-9]+$/.test(slackReadyChannelId || '');
 configureSlackReadyHook(config, slackReadyEnabled);
 
 if (process.env.OPENCLAW_GATEWAY_TOKEN) {
@@ -351,7 +384,7 @@ if (process.env.DISCORD_BOT_TOKEN) {
   };
 }
 
-if (hasSlackCredentials) {
+if (slackIntegrationEnabled) {
   const slackGroupPolicy = slackEnum(
     'SLACK_GROUP_POLICY',
     process.env.SLACK_GROUP_POLICY,
@@ -391,7 +424,6 @@ if (hasSlackCredentials) {
   // overwrite it. Once this channel block exists, OpenClaw resolves the
   // default account credentials from SLACK_BOT_TOKEN and SLACK_APP_TOKEN;
   // keeping them out of this object prevents secrets entering R2 snapshots.
-  const slackPluginPath = '/usr/local/lib/node_modules/@openclaw/slack';
   config.plugins = config.plugins || {};
   config.plugins.load = config.plugins.load || {};
   config.plugins.load.paths = Array.isArray(config.plugins.load.paths)

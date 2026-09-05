@@ -40,7 +40,7 @@ RUN mkdir -p /home/openclaw/.openclaw \
     && ln -s /home/openclaw/clawd /root/clawd
 
 # Copy startup configuration files
-# Build cache bust: 2026-08-29-v38-slack-ready-hook
+# Build cache bust: 2026-09-04-v39-slack-plugin-manifest-guard
 COPY container/patch-openclaw-config.cjs /usr/local/lib/openclaw/patch-openclaw-config.cjs
 COPY container/install-moltworker-slack-ready-hook.cjs /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
 COPY container/hooks/moltworker-slack-ready/HOOK.md /usr/local/lib/openclaw/hooks/moltworker-slack-ready/HOOK.md

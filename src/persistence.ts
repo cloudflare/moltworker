@@ -369,7 +369,21 @@ export async function restoreIfNeeded(sandbox: Sandbox, bucket: R2Bucket): Promi
     console.log(`[persistence] Restore complete in ${Date.now() - t0}ms`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('BACKUP_EXPIRED') || msg.includes('BACKUP_NOT_FOUND')) {
+    const code =
+      typeof err === 'object' && err !== null && 'code' in err
+        ? (err as { code?: unknown }).code
+        : undefined;
+    const name = err instanceof Error ? err.name : undefined;
+    const backupUnavailable =
+      code === 'BACKUP_EXPIRED' ||
+      code === 'BACKUP_NOT_FOUND' ||
+      name === 'BackupExpiredError' ||
+      name === 'BackupNotFoundError' ||
+      msg.includes('BACKUP_EXPIRED') ||
+      msg.includes('BACKUP_NOT_FOUND') ||
+      msg.startsWith('BackupExpiredError:') ||
+      msg.startsWith('BackupNotFoundError:');
+    if (backupUnavailable) {
       console.log(
         `[persistence] Backup ${handle.id} expired/gone, conditionally invalidating state`,
       );

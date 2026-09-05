@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -43,11 +43,17 @@ function patchConfig(
   const directory = mkdtempSync(resolve(tmpdir(), 'moltworker-openclaw-config-'));
   temporaryDirectories.push(directory);
   const configPath = resolve(directory, 'openclaw.json');
+  const pluginDirectory = resolve(directory, 'slack-plugin');
+  mkdirSync(pluginDirectory);
+  writeFileSync(resolve(pluginDirectory, 'openclaw.plugin.json'), '{}');
   writeFileSync(configPath, JSON.stringify(initialConfig));
 
   execFileSync(process.execPath, [patcherPath], {
     env: {
       OPENCLAW_CONFIG_PATH: configPath,
+      NODE_ENV: 'test',
+      MOLTWORKER_TEST_MODE: '1',
+      MOLTWORKER_TEST_SLACK_PLUGIN_PATH: pluginDirectory,
       ...environment,
     },
     stdio: 'pipe',
@@ -285,6 +291,9 @@ describe('OpenClaw config patcher', () => {
   });
 
   it('registers the image-baked Slack plugin without replacing existing plugin policy', () => {
+    const pluginDirectory = mkdtempSync(resolve(tmpdir(), 'moltworker-slack-plugin-'));
+    temporaryDirectories.push(pluginDirectory);
+    writeFileSync(resolve(pluginDirectory, 'openclaw.plugin.json'), '{}');
     const { config } = patchConfig(
       {
         plugins: {
@@ -296,6 +305,8 @@ describe('OpenClaw config patcher', () => {
       {
         SLACK_BOT_TOKEN: 'slack-bot-token',
         SLACK_APP_TOKEN: 'slack-app-token',
+        NODE_ENV: 'test',
+        MOLTWORKER_TEST_SLACK_PLUGIN_PATH: pluginDirectory,
       },
     );
 
@@ -306,9 +317,80 @@ describe('OpenClaw config patcher', () => {
         slack: { enabled: true },
       },
       load: {
-        paths: ['/opt/existing-plugin', '/usr/local/lib/node_modules/@openclaw/slack'],
+        paths: ['/opt/existing-plugin', pluginDirectory],
       },
     });
+  });
+
+  it('removes a stale managed Slack plugin path and disables Slack when its manifest is absent', () => {
+    const temporaryPluginParent = mkdtempSync(
+      resolve(tmpdir(), 'moltworker-missing-slack-plugin-'),
+    );
+    temporaryDirectories.push(temporaryPluginParent);
+    const missingPluginDirectory = resolve(temporaryPluginParent, 'slack');
+    const { config, serialized } = patchConfig(
+      {
+        channels: { slack: { enabled: true } },
+        plugins: {
+          allow: ['existing-plugin', 'slack'],
+          entries: { slack: { enabled: true } },
+          load: { paths: ['/opt/existing-plugin', missingPluginDirectory] },
+        },
+      },
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token-that-must-not-appear-in-output',
+        SLACK_APP_TOKEN: 'slack-app-token-that-must-not-appear-in-output',
+        NODE_ENV: 'test',
+        MOLTWORKER_TEST_SLACK_PLUGIN_PATH: missingPluginDirectory,
+      },
+    );
+
+    expect(config.channels?.slack).toMatchObject({ enabled: false });
+    expect(config.plugins).toMatchObject({
+      allow: ['existing-plugin', 'slack'],
+      entries: { slack: { enabled: false } },
+      load: { paths: ['/opt/existing-plugin'] },
+    });
+    expect(serialized).not.toContain('slack-bot-token-that-must-not-appear-in-output');
+    expect(serialized).not.toContain('slack-app-token-that-must-not-appear-in-output');
+  });
+
+  it('does not honor the test plugin path without the explicit test-mode guard', () => {
+    const pluginDirectory = mkdtempSync(resolve(tmpdir(), 'moltworker-slack-plugin-'));
+    temporaryDirectories.push(pluginDirectory);
+    writeFileSync(resolve(pluginDirectory, 'openclaw.plugin.json'), '{}');
+
+    const { config } = patchConfig(
+      { channels: { slack: { enabled: true } } },
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        NODE_ENV: 'test',
+        MOLTWORKER_TEST_MODE: '0',
+        MOLTWORKER_TEST_SLACK_PLUGIN_PATH: pluginDirectory,
+      },
+    );
+
+    expect(config.channels?.slack).toMatchObject({ enabled: false });
+  });
+
+  it('disables Slack when the manifest path is a directory rather than a regular file', () => {
+    const pluginDirectory = mkdtempSync(resolve(tmpdir(), 'moltworker-slack-plugin-'));
+    temporaryDirectories.push(pluginDirectory);
+    mkdirSync(resolve(pluginDirectory, 'openclaw.plugin.json'));
+
+    const { config } = patchConfig(
+      { channels: { slack: { enabled: true } } },
+      {
+        SLACK_BOT_TOKEN: 'slack-bot-token',
+        SLACK_APP_TOKEN: 'slack-app-token',
+        NODE_ENV: 'test',
+        MOLTWORKER_TEST_MODE: '1',
+        MOLTWORKER_TEST_SLACK_PLUGIN_PATH: pluginDirectory,
+      },
+    );
+
+    expect(config.channels?.slack).toMatchObject({ enabled: false });
   });
 
   it('configures channel roots to reply in isolated Slack threads by default', () => {

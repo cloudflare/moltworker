@@ -12,12 +12,52 @@
 
 set -e
 
+CURRENT_PHASE="preflight"
+GATEWAY_PID=""
+
+report_phase() {
+    CURRENT_PHASE="$1"
+    echo "MOLTWORKER_STARTUP_PHASE=$CURRENT_PHASE"
+}
+
+report_failure() {
+    EXIT_STATUS=$?
+    if [ "$EXIT_STATUS" -ne 0 ]; then
+        echo "MOLTWORKER_STARTUP_FAILURE phase=$CURRENT_PHASE exit_code=$EXIT_STATUS"
+    fi
+}
+
+trap report_failure EXIT
+
+forward_gateway_signal() {
+    SIGNAL="$1"
+    if [ -n "$GATEWAY_PID" ]; then
+        kill "-$SIGNAL" "$GATEWAY_PID" 2>/dev/null || true
+        # A gateway may report 128+signal after handling our forwarded
+        # shutdown signal. It is an intentional shutdown, not a startup
+        # failure, so wait for reaping without letting `set -e` abort here.
+        wait "$GATEWAY_PID" || true
+        GATEWAY_PID=""
+    fi
+    exit 0
+}
+
+trap 'forward_gateway_signal TERM' TERM
+trap 'forward_gateway_signal INT' INT
+
+report_phase preflight
+
 if pgrep -f "openclaw gateway" > /dev/null 2>&1; then
     echo "OpenClaw gateway is already running, exiting."
     exit 0
 fi
 
 CONFIG_DIR="/home/openclaw/.openclaw"
+# The test-only override keeps the production config location immutable while
+# allowing the shell script to run against isolated filesystem fixtures.
+if [ "${MOLTWORKER_TEST_MODE:-}" = "1" ] && [ -n "${MOLTWORKER_TEST_CONFIG_DIR:-}" ]; then
+    CONFIG_DIR="$MOLTWORKER_TEST_CONFIG_DIR"
+fi
 CONFIG_FILE="$CONFIG_DIR/openclaw.json"
 WORKSPACE_DIR="/root/clawd"
 SKILLS_DIR="/root/clawd/skills"
@@ -30,6 +70,7 @@ mkdir -p "$CONFIG_DIR"
 # ONBOARD (only if no config exists yet)
 # ============================================================
 if [ ! -f "$CONFIG_FILE" ]; then
+    report_phase onboard
     echo "No existing config found, running openclaw onboard..."
 
     # Determine auth choice — openclaw onboard reads the actual key values
@@ -62,6 +103,7 @@ fi
 # ============================================================
 # INSTALL MANAGED HOOK (after restore, before config patching)
 # ============================================================
+report_phase install_hook
 node /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
 
 # ============================================================
@@ -73,11 +115,13 @@ node /usr/local/lib/openclaw/install-moltworker-slack-ready-hook.cjs
 # - Gateway token auth
 # - Trusted proxies for sandbox networking
 # - Legacy AI Gateway compatibility and the Worker AI proxy provider
+report_phase patch_config
 node /usr/local/lib/openclaw/patch-openclaw-config.cjs
 
 # ============================================================
 # START GATEWAY
 # ============================================================
+report_phase gateway
 echo "Starting OpenClaw Gateway..."
 echo "Gateway will be available on port 18789"
 
@@ -95,4 +139,9 @@ if [ -n "$OPENCLAW_GATEWAY_TOKEN" ]; then
 else
     echo "Starting gateway with device pairing (no token)..."
 fi
-exec openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan
+openclaw gateway --port 18789 --verbose --allow-unconfigured --bind lan &
+GATEWAY_PID=$!
+wait "$GATEWAY_PID"
+GATEWAY_STATUS=$?
+GATEWAY_PID=""
+exit "$GATEWAY_STATUS"

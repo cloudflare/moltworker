@@ -3,6 +3,98 @@ import type { OpenClawEnv } from '../types';
 import { GATEWAY_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
 
+const STARTUP_PHASES = ['preflight', 'onboard', 'install_hook', 'patch_config', 'gateway'] as const;
+type StartupPhase = (typeof STARTUP_PHASES)[number];
+const PROCESS_STATUSES = ['starting', 'running', 'completed', 'failed', 'killed', 'error'] as const;
+type ProcessStatus = (typeof PROCESS_STATUSES)[number];
+
+interface GatewayStartupDiagnostics {
+  phase?: StartupPhase;
+  exitCode?: number;
+}
+
+const MAX_DIAGNOSTIC_LOG_CHARS = 16_384;
+const DIAGNOSTIC_CHARS_PER_STREAM = MAX_DIAGNOSTIC_LOG_CHARS / 2;
+const DIAGNOSTIC_HEAD_OR_TAIL_CHARS = DIAGNOSTIC_CHARS_PER_STREAM / 2;
+
+function getSafeProcessStatus(status: unknown): ProcessStatus | undefined {
+  return typeof status === 'string' && PROCESS_STATUSES.includes(status as ProcessStatus)
+    ? (status as ProcessStatus)
+    : undefined;
+}
+
+// The SDK exposes exitCode as number without a narrower documented range.
+// Keep only non-negative JavaScript safe integers so diagnostics cannot report
+// rounded, infinite, or negative values from an untrusted runtime response.
+function getSafeExitCode(exitCode: unknown): number | undefined {
+  return typeof exitCode === 'number' && Number.isSafeInteger(exitCode) && exitCode >= 0
+    ? exitCode
+    : undefined;
+}
+
+function boundedDiagnosticStream(output: string | undefined): string {
+  const stream = output ?? '';
+  if (stream.length <= DIAGNOSTIC_CHARS_PER_STREAM) return stream;
+  return `${stream.slice(0, DIAGNOSTIC_HEAD_OR_TAIL_CHARS)}\n${stream.slice(-DIAGNOSTIC_HEAD_OR_TAIL_CHARS)}`;
+}
+
+function parseStartupDiagnostics(logs: {
+  stdout?: string;
+  stderr?: string;
+}): GatewayStartupDiagnostics {
+  const diagnostics: GatewayStartupDiagnostics = {};
+  const phases = STARTUP_PHASES.join('|');
+  const phaseMarker = new RegExp(`^MOLTWORKER_STARTUP_PHASE=(${phases})$`);
+  const failureMarker = new RegExp(
+    `^MOLTWORKER_STARTUP_FAILURE phase=(${phases}) exit_code=(\\d+)$`,
+  );
+  const output = `${boundedDiagnosticStream(logs.stdout)}\n${boundedDiagnosticStream(logs.stderr)}`;
+  let hasFailureMarker = false;
+
+  for (const line of output.split(/\r?\n/)) {
+    const failure = line.match(failureMarker);
+    if (failure) {
+      const exitCode = getSafeExitCode(Number(failure[2]));
+      if (exitCode === undefined) continue;
+      diagnostics.phase = failure[1] as StartupPhase;
+      diagnostics.exitCode = exitCode;
+      hasFailureMarker = true;
+      continue;
+    }
+
+    const phase = line.match(phaseMarker);
+    if (phase && !hasFailureMarker) diagnostics.phase = phase[1] as StartupPhase;
+  }
+
+  return diagnostics;
+}
+
+async function createStartupReadinessError(
+  process: Process,
+  readinessFailure: unknown,
+): Promise<Error> {
+  let diagnostics: GatewayStartupDiagnostics = {};
+  let diagnosticsUnavailable = false;
+
+  try {
+    diagnostics = parseStartupDiagnostics(await process.getLogs());
+  } catch {
+    diagnosticsUnavailable = true;
+  }
+
+  const details = [`readiness timeout: ${STARTUP_TIMEOUT_MS}ms`];
+  const status = getSafeProcessStatus(process.status);
+  if (status) details.push(`status: ${status}`);
+  if (diagnostics.phase) details.push(`phase: ${diagnostics.phase}`);
+  const exitCode = diagnostics.exitCode ?? getSafeExitCode(process.exitCode);
+  if (exitCode !== undefined) details.push(`exit code: ${exitCode}`);
+  if (diagnosticsUnavailable) details.push('diagnostics unavailable');
+
+  return new Error(`OpenClaw gateway failed to become ready (${details.join('; ')})`, {
+    cause: readinessFailure,
+  });
+}
+
 /**
  * Force kill the gateway process and clean up lock files.
  *
@@ -91,8 +183,8 @@ export async function findExistingGatewayProcess(sandbox: Sandbox): Promise<Proc
         }
       }
     }
-  } catch (e) {
-    console.log('Could not list processes:', e);
+  } catch {
+    console.log('Could not list gateway processes');
   }
   return null;
 }
@@ -128,11 +220,11 @@ export async function ensureGateway(
   // Check if gateway is already running or starting
   const existingProcess = await findExistingGatewayProcess(sandbox);
   if (existingProcess) {
+    const existingStatus = getSafeProcessStatus(existingProcess.status);
     console.log(
-      'Found existing gateway process:',
-      existingProcess.id,
-      'status:',
-      existingProcess.status,
+      existingStatus
+        ? `Found existing gateway process with status: ${existingStatus}`
+        : 'Found existing gateway process',
     );
 
     if (!waitForReady) {
@@ -154,8 +246,8 @@ export async function ensureGateway(
       console.log('Existing process not reachable after full timeout, killing and restarting...');
       try {
         await existingProcess.kill();
-      } catch (killError) {
-        console.log('Failed to kill process:', killError);
+      } catch {
+        console.log('Failed to kill existing gateway process');
       }
       if (!startIfMissing) {
         throw new Error('Existing OpenClaw gateway process is not reachable', { cause: error });
@@ -173,8 +265,8 @@ export async function ensureGateway(
       );
       return null;
     }
-  } catch (e) {
-    console.log('Port probe failed, proceeding to start gateway:', e);
+  } catch {
+    console.log('Port probe failed, proceeding to start gateway');
   }
 
   if (!startIfMissing) {
@@ -194,10 +286,15 @@ export async function ensureGateway(
     process = await sandbox.startProcess(command, {
       env: Object.keys(envVars).length > 0 ? envVars : undefined,
     });
-    console.log('Process started with id:', process.id, 'status:', process.status);
-  } catch (startErr) {
-    console.error('Failed to start process:', startErr);
-    throw startErr;
+    const processStatus = getSafeProcessStatus(process.status);
+    console.log(
+      processStatus
+        ? `Gateway process started with status: ${processStatus}`
+        : 'Gateway process started',
+    );
+  } catch (startError) {
+    console.error('Failed to start gateway process');
+    throw startError;
   }
 
   if (waitForReady) {
@@ -206,26 +303,13 @@ export async function ensureGateway(
       console.log('[Gateway] Waiting for OpenClaw gateway to be ready on port', GATEWAY_PORT);
       await process.waitForPort(GATEWAY_PORT, { mode: 'tcp', timeout: STARTUP_TIMEOUT_MS });
       console.log('[Gateway] OpenClaw gateway is ready!');
-
-      const logs = await process.getLogs();
-      if (logs.stdout) console.log('[Gateway] stdout:', logs.stdout);
-      if (logs.stderr) console.log('[Gateway] stderr:', logs.stderr);
-    } catch (e) {
-      console.error('[Gateway] waitForPort failed:', e);
-      try {
-        const logs = await process.getLogs();
-        console.error('[Gateway] startup failed. Stderr:', logs.stderr);
-        console.error('[Gateway] startup failed. Stdout:', logs.stdout);
-        throw new Error(`OpenClaw gateway failed to start. Stderr: ${logs.stderr || '(empty)'}`, {
-          cause: e,
-        });
-      } catch (logErr) {
-        console.error('[Gateway] Failed to get logs:', logErr);
-        throw e;
-      }
+    } catch (readinessFailure) {
+      const startupError = await createStartupReadinessError(process, readinessFailure);
+      console.error('[Gateway] startup readiness failure:', startupError.message);
+      throw startupError;
     }
   } else {
-    console.log('[Gateway] Process started (not waiting for ready):', process.id);
+    console.log('[Gateway] Process started without readiness wait');
   }
 
   // Verify gateway is actually responding

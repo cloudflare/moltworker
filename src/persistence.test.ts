@@ -486,7 +486,14 @@ describe('restoreIfNeeded', () => {
       exec: vi.fn().mockResolvedValue(createMockExecResult()),
       restoreBackup: vi
         .fn()
-        .mockRejectedValueOnce(new Error('BACKUP_NOT_FOUND'))
+        .mockRejectedValueOnce(
+          Object.assign(
+            new Error(
+              'Backup old-backup has expired (created: 2026-08-27T21:49:50.948Z, TTL: 604800s). Create a new backup.',
+            ),
+            { name: 'BackupExpiredError', code: 'BACKUP_EXPIRED' },
+          ),
+        )
         .mockResolvedValueOnce(undefined),
     } as unknown as Sandbox;
 
@@ -525,9 +532,27 @@ describe('restoreIfNeeded', () => {
     expect(vi.mocked(bucket.delete)).not.toHaveBeenCalled();
   });
 
-  it.each(['BACKUP_EXPIRED', 'BACKUP_NOT_FOUND'])(
-    'clears a %s handle and pending restore marker, then marks this isolate restored',
-    async (backupError) => {
+  it.each([
+    { label: 'legacy BACKUP_EXPIRED message', error: new Error('BACKUP_EXPIRED') },
+    { label: 'legacy BACKUP_NOT_FOUND message', error: new Error('BACKUP_NOT_FOUND') },
+    {
+      label: 'SDK BackupExpiredError',
+      error: Object.assign(
+        new Error(
+          'Backup 83a10969-7398-4f3c-b51c-f981e815ee56 has expired (created: 2026-08-27T21:49:50.948Z, TTL: 604800s). Create a new backup.',
+        ),
+        { name: 'BackupExpiredError', code: 'BACKUP_EXPIRED' },
+      ),
+    },
+    {
+      label: 'RPC-serialized BackupExpiredError',
+      error: new Error(
+        'BackupExpiredError: Backup 83a10969-7398-4f3c-b51c-f981e815ee56 has expired (created: 2026-08-27T21:49:50.948Z, TTL: 604800s). Create a new backup.',
+      ),
+    },
+  ])(
+    'clears a $label handle and pending restore marker, then marks this isolate restored',
+    async ({ error }) => {
       clearPersistenceCache();
       const bucket = {
         get: vi
@@ -539,7 +564,7 @@ describe('restoreIfNeeded', () => {
       } as unknown as R2Bucket;
       const sandbox = {
         exec: vi.fn().mockResolvedValue(createMockExecResult()),
-        restoreBackup: vi.fn().mockRejectedValue(new Error(backupError)),
+        restoreBackup: vi.fn().mockRejectedValue(error),
       } as unknown as Sandbox;
 
       await expect(restoreIfNeeded(sandbox, bucket)).resolves.toBeUndefined();
@@ -549,7 +574,30 @@ describe('restoreIfNeeded', () => {
         onlyIf: { etagMatches: 'old-etag' },
       });
       expect(vi.mocked(bucket.delete)).toHaveBeenCalledWith('restore-needed');
+      expect(vi.mocked(bucket.delete)).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^backups\//),
+      );
       expect(vi.mocked(bucket.get)).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('preserves the backup handle and restore marker for unrelated restore failures', async () => {
+    clearPersistenceCache();
+    const bucket = {
+      get: vi
+        .fn()
+        .mockResolvedValue({ etag: 'old-etag', json: vi.fn().mockResolvedValue(oldHandle) }),
+      put: vi.fn(),
+      delete: vi.fn(),
+    } as unknown as R2Bucket;
+    const failure = new Error('restore transport unavailable');
+    const sandbox = {
+      exec: vi.fn().mockResolvedValue(createMockExecResult()),
+      restoreBackup: vi.fn().mockRejectedValue(failure),
+    } as unknown as Sandbox;
+
+    await expect(restoreIfNeeded(sandbox, bucket)).rejects.toBe(failure);
+    expect(vi.mocked(bucket.put)).not.toHaveBeenCalled();
+    expect(vi.mocked(bucket.delete)).not.toHaveBeenCalled();
+  });
 });
