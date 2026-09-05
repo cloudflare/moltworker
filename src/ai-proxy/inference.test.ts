@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MODEL } from './constants';
+import { DEFAULT_MODEL, KIMI_MODEL } from './constants';
 import { runWorkersAi } from './inference';
 import type { OpenAIChatCompletionRequest } from './types';
 
@@ -80,11 +80,15 @@ describe('runWorkersAi', () => {
         message: 'Workers AI request failed',
         type: 'upstream_error',
         code: 'upstream_error',
+        retry_guidance:
+          'Do not switch models automatically. Retry the same requested model after the limit resets, or pick a model explicitly in the Admin UI.',
+        requested_model: DEFAULT_MODEL,
+        fallback: false,
       },
     });
   });
 
-  it('preserves Workers AI rate limiting as HTTP 429', async () => {
+  it('preserves Workers AI rate limiting as HTTP 429 without falling back to Kimi', async () => {
     const run = vi.fn().mockResolvedValue(new Response('rate limit detail', { status: 429 }));
 
     const response = await runWorkersAi(
@@ -94,8 +98,17 @@ describe('runWorkersAi', () => {
       new AbortController().signal,
     );
 
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][0]).toBe(DEFAULT_MODEL);
+    expect(run.mock.calls[0][0]).not.toBe(KIMI_MODEL);
     expect(response.status).toBe(429);
-    expect(await response.json()).toMatchObject({ error: { code: 'upstream_error' } });
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: 'rate_or_spend_limited',
+        requested_model: DEFAULT_MODEL,
+        fallback: false,
+      },
+    });
   });
 
   it('passes the request signal to the SSE adapter so abort cancels the upstream body', async () => {
