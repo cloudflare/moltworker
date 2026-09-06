@@ -109,7 +109,7 @@ aiProxy.post(chatCompletionsPath, async (c) => {
     }
 
     stage = 'validation';
-    const input = await parseChatCompletionRequest(c.req.raw);
+    const input = await parseChatCompletionRequest(c.req.raw, { bucket: c.env.BACKUP_BUCKET });
     model = input.model;
 
     stage = 'inference';

@@ -12,9 +12,9 @@ import {
   type DeviceListResponse,
   type StorageStatusResponse,
 } from '../api';
+import ModelUsagePanel from './ModelUsagePanel';
 import './AdminPage.css';
 
-// Small inline spinner for buttons
 function ButtonSpinner() {
   return <span className="btn-spinner" />;
 }
@@ -83,7 +83,6 @@ export default function AdminPage() {
       const status = await getStorageStatus();
       setStorageStatus(status);
     } catch (err) {
-      // Don't show error for storage status - it's not critical
       console.error('Failed to fetch storage status:', err);
     }
   }, []);
@@ -98,7 +97,6 @@ export default function AdminPage() {
     try {
       const result = await approveDevice(requestId);
       if (result.success) {
-        // Refresh the list
         await fetchDevices();
       } else {
         setError(result.error || 'Approval failed');
@@ -112,14 +110,12 @@ export default function AdminPage() {
 
   const handleApproveAll = async () => {
     if (pending.length === 0) return;
-
     setActionInProgress('all');
     try {
       const result = await approveAllDevices();
       if (result.failed && result.failed.length > 0) {
         setError(`Failed to approve ${result.failed.length} device(s)`);
       }
-      // Refresh the list
       await fetchDevices();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve devices');
@@ -136,13 +132,11 @@ export default function AdminPage() {
     ) {
       return;
     }
-
     setRestartInProgress(true);
     try {
       const result = await restartGateway();
       if (result.success) {
         setError(null);
-        // Show success message briefly
         alert(
           'Container recreation initiated. On next access, state will be restored from R2. All clients will be temporarily disconnected.',
         );
@@ -230,6 +224,8 @@ export default function AdminPage() {
         </div>
       )}
 
+      <ModelUsagePanel />
+
       <section className="devices-section gateway-section">
         <div className="section-header">
           <h2>Gateway Controls</h2>
@@ -277,7 +273,6 @@ export default function AdminPage() {
                 </button>
               </div>
             </div>
-
             {pending.length === 0 ? (
               <div className="empty-state">
                 <p>No pending pairing requests</p>
@@ -348,12 +343,10 @@ export default function AdminPage() {
               </div>
             )}
           </section>
-
           <section className="devices-section">
             <div className="section-header">
               <h2>Paired Devices</h2>
             </div>
-
             {paired.length === 0 ? (
               <div className="empty-state">
                 <p>No paired devices</p>

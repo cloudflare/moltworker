@@ -1,9 +1,15 @@
+import { readSessionModel } from '../admin/session-model';
 import { MAX_PROXY_BODY_BYTES } from './constants';
-import { isAllowedModel } from './models';
+import { isAllowedModel, type AllowedModel } from './models';
 import { ProxyRequestError, type OpenAIChatCompletionRequest } from './types';
 
 const forbiddenKeys = new Set(['__proto__', 'prototype', 'constructor']);
 const textDecoder = new TextDecoder();
+
+export interface ParseChatCompletionOptions {
+  /** When set, omitted model falls back to the Admin session model in R2. */
+  bucket?: R2Bucket;
+}
 
 function invalidRequest(message: string): ProxyRequestError {
   return new ProxyRequestError(400, 'invalid_request', message);
@@ -54,6 +60,7 @@ function contentLengthExceedsLimit(contentLength: string | null): boolean {
 
 export async function parseChatCompletionRequest(
   request: Request,
+  options: ParseChatCompletionOptions = {},
 ): Promise<OpenAIChatCompletionRequest> {
   if (!hasJsonContentType(request.headers.get('content-type'))) {
     throw new ProxyRequestError(
@@ -85,8 +92,19 @@ export async function parseChatCompletionRequest(
 
   validateNoPrototypePollution(payload);
 
-  const { model, messages } = payload as Record<string, unknown>;
-  if (typeof model !== 'string' || !isAllowedModel(model)) {
+  const record = payload as Record<string, unknown>;
+  const { model, messages } = record;
+
+  let resolvedModel: AllowedModel;
+  if (model === undefined || model === null) {
+    if (!options.bucket) {
+      throw new ProxyRequestError(400, 'model_not_allowed', 'Model is not allowed');
+    }
+    const session = await readSessionModel(options.bucket);
+    resolvedModel = session.model;
+  } else if (typeof model === 'string' && isAllowedModel(model)) {
+    resolvedModel = model;
+  } else {
     throw new ProxyRequestError(400, 'model_not_allowed', 'Model is not allowed');
   }
 
@@ -98,5 +116,8 @@ export async function parseChatCompletionRequest(
     throw invalidRequest('Messages must be a non-empty array');
   }
 
-  return payload as OpenAIChatCompletionRequest;
+  return {
+    ...(record as OpenAIChatCompletionRequest),
+    model: resolvedModel,
+  };
 }

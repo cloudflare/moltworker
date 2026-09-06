@@ -19,13 +19,8 @@ type WorkersAiRun = (
   options: WorkersAiRunOptions,
 ) => Promise<Response>;
 
-const upstreamErrorBody = {
-  error: {
-    message: 'Workers AI request failed',
-    type: 'upstream_error',
-    code: 'upstream_error',
-  },
-};
+const RETRY_GUIDANCE =
+  'Do not switch models automatically. Retry the same requested model after the limit resets, or pick a model explicitly in the Admin UI.';
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -34,8 +29,23 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-function upstreamError(status: number): Response {
-  return jsonResponse(upstreamErrorBody, status);
+function upstreamError(status: number, model: AllowedModel): Response {
+  const limited = status === 429;
+  return jsonResponse(
+    {
+      error: {
+        message: limited
+          ? 'Model rate or spend limit reached. Retry later with the same model. Automatic fallback is disabled.'
+          : 'Workers AI request failed',
+        type: 'upstream_error',
+        code: limited ? 'rate_or_spend_limited' : 'upstream_error',
+        retry_guidance: RETRY_GUIDANCE,
+        requested_model: model,
+        fallback: false,
+      },
+    },
+    status,
+  );
 }
 
 function createContext(model: AllowedModel): ChatCompletionContext {
@@ -70,14 +80,14 @@ export async function runWorkersAi(
   });
 
   if (!upstream.ok) {
-    return upstreamError(upstream.status);
+    return upstreamError(upstream.status, request.model);
   }
 
   const contentType = upstream.headers.get('content-type')?.toLowerCase() ?? '';
   const context = createContext(request.model);
   if (contentType.includes('text/event-stream')) {
     if (upstream.body === null) {
-      return upstreamError(502);
+      return upstreamError(502, request.model);
     }
 
     return new Response(createOpenAIChatCompletionStream(upstream.body, context, signal), {
@@ -90,14 +100,14 @@ export async function runWorkersAi(
   }
 
   if (!contentType.includes('application/json')) {
-    return upstreamError(502);
+    return upstreamError(502, request.model);
   }
 
   let result: unknown;
   try {
     result = await upstream.json();
   } catch {
-    return upstreamError(502);
+    return upstreamError(502, request.model);
   }
 
   return jsonResponse(toOpenAIChatCompletion(result, context), upstream.status);

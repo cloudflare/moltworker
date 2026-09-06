@@ -15,6 +15,7 @@ import {
   parseWebDiagnosticsRequest,
   runWebDiagnostics,
 } from '../web-diagnostics';
+import { adminModelRoutes } from './admin-models';
 
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
@@ -34,6 +35,7 @@ const adminApi = new Hono<AppEnv>();
 
 // Middleware: Verify Cloudflare Access JWT for all admin routes
 adminApi.use('*', createAccessMiddleware({ type: 'json' }));
+adminApi.route('/', adminModelRoutes);
 
 // GET /api/admin/devices - List pending and paired devices
 adminApi.get('/devices', async (c) => {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_MODEL, MAX_PROXY_BODY_BYTES } from '../ai-proxy/constants';
+import { DEFAULT_MODEL, MAX_PROXY_BODY_BYTES, QWEN_MODEL } from '../ai-proxy/constants';
+import { SESSION_MODEL_OBJECT_KEY } from '../admin/session-model';
 import { createMockEnv } from '../test-utils';
 import { aiProxy } from './ai-proxy';
 
@@ -226,6 +227,42 @@ describe('aiProxy', () => {
     expect(await response.json()).toMatchObject({
       object: 'chat.completion',
       model: DEFAULT_MODEL,
+    });
+  });
+
+  it('defaults an omitted model to the Admin session model from R2', async () => {
+    const aiRun = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ response: 'hello' }, { headers: { 'content-type': 'application/json' } }),
+      );
+    const backupBucket = {
+      get: vi.fn().mockResolvedValue({
+        json: async () => ({
+          model: QWEN_MODEL,
+          updatedAt: '2026-09-01T00:00:00.000Z',
+        }),
+      }),
+    } as unknown as R2Bucket;
+
+    const response = await aiProxy.request(
+      route,
+      request({ messages: [{ role: 'user', content: 'hello from the prompt' }] }),
+      createMockEnv({
+        AI: { run: aiRun, aiGatewayLogId: 'gateway-log-session' } as unknown as Ai,
+        AI_GATEWAY_ID: 'moltworker',
+        AI_PROXY_TOKEN: 'proxy-secret',
+        BACKUP_BUCKET: backupBucket,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(backupBucket.get).toHaveBeenCalledWith(SESSION_MODEL_OBJECT_KEY);
+    expect(aiRun).toHaveBeenCalledTimes(1);
+    expect(aiRun.mock.calls[0][0]).toBe(QWEN_MODEL);
+    expect(await response.json()).toMatchObject({
+      object: 'chat.completion',
+      model: QWEN_MODEL,
     });
   });
 

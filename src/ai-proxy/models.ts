@@ -42,6 +42,17 @@ export interface OpenAIModelList {
   data: OpenAIModelRecord[];
 }
 
+export interface AdminModelRecord {
+  id: AllowedModel;
+  name: string;
+  alias: string;
+  selection: ModelSelection;
+  primary: boolean;
+  manual_only: boolean;
+  context_window: number;
+  supports_tools: boolean;
+}
+
 const REGISTRY_ERROR = 'Invalid Workers AI model registry';
 const modelKeys = new Set([
   'id',
@@ -226,4 +237,17 @@ export function createOpenAIModelList(): OpenAIModelList {
       upstream_capabilities: { ...model.documentedCapabilities },
     })),
   };
+}
+
+export function createAdminModelList(): AdminModelRecord[] {
+  return WORKERS_AI_MODELS.map((model) => ({
+    id: asAllowedModel(model.id),
+    name: model.name,
+    alias: model.alias,
+    selection: model.selection,
+    primary: model.selection === 'primary',
+    manual_only: model.selection === 'manual',
+    context_window: model.contextWindow,
+    supports_tools: model.compat.supportsTools,
+  }));
 }
