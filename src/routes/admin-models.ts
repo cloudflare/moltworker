@@ -44,8 +44,8 @@ adminModelRoutes.put('/session-model', async (c) => {
   return c.json(state);
 });
 
-adminModelRoutes.get('/usage', (c) => {
-  return c.json(createUsageSnapshot(c.env));
+adminModelRoutes.get('/usage', async (c) => {
+  return c.json(await createUsageSnapshot(c.env));
 });
 
 export { adminModelRoutes };

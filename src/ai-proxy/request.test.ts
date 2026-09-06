@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_MODEL, MAX_PROXY_BODY_BYTES, OPTIONAL_MODEL, QWEN_MODEL } from './constants';
+import { SESSION_MODEL_OBJECT_KEY } from '../admin/session-model';
 import { parseChatCompletionRequest } from './request';
 
 function chatCompletionRequest(body: unknown, headers?: HeadersInit): Request {
@@ -111,12 +112,97 @@ describe('parseChatCompletionRequest', () => {
     ).rejects.toMatchObject({ status: 400, code: 'model_not_allowed' });
   });
 
-  it.each([undefined, null, 42])('rejects a missing or non-string model: %j', async (model) => {
+  it.each([undefined, null])('rejects omitted model when no session bucket is provided: %j', async (model) => {
     await expect(
       parseChatCompletionRequest(
         chatCompletionRequest({ model, messages: [{ role: 'user', content: 'hi' }] }),
       ),
     ).rejects.toMatchObject({ status: 400, code: 'model_not_allowed' });
+  });
+
+  it('rejects a non-string model', async () => {
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({ model: 42, messages: [{ role: 'user', content: 'hi' }] }),
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'model_not_allowed' });
+  });
+
+  it('defaults omitted model to the stored Admin session model', async () => {
+    const bucket = {
+      get: vi.fn().mockResolvedValue({
+        json: async () => ({
+          model: OPTIONAL_MODEL,
+          updatedAt: '2026-09-01T00:00:00.000Z',
+        }),
+      }),
+    } as unknown as R2Bucket;
+
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest({ messages: [{ role: 'user', content: 'hi' }] }),
+      { bucket },
+    );
+
+    expect(parsed.model).toBe(OPTIONAL_MODEL);
+    expect(bucket.get).toHaveBeenCalledWith(SESSION_MODEL_OBJECT_KEY);
+  });
+
+  it('defaults null model to the stored session model without substituting Kimi silently', async () => {
+    const bucket = {
+      get: vi.fn().mockResolvedValue({
+        json: async () => ({
+          model: DEFAULT_MODEL,
+          updatedAt: '2026-09-01T00:00:00.000Z',
+        }),
+      }),
+    } as unknown as R2Bucket;
+
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest({ model: null, messages: [{ role: 'user', content: 'hi' }] }),
+      { bucket },
+    );
+
+    expect(parsed.model).toBe(DEFAULT_MODEL);
+    expect(parsed.model).not.toBe(OPTIONAL_MODEL);
+  });
+
+  it('lets an explicit allowlisted model win over the stored session model', async () => {
+    const bucket = {
+      get: vi.fn().mockResolvedValue({
+        json: async () => ({
+          model: OPTIONAL_MODEL,
+          updatedAt: '2026-09-01T00:00:00.000Z',
+        }),
+      }),
+    } as unknown as R2Bucket;
+
+    const parsed = await parseChatCompletionRequest(
+      chatCompletionRequest({
+        model: QWEN_MODEL,
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+      { bucket },
+    );
+
+    expect(parsed.model).toBe(QWEN_MODEL);
+    expect(bucket.get).not.toHaveBeenCalled();
+  });
+
+  it('still rejects unknown models even when a session bucket is present', async () => {
+    const bucket = {
+      get: vi.fn(),
+    } as unknown as R2Bucket;
+
+    await expect(
+      parseChatCompletionRequest(
+        chatCompletionRequest({
+          model: '@cf/unknown/model',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+        { bucket },
+      ),
+    ).rejects.toMatchObject({ status: 400, code: 'model_not_allowed' });
+    expect(bucket.get).not.toHaveBeenCalled();
   });
 
   it('rejects a request without messages', async () => {
