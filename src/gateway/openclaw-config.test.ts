@@ -252,7 +252,7 @@ describe('OpenClaw config patcher', () => {
       existingSetting: 'retained',
       port: 18789,
       mode: 'local',
-      trustedProxies: ['10.1.0.0'],
+      trustedProxies: ['10.0.0.1'],
       auth: { token: 'gateway-runtime-secret' },
       controlUi: { allowedOrigins: ['*'], allowInsecureAuth: true },
     });

@@ -287,7 +287,10 @@ config.tools.web.search = {
 // Gateway configuration
 config.gateway.port = 18789;
 config.gateway.mode = 'local';
-config.gateway.trustedProxies = ['10.1.0.0'];
+// Cloudflare Sandbox containerFetch/wsConnect arrives at the gateway from the
+// container-network peer that production logs show as 10.0.0.1 (Docker-style
+// bridge gateway), not 10.1.0.0. Keep this narrow: only the Worker→container hop.
+config.gateway.trustedProxies = ['10.0.0.1'];
 
 config.gateway.controlUi = config.gateway.controlUi || {};
 config.gateway.controlUi.allowedOrigins = ['*'];

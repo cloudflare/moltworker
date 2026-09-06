@@ -39,6 +39,7 @@ import {
   isBrowserFetchPathVariant,
 } from './routes';
 import { redactSensitiveParams } from './utils/logging';
+import { withProxyAttribution } from './utils/proxy-headers';
 import { handleScheduled } from './cron/handler';
 import loadingPageHtml from './assets/loading.html';
 import configErrorHtml from './assets/config-error.html';
@@ -353,6 +354,8 @@ app.all('*', async (c) => {
       tokenUrl.searchParams.set('token', c.env.MOLTBOT_GATEWAY_TOKEN);
       wsRequest = new Request(tokenUrl.toString(), request);
     }
+    // Rebuild client attribution before the container sees proxy-shaped headers.
+    wsRequest = withProxyAttribution(wsRequest);
 
     try {
       await prepareGateway(sandbox, c.env);
@@ -510,16 +513,20 @@ app.all('*', async (c) => {
 
   console.log('[HTTP] Proxying:', url.pathname + url.search);
 
+  // Rebuild X-Forwarded-* from CF-Connecting-IP so OpenClaw can attribute the
+  // Worker→container hop (trustedProxies) without accepting spoofable client headers.
+  const gatewayRequest = withProxyAttribution(request);
+
   let httpResponse: Response;
   try {
-    httpResponse = await sandbox.containerFetch(request, GATEWAY_PORT);
+    httpResponse = await sandbox.containerFetch(gatewayRequest, GATEWAY_PORT);
   } catch (err) {
     if (isGatewayCrashedError(err)) {
       console.log('[HTTP] Gateway crashed, attempting restore + restart and retry...');
       await killGateway(sandbox);
       await prepareGateway(sandbox, c.env);
       try {
-        httpResponse = await sandbox.containerFetch(request, GATEWAY_PORT);
+        httpResponse = await sandbox.containerFetch(gatewayRequest, GATEWAY_PORT);
       } catch (retryErr) {
         console.error('[HTTP] Retry after restart also failed:', retryErr);
         if (acceptsHtml) return c.html(loadingPageHtml);
